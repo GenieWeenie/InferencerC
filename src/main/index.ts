@@ -304,9 +304,9 @@ function createWindow() {
   });
 
   // MCP Execute Tool Handler
-  ipcMain.handle('mcp-execute-tool', async (event, serverId: string, toolName: string, args?: Record<string, any>) => {
+  ipcMain.handle('mcp-execute-tool', async (event, params: { serverId: string; toolName: string; arguments?: Record<string, any> }) => {
     try {
-      const result = await mcpClientManager.callTool(serverId, toolName, args);
+      const result = await mcpClientManager.callTool(params.serverId, params.toolName, params.arguments);
       return {
         success: true,
         result,

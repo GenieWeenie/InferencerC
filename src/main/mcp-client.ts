@@ -282,6 +282,11 @@ export class MCPClient extends EventEmitter {
    */
   private handleResponse(response: JSONRPCResponse | JSONRPCErrorResponse): void {
     const { id } = response;
+
+    if (id === null) {
+      return; // Notification response (shouldn't happen)
+    }
+
     const pending = this.pendingRequests.get(id);
 
     if (!pending) {

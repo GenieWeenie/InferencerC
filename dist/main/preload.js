@@ -18,6 +18,10 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         electron_1.ipcRenderer.on('folder-changed', callback);
         return () => electron_1.ipcRenderer.removeAllListeners('folder-changed');
     },
+    // MCP APIs
+    mcpConnect: (server) => electron_1.ipcRenderer.invoke('mcp-connect', server),
+    mcpDisconnect: (serverId) => electron_1.ipcRenderer.invoke('mcp-disconnect', serverId),
+    mcpExecuteTool: (params) => electron_1.ipcRenderer.invoke('mcp-execute-tool', params),
     // Auto-updater
     getAppVersion: () => electron_1.ipcRenderer.invoke('app-version'),
     checkForUpdates: () => electron_1.ipcRenderer.invoke('check-for-updates'),
