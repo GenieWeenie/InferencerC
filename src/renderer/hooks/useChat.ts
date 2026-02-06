@@ -223,6 +223,28 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         }
     }, [currentModel, availableModels]); // Only adjust when model changes, not when maxTokens changes
 
+    // Memory monitoring for long conversations
+    useEffect(() => {
+        if ((performance as any).memory) {
+            const memory = (performance as any).memory;
+            const usedMB = Math.round(memory.usedJSHeapSize / 1024 / 1024);
+            const limitMB = Math.round(memory.jsHeapSizeLimit / 1024 / 1024);
+            const loadedCount = loadedMessageIndices.size;
+            const totalMessages = history.length;
+            const cacheSize = fullMessageCache.size;
+
+            // Log memory stats when history size changes significantly (every 100 messages)
+            if (totalMessages > 0 && totalMessages % 100 === 0) {
+                console.log(`[Memory] History: ${totalMessages} messages | Loaded: ${loadedCount} | Cache: ${cacheSize} | Heap: ${usedMB}MB / ${limitMB}MB`);
+            }
+
+            // Warn if memory usage is high with large conversation
+            if (totalMessages > 500 && usedMB > 1500) {
+                console.warn(`[Memory] Large conversation (${totalMessages} messages) with high memory usage (${usedMB}MB)`);
+            }
+        }
+    }, [history.length, loadedMessageIndices.size, fullMessageCache.size]);
+
     useEffect(() => {
         if (!sessionId || !currentModel) return;
 

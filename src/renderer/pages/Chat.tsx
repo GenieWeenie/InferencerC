@@ -150,6 +150,10 @@ const Chat: React.FC = () => {
     const fpsLastTime = React.useRef(performance.now());
     const fpsAnimationFrameId = React.useRef<number | null>(null);
 
+    // Memory monitoring refs
+    const memoryMonitorInterval = React.useRef<NodeJS.Timeout | null>(null);
+    const lastMemoryWarning = React.useRef<number>(0);
+
     const [bookmarkedMessages, setBookmarkedMessages] = React.useState<Set<number>>(new Set());
     const [showRequestLog, setShowRequestLog] = React.useState(false);
     const [messageRatings, setMessageRatings] = React.useState<Record<number, 'up' | 'down'>>({});
@@ -299,6 +303,50 @@ const Chat: React.FC = () => {
             }
         };
     }, []);
+
+    // Memory usage monitoring for long conversations
+    React.useEffect(() => {
+        const monitorMemory = () => {
+            // Check if performance.memory API is available (Chrome/Chromium)
+            if ((performance as any).memory) {
+                const memory = (performance as any).memory;
+                const usedMB = Math.round(memory.usedJSHeapSize / 1024 / 1024);
+                const totalMB = Math.round(memory.totalJSHeapSize / 1024 / 1024);
+                const limitMB = Math.round(memory.jsHeapSizeLimit / 1024 / 1024);
+                const usagePercent = Math.round((memory.usedJSHeapSize / memory.jsHeapSizeLimit) * 100);
+
+                // Log memory usage every 30 seconds
+                console.log(`[Memory Monitor] Used: ${usedMB}MB / ${limitMB}MB (${usagePercent}%) | Total Allocated: ${totalMB}MB | Messages: ${history.length}`);
+
+                // Warn if memory usage is high (> 75% of limit)
+                if (usagePercent > 75) {
+                    const now = Date.now();
+                    // Only show warning once per minute to avoid spam
+                    if (now - lastMemoryWarning.current > 60000) {
+                        console.warn(`[Memory Monitor] HIGH MEMORY USAGE: ${usedMB}MB / ${limitMB}MB (${usagePercent}%) - Consider closing some conversations`);
+                        lastMemoryWarning.current = now;
+                    }
+                }
+
+                // Critical warning if approaching 2GB limit
+                if (usedMB > 1800) {
+                    console.error(`[Memory Monitor] CRITICAL: Memory usage exceeds 1.8GB (${usedMB}MB) - Performance may degrade`);
+                }
+            }
+        };
+
+        // Start monitoring - check every 30 seconds
+        memoryMonitorInterval.current = setInterval(monitorMemory, 30000);
+
+        // Initial check
+        monitorMemory();
+
+        return () => {
+            if (memoryMonitorInterval.current) {
+                clearInterval(memoryMonitorInterval.current);
+            }
+        };
+    }, [history.length]); // Re-run when history length changes to log message count
 
     // GitHub file fetching
     const executeGithubFetch = async () => {
