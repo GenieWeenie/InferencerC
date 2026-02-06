@@ -9,6 +9,7 @@ import {
     AlertTriangle,
     Search,
     Check,
+    ArrowRight,
 } from 'lucide-react';
 import {
     KeyboardShortcut,
@@ -220,7 +221,7 @@ const ShortcutEditor: React.FC<ShortcutEditorProps> = ({ isOpen, onClose }) => {
                     <React.Fragment key={index}>
                         {renderKeys(keys)}
                         {index < chord.length - 1 && (
-                            <span className="text-slate-500 text-xs font-medium">then</span>
+                            <ArrowRight size={14} className="text-slate-500" />
                         )}
                     </React.Fragment>
                 ))}
@@ -413,17 +414,36 @@ const ShortcutEditor: React.FC<ShortcutEditorProps> = ({ isOpen, onClose }) => {
                                                                                         <p className="text-xs text-purple-400 font-medium">
                                                                                             Chord Mode - Step {chordSequence.length + 1}
                                                                                         </p>
-                                                                                        {chordSequence.length > 0 && (
-                                                                                            <div className="text-xs text-white">
-                                                                                                {renderChord(chordSequence)}
-                                                                                            </div>
-                                                                                        )}
-                                                                                        {recordingKeys.length > 0 && (
-                                                                                            <div className="text-xs text-white flex items-center gap-1">
-                                                                                                <span className="text-purple-400">Current:</span>
-                                                                                                {renderKeys(recordingKeys)}
-                                                                                            </div>
-                                                                                        )}
+                                                                                        <div className="flex items-center gap-2">
+                                                                                            {chordSequence.map((keys, index) => (
+                                                                                                <React.Fragment key={index}>
+                                                                                                    <motion.div
+                                                                                                        initial={{ scale: 0.8, opacity: 0 }}
+                                                                                                        animate={{ scale: 1, opacity: 1 }}
+                                                                                                        className="flex items-center gap-1"
+                                                                                                    >
+                                                                                                        <div className="flex items-center gap-1 px-2 py-1 bg-green-500/20 border border-green-500/40 rounded">
+                                                                                                            {renderKeys(keys)}
+                                                                                                            <Check size={12} className="text-green-500 ml-1" />
+                                                                                                        </div>
+                                                                                                    </motion.div>
+                                                                                                    {index < chordSequence.length && (
+                                                                                                        <ArrowRight size={14} className="text-purple-400" />
+                                                                                                    )}
+                                                                                                </React.Fragment>
+                                                                                            ))}
+                                                                                            {recordingKeys.length > 0 ? (
+                                                                                                <motion.div
+                                                                                                    initial={{ scale: 0.9 }}
+                                                                                                    animate={{ scale: 1 }}
+                                                                                                    className="flex items-center gap-1 px-2 py-1 bg-primary/20 border border-primary rounded"
+                                                                                                >
+                                                                                                    {renderKeys(recordingKeys)}
+                                                                                                </motion.div>
+                                                                                            ) : (
+                                                                                                <span className="text-xs text-purple-300 italic">Press keys...</span>
+                                                                                            )}
+                                                                                        </div>
                                                                                     </div>
                                                                                 </div>
                                                                                 {chordSequence.length > 0 && (
