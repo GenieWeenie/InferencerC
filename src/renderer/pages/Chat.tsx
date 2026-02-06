@@ -144,6 +144,12 @@ const Chat: React.FC = () => {
     const [currentSearchIndex, setCurrentSearchIndex] = React.useState(0);
     const [showSearchResultsList, setShowSearchResultsList] = React.useState(false);
     const virtuosoRef = React.useRef<any>(null);
+
+    // FPS monitoring refs
+    const fpsFrameCount = React.useRef(0);
+    const fpsLastTime = React.useRef(performance.now());
+    const fpsAnimationFrameId = React.useRef<number | null>(null);
+
     const [bookmarkedMessages, setBookmarkedMessages] = React.useState<Set<number>>(new Set());
     const [showRequestLog, setShowRequestLog] = React.useState(false);
     const [messageRatings, setMessageRatings] = React.useState<Record<number, 'up' | 'down'>>({});
@@ -234,6 +240,65 @@ const Chat: React.FC = () => {
             treeHook.replaceMessages(history);
         }
     }, [branchingEnabled, history.length]); // Run when branching is enabled OR history length changes
+
+    // FPS monitoring for Virtuoso scroll performance
+    React.useEffect(() => {
+        let isScrolling = false;
+        let scrollTimeout: NodeJS.Timeout;
+
+        const measureFPS = () => {
+            fpsFrameCount.current++;
+            const now = performance.now();
+            const delta = now - fpsLastTime.current;
+
+            // Log FPS every second during scrolling
+            if (delta >= 1000 && isScrolling) {
+                const fps = Math.round((fpsFrameCount.current * 1000) / delta);
+                console.log(`[FPS Monitor] Virtuoso Scroll: ${fps} FPS`);
+
+                fpsFrameCount.current = 0;
+                fpsLastTime.current = now;
+            }
+
+            if (isScrolling) {
+                fpsAnimationFrameId.current = requestAnimationFrame(measureFPS);
+            }
+        };
+
+        const handleScroll = () => {
+            if (!isScrolling) {
+                isScrolling = true;
+                fpsFrameCount.current = 0;
+                fpsLastTime.current = performance.now();
+                fpsAnimationFrameId.current = requestAnimationFrame(measureFPS);
+            }
+
+            clearTimeout(scrollTimeout);
+            scrollTimeout = setTimeout(() => {
+                isScrolling = false;
+                if (fpsAnimationFrameId.current !== null) {
+                    cancelAnimationFrame(fpsAnimationFrameId.current);
+                    fpsAnimationFrameId.current = null;
+                }
+            }, 150);
+        };
+
+        // Get the Virtuoso scroller element
+        const virtuosoElement = virtuosoRef.current?.getScrollerElement?.();
+        if (virtuosoElement) {
+            virtuosoElement.addEventListener('scroll', handleScroll, { passive: true });
+        }
+
+        return () => {
+            if (virtuosoElement) {
+                virtuosoElement.removeEventListener('scroll', handleScroll);
+            }
+            clearTimeout(scrollTimeout);
+            if (fpsAnimationFrameId.current !== null) {
+                cancelAnimationFrame(fpsAnimationFrameId.current);
+            }
+        };
+    }, []);
 
     // GitHub file fetching
     const executeGithubFetch = async () => {
