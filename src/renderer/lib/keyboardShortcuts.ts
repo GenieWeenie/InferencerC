@@ -358,6 +358,7 @@ export class KeyboardShortcutsManager {
     resetAllShortcuts(): void {
         this.shortcuts.forEach(shortcut => {
             delete shortcut.customKeys;
+            delete shortcut.customChord;
         });
         this.saveShortcuts();
     }
