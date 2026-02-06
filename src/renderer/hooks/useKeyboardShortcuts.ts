@@ -17,9 +17,26 @@ export function useKeyboardShortcut(
         if (!enabled) return;
 
         const handleKeyDown = (event: KeyboardEvent) => {
-            if (keyboardShortcutsManager.matchesShortcut(event, shortcutId)) {
-                event.preventDefault();
-                callback(event);
+            const shortcut = keyboardShortcutsManager.getShortcut(shortcutId);
+            if (!shortcut || !shortcut.enabled) return;
+
+            // Handle chord shortcuts
+            if (shortcut.isChord) {
+                const result = keyboardShortcutsManager.matchesChordShortcut(event);
+
+                // Only trigger callback if the chord sequence is complete and matches this shortcut
+                if (result === shortcutId) {
+                    event.preventDefault();
+                    callback(event);
+                }
+                // result === null means partial match (waiting for more keys), don't prevent default
+                // result === undefined means no match, don't prevent default
+            } else {
+                // Handle single-key shortcuts
+                if (keyboardShortcutsManager.matchesShortcut(event, shortcutId)) {
+                    event.preventDefault();
+                    callback(event);
+                }
             }
         };
 
