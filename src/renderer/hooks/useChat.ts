@@ -42,6 +42,9 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     const [sessionId, setSessionId] = useState<string>('');
 
     const [history, setHistory] = useState<ChatMessage[]>([]);
+    // Lazy loading state - track which messages have full content loaded
+    const [loadedMessageIndices, setLoadedMessageIndices] = useState<Set<number>>(new Set());
+    const [fullMessageCache, setFullMessageCache] = useState<Map<number, ChatMessage>>(new Map());
     const [selectedToken, setSelectedToken] = useState<SelectedTokenContext | null>(null);
     const [availableModels, setAvailableModels] = useState<Model[]>([]);
     const [currentModel, setCurrentModel] = useState<string>('');
@@ -224,12 +227,27 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         if (!sessionId || !currentModel) return;
 
         const timer = setTimeout(() => {
+            // Get full messages from cache for saving
+            const messagesToSave = history.map((msg, index) => {
+                // If message is in cache, use full version
+                if (loadedMessageIndices.has(index) && fullMessageCache.has(index)) {
+                    return fullMessageCache.get(index)!;
+                }
+                // Otherwise, retrieve from existing session (for lazy-loaded messages)
+                const existingSession = HistoryService.getSession(sessionId);
+                if (existingSession && existingSession.messages[index]) {
+                    return existingSession.messages[index];
+                }
+                // Fallback to current message
+                return msg;
+            });
+
             HistoryService.saveSession({
                 id: sessionId,
                 title: history.length > 0 ? (history[0].content.slice(0, 30) + (history[0].content.length > 30 ? '...' : '')) : 'New Chat',
                 lastModified: Date.now(),
                 modelId: currentModel,
-                messages: history,
+                messages: messagesToSave,
                 expertMode,
                 thinkingEnabled,
                 systemPrompt,
@@ -242,13 +260,16 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         }, 1000); // 1s debounce
 
         return () => clearTimeout(timer);
-    }, [history, sessionId, currentModel, expertMode, thinkingEnabled]);
+    }, [history, sessionId, currentModel, expertMode, thinkingEnabled, loadedMessageIndices, fullMessageCache]);
 
     const createNewSession = () => {
         const newSession = HistoryService.createNewSession(currentModel || 'local-lmstudio');
         setSessionId(newSession.id);
         setHistory([]);
         setSelectedToken(null);
+        // Reset lazy loading state
+        setLoadedMessageIndices(new Set());
+        setFullMessageCache(new Map());
         HistoryService.setLastActiveSessionId(newSession.id);
         HistoryService.saveSession(newSession);
         setSavedSessions(HistoryService.getAllSessions());
@@ -259,7 +280,52 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         const session = HistoryService.getSession(id);
         if (session) {
             setSessionId(session.id);
-            setHistory(session.messages);
+
+            // Lazy loading: Only load recent messages initially
+            const INITIAL_LOAD_COUNT = 50; // Load last 50 messages with full content
+            const allMessages = session.messages;
+            const messageCount = allMessages.length;
+
+            // Reset lazy loading state
+            const newCache = new Map<number, ChatMessage>();
+            const newLoadedIndices = new Set<number>();
+
+            let lightweightHistory: ChatMessage[];
+
+            if (messageCount <= INITIAL_LOAD_COUNT) {
+                // Load all messages if count is small
+                lightweightHistory = allMessages;
+                allMessages.forEach((msg, index) => {
+                    newCache.set(index, msg);
+                    newLoadedIndices.add(index);
+                });
+            } else {
+                // Create lightweight versions for old messages
+                lightweightHistory = allMessages.map((msg, index) => {
+                    const shouldLoadFull = index >= messageCount - INITIAL_LOAD_COUNT;
+
+                    if (shouldLoadFull) {
+                        // Load recent messages with full content
+                        newCache.set(index, msg);
+                        newLoadedIndices.add(index);
+                        return msg;
+                    } else {
+                        // Create lightweight placeholder for old messages
+                        return {
+                            role: msg.role,
+                            content: msg.content.length > 100
+                                ? msg.content.substring(0, 100) + '...'
+                                : msg.content,
+                            isLoading: false
+                        } as ChatMessage;
+                    }
+                });
+            }
+
+            setHistory(lightweightHistory);
+            setFullMessageCache(newCache);
+            setLoadedMessageIndices(newLoadedIndices);
+
             if (session.modelId) {
                 setCurrentModel(session.modelId);
                 localStorage.setItem('app_last_model', session.modelId);
@@ -282,6 +348,48 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         HistoryService.deleteSession(id);
         setSavedSessions(HistoryService.getAllSessions());
         if (id === sessionId) createNewSession();
+    };
+
+    // Lazy loading: Load message content on demand
+    const loadMessageContent = (indices: number[], allMessages: ChatMessage[]) => {
+        const newCache = new Map(fullMessageCache);
+        const newLoadedIndices = new Set(loadedMessageIndices);
+
+        indices.forEach(index => {
+            if (index >= 0 && index < allMessages.length && !loadedMessageIndices.has(index)) {
+                // Store full message in cache
+                newCache.set(index, allMessages[index]);
+                newLoadedIndices.add(index);
+            }
+        });
+
+        setFullMessageCache(newCache);
+        setLoadedMessageIndices(newLoadedIndices);
+    };
+
+    // Load a range of messages (for scrolling/pagination)
+    const loadMessageRange = (startIndex: number, endIndex: number, allMessages: ChatMessage[]) => {
+        const indicesToLoad: number[] = [];
+        for (let i = startIndex; i <= Math.min(endIndex, allMessages.length - 1); i++) {
+            if (!loadedMessageIndices.has(i)) {
+                indicesToLoad.push(i);
+            }
+        }
+        if (indicesToLoad.length > 0) {
+            loadMessageContent(indicesToLoad, allMessages);
+        }
+    };
+
+    // Get visible history with lazy-loaded content
+    const getVisibleHistory = (): ChatMessage[] => {
+        return history.map((msg, index) => {
+            // If content is loaded in cache, use full message
+            if (loadedMessageIndices.has(index)) {
+                return fullMessageCache.get(index) || msg;
+            }
+            // Otherwise return lightweight version
+            return msg;
+        });
     };
 
     const executeWebFetch = async () => {
@@ -314,6 +422,25 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         const newHistory = history.slice(0, index);
         setHistory(newHistory);
         setSelectedToken(null);
+
+        // Clean up lazy loading cache - remove entries for deleted messages
+        setFullMessageCache(cache => {
+            const newCache = new Map(cache);
+            // Remove all entries >= index
+            for (let i = index; i < history.length; i++) {
+                newCache.delete(i);
+            }
+            return newCache;
+        });
+
+        setLoadedMessageIndices(indices => {
+            const newIndices = new Set(indices);
+            // Remove all indices >= index
+            for (let i = index; i < history.length; i++) {
+                newIndices.delete(i);
+            }
+            return newIndices;
+        });
     };
 
     const selectChoice = (messageIndex: number, choiceIndex: number) => {
@@ -321,11 +448,21 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const newHistory = [...prev];
             const targetMsg = newHistory[messageIndex];
             if (!targetMsg || !targetMsg.choices || !targetMsg.choices[choiceIndex]) return prev;
-            newHistory[messageIndex] = {
+
+            const updatedMessage: ChatMessage = {
                 ...targetMsg,
                 selectedChoiceIndex: choiceIndex,
                 content: targetMsg.choices[choiceIndex].message.content
             };
+            newHistory[messageIndex] = updatedMessage;
+
+            // Update cache for lazy loading
+            setFullMessageCache(cache => {
+                const newCache = new Map(cache);
+                newCache.set(messageIndex, updatedMessage);
+                return newCache;
+            });
+
             return newHistory;
         });
         setSelectedToken(null);
@@ -339,18 +476,27 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             if (!newHistory[index]) return prev;
 
             const existing = newHistory[index];
-            newHistory[index] = {
+            const updatedMessage: ChatMessage = {
                 ...existing,
                 content,
                 isLoading,
                 generationTime: generationTime !== undefined ? generationTime : existing.generationTime,
                 tool_calls: toolCalls || existing.tool_calls,
                 choices: logprobs ? [{
-                    message: { role: 'assistant', content },
+                    message: { role: 'assistant' as const, content },
                     index: 0,
                     logprobs: { content: logprobs }
                 }] : existing.choices
             };
+            newHistory[index] = updatedMessage;
+
+            // Update cache for lazy loading
+            setFullMessageCache(cache => {
+                const newCache = new Map(cache);
+                newCache.set(index, updatedMessage);
+                return newCache;
+            });
+
             return newHistory;
         });
     };
@@ -366,7 +512,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
             const newContent = newLogprobs.map(lp => lp.token).join('');
 
-            newHistory[messageIndex] = {
+            const updatedMessage: ChatMessage = {
                 ...msg,
                 content: newContent,
                 choices: [{
@@ -375,6 +521,15 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                     logprobs: { content: newLogprobs }
                 }]
             };
+
+            newHistory[messageIndex] = updatedMessage;
+
+            // Update cache for lazy loading
+            setFullMessageCache(cache => {
+                const newCache = new Map(cache);
+                newCache.set(messageIndex, updatedMessage);
+                return newCache;
+            });
 
             // Also update selected token if it matches
             if (selectedToken && selectedToken.messageIndex === messageIndex && selectedToken.tokenIndex === tokenIndex) {
@@ -628,7 +783,22 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     const stopGeneration = () => {
         abortControllers.forEach(c => c.abort());
         setAbortControllers([]);
-        setHistory(prev => prev.map(msg => msg.isLoading ? { ...msg, isLoading: false, content: msg.content + " [Stopped]" } : msg));
+        setHistory(prev => {
+            const newHistory = prev.map((msg, index) => {
+                if (msg.isLoading) {
+                    const stoppedMsg = { ...msg, isLoading: false, content: msg.content + " [Stopped]" };
+                    // Update cache
+                    setFullMessageCache(cache => {
+                        const newCache = new Map(cache);
+                        newCache.set(index, stoppedMsg);
+                        return newCache;
+                    });
+                    return stoppedMsg;
+                }
+                return msg;
+            });
+            return newHistory;
+        });
         toast.info("Generation stopped.");
     };
 
@@ -737,6 +907,13 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         let newHistory = [...history, userMsg];
         let controllers: AbortController[] = [];
 
+        // Track new messages as loaded in lazy loading cache
+        const userMsgIndex = newHistory.length - 1;
+        const newCache = new Map(fullMessageCache);
+        const newLoadedIndices = new Set(loadedMessageIndices);
+        newCache.set(userMsgIndex, userMsg);
+        newLoadedIndices.add(userMsgIndex);
+
         if (battleMode && secondaryModel) {
             // Battle Mode: 2 Assistant Messages
             const indexA = newHistory.length;
@@ -746,6 +923,15 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const msgB: ChatMessage = { role: 'assistant', content: '', isLoading: true };
 
             newHistory.push(msgA, msgB);
+
+            // Track battle mode messages as loaded
+            newCache.set(indexA, msgA);
+            newCache.set(indexB, msgB);
+            newLoadedIndices.add(indexA);
+            newLoadedIndices.add(indexB);
+
+            setFullMessageCache(newCache);
+            setLoadedMessageIndices(newLoadedIndices);
             setHistory(newHistory);
 
             setInput('');
@@ -771,6 +957,13 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const targetIndex = newHistory.length;
             const loadingItem: ChatMessage = { role: 'assistant', content: prefill || '', isLoading: true };
             newHistory.push(loadingItem);
+
+            // Track assistant message as loaded
+            newCache.set(targetIndex, loadingItem);
+            newLoadedIndices.add(targetIndex);
+
+            setFullMessageCache(newCache);
+            setLoadedMessageIndices(newLoadedIndices);
             setHistory(newHistory);
 
             setInput('');
@@ -837,6 +1030,10 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         autoRouting, setAutoRouting,
         enabledTools, setEnabledTools,
         responseFormat, setResponseFormat,
-        updateMessageToken
+        updateMessageToken,
+        // Lazy loading support
+        loadMessageRange,
+        loadedMessageIndices,
+        getVisibleHistory
     };
 };
