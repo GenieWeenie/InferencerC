@@ -290,6 +290,19 @@ function createWindow() {
     }
   });
 
+  // MCP Disconnect Handler
+  ipcMain.handle('mcp-disconnect', async (event, serverId: string) => {
+    try {
+      const result = await mcpClientManager.disconnect(serverId);
+      return result;
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to disconnect from MCP server',
+      };
+    }
+  });
+
   // Code Execution Handler (sandboxed)
   ipcMain.handle('execute-code', async (event, code: string, language: string) => {
     try {
