@@ -303,6 +303,22 @@ function createWindow() {
     }
   });
 
+  // MCP Execute Tool Handler
+  ipcMain.handle('mcp-execute-tool', async (event, serverId: string, toolName: string, args?: Record<string, any>) => {
+    try {
+      const result = await mcpClientManager.callTool(serverId, toolName, args);
+      return {
+        success: true,
+        result,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to execute tool',
+      };
+    }
+  });
+
   // Code Execution Handler (sandboxed)
   ipcMain.handle('execute-code', async (event, code: string, language: string) => {
     try {
