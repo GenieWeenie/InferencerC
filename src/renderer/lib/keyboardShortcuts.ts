@@ -65,6 +65,26 @@ export const DEFAULT_SHORTCUTS: KeyboardShortcut[] = [
         defaultKeys: ['Ctrl', 'K'],
         enabled: true,
     },
+    {
+        id: 'nav.quickOpen',
+        label: 'Quick Open File',
+        description: 'Quickly open a file from the project',
+        category: 'Navigation',
+        defaultKeys: [],
+        enabled: true,
+        isChord: true,
+        defaultChord: [['Ctrl', 'K'], ['Ctrl', 'O']],
+    },
+    {
+        id: 'nav.goToLine',
+        label: 'Go to Line',
+        description: 'Jump to a specific line number',
+        category: 'Navigation',
+        defaultKeys: [],
+        enabled: true,
+        isChord: true,
+        defaultChord: [['Ctrl', 'K'], ['Ctrl', 'G']],
+    },
 
     // Chat
     {
