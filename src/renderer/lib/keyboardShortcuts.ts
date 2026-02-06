@@ -348,20 +348,130 @@ export class KeyboardShortcutsManager {
 
         for (let i = 0; i < shortcuts.length; i++) {
             for (let j = i + 1; j < shortcuts.length; j++) {
-                const keys1 = shortcuts[i].customKeys || shortcuts[i].defaultKeys;
-                const keys2 = shortcuts[j].customKeys || shortcuts[j].defaultKeys;
-
-                if (this.areKeysEqual(keys1, keys2)) {
-                    conflicts.push({
-                        shortcut1: shortcuts[i],
-                        shortcut2: shortcuts[j],
-                        keys: keys1,
-                    });
+                const conflict = this.checkShortcutConflict(shortcuts[i], shortcuts[j]);
+                if (conflict) {
+                    conflicts.push(conflict);
                 }
             }
         }
 
         return conflicts;
+    }
+
+    /**
+     * Check if two shortcuts conflict
+     * Handles single-key, chord, and prefix conflicts
+     */
+    private checkShortcutConflict(
+        shortcut1: KeyboardShortcut,
+        shortcut2: KeyboardShortcut
+    ): ShortcutConflict | null {
+        const isChord1 = shortcut1.isChord;
+        const isChord2 = shortcut2.isChord;
+
+        // Case 1: Both are single-key shortcuts
+        if (!isChord1 && !isChord2) {
+            const keys1 = shortcut1.customKeys || shortcut1.defaultKeys;
+            const keys2 = shortcut2.customKeys || shortcut2.defaultKeys;
+
+            if (this.areKeysEqual(keys1, keys2)) {
+                return {
+                    shortcut1,
+                    shortcut2,
+                    keys: keys1,
+                };
+            }
+        }
+
+        // Case 2: Both are chord shortcuts
+        if (isChord1 && isChord2) {
+            const chord1 = shortcut1.customChord || shortcut1.defaultChord;
+            const chord2 = shortcut2.customChord || shortcut2.defaultChord;
+
+            if (!chord1 || !chord2) return null;
+
+            // Check for exact chord match
+            if (this.areChordsEqual(chord1, chord2)) {
+                return {
+                    shortcut1,
+                    shortcut2,
+                    keys: chord1[0], // Use first key combo as representative
+                };
+            }
+
+            // Check for prefix conflicts (one chord is prefix of another)
+            if (this.isChordPrefix(chord1, chord2) || this.isChordPrefix(chord2, chord1)) {
+                return {
+                    shortcut1,
+                    shortcut2,
+                    keys: chord1[0], // Use first key combo as representative
+                };
+            }
+        }
+
+        // Case 3: One is chord, one is single-key
+        if (isChord1 && !isChord2) {
+            const chord1 = shortcut1.customChord || shortcut1.defaultChord;
+            const keys2 = shortcut2.customKeys || shortcut2.defaultKeys;
+
+            if (chord1 && this.doesSingleKeyConflictWithChord(keys2, chord1)) {
+                return {
+                    shortcut1,
+                    shortcut2,
+                    keys: keys2,
+                };
+            }
+        }
+
+        if (!isChord1 && isChord2) {
+            const keys1 = shortcut1.customKeys || shortcut1.defaultKeys;
+            const chord2 = shortcut2.customChord || shortcut2.defaultChord;
+
+            if (chord2 && this.doesSingleKeyConflictWithChord(keys1, chord2)) {
+                return {
+                    shortcut1,
+                    shortcut2,
+                    keys: keys1,
+                };
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Check if two chords are equal
+     */
+    private areChordsEqual(chord1: ChordBinding, chord2: ChordBinding): boolean {
+        if (chord1.length !== chord2.length) return false;
+
+        return chord1.every((keys, index) =>
+            this.areKeysEqual(keys, chord2[index])
+        );
+    }
+
+    /**
+     * Check if chord1 is a prefix of chord2
+     * Example: [['Ctrl', 'K']] is a prefix of [['Ctrl', 'K'], ['Ctrl', 'C']]
+     */
+    private isChordPrefix(chord1: ChordBinding, chord2: ChordBinding): boolean {
+        if (chord1.length >= chord2.length) return false;
+
+        return chord1.every((keys, index) =>
+            this.areKeysEqual(keys, chord2[index])
+        );
+    }
+
+    /**
+     * Check if a single-key shortcut conflicts with the first part of a chord
+     * Example: ['Ctrl', 'K'] conflicts with [['Ctrl', 'K'], ['Ctrl', 'C']]
+     */
+    private doesSingleKeyConflictWithChord(
+        singleKeys: string[],
+        chord: ChordBinding
+    ): boolean {
+        if (chord.length === 0) return false;
+        return this.areKeysEqual(singleKeys, chord[0]);
     }
 
     /**
