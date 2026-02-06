@@ -13,6 +13,9 @@ export interface KeyboardShortcut {
     defaultKeys: string[];
     customKeys?: string[];
     enabled: boolean;
+    isChord?: boolean;
+    defaultChord?: string[][];
+    customChord?: string[][];
 }
 
 export type ShortcutCategory =
@@ -28,6 +31,12 @@ export interface ShortcutConflict {
     shortcut2: KeyboardShortcut;
     keys: string[];
 }
+
+/**
+ * Chord binding represents a sequence of key combinations
+ * Example: [['Ctrl', 'K'], ['Ctrl', 'C']] means press Ctrl+K, then press Ctrl+C
+ */
+export type ChordBinding = string[][];
 
 // Default keyboard shortcuts configuration
 export const DEFAULT_SHORTCUTS: KeyboardShortcut[] = [
