@@ -108,9 +108,15 @@ export class SearchService {
             sessions = sessions.filter(s => candidateIds.has(s.id));
         }
 
-        const results: SearchResult[] = [];
+        // Pre-compute query data once
         const queryTerms = this.tokenize(query, opts.caseSensitive);
         const queryLower = opts.caseSensitive ? query : query.toLowerCase();
+
+        // Use a min-heap approach: maintain only top maxResults
+        // Optimization: Use array + sort when full, but avoid storing all results
+        const maxHeapSize = opts.maxResults * 2; // Keep 2x to allow for better sorting
+        const results: SearchResult[] = [];
+        let minScoreInHeap = 0;
 
         for (const metaSession of sessions) {
             // Load full session details from storage
@@ -122,18 +128,31 @@ export class SearchService {
             // Search in session title
             const titleMatch = this.matchText(session.title, queryLower, queryTerms, opts);
             if (titleMatch) {
-                results.push({
-                    sessionId: session.id,
-                    sessionTitle: session.title,
-                    messageIndex: -1, // -1 indicates title match
-                    messageRole: 'system',
-                    content: session.title,
-                    matchedText: titleMatch.matchedText,
-                    matchStart: titleMatch.start,
-                    matchEnd: titleMatch.end,
-                    relevanceScore: titleMatch.score * 1.5, // Boost title matches
-                    timestamp: session.lastModified,
-                });
+                const titleScore = titleMatch.score * 1.5; // Boost title matches
+
+                // Only add if score is high enough
+                if (results.length < maxHeapSize || titleScore > minScoreInHeap) {
+                    results.push({
+                        sessionId: session.id,
+                        sessionTitle: session.title,
+                        messageIndex: -1, // -1 indicates title match
+                        messageRole: 'system',
+                        content: session.title,
+                        matchedText: titleMatch.matchedText,
+                        matchStart: titleMatch.start,
+                        matchEnd: titleMatch.end,
+                        relevanceScore: titleScore,
+                        timestamp: session.lastModified,
+                        // Defer context extraction
+                    });
+
+                    // If heap is full, trim and update min score
+                    if (results.length > maxHeapSize) {
+                        results.sort((a, b) => b.relevanceScore - a.relevanceScore);
+                        results.length = maxHeapSize;
+                        minScoreInHeap = results[results.length - 1].relevanceScore;
+                    }
+                }
             }
 
             // Search in messages
@@ -151,41 +170,54 @@ export class SearchService {
 
                 const match = this.matchText(content, queryLower, queryTerms, opts);
                 if (match) {
-                    const result: SearchResult = {
-                        sessionId: session.id,
-                        sessionTitle: session.title,
-                        messageIndex: i,
-                        messageRole: msg.role,
-                        content: content,
-                        matchedText: match.matchedText,
-                        matchStart: match.start,
-                        matchEnd: match.end,
-                        relevanceScore: match.score,
-                        timestamp: session.lastModified,
-                    };
+                    // Only add if score is high enough
+                    if (results.length < maxHeapSize || match.score > minScoreInHeap) {
+                        results.push({
+                            sessionId: session.id,
+                            sessionTitle: session.title,
+                            messageIndex: i,
+                            messageRole: msg.role,
+                            content: content,
+                            matchedText: match.matchedText,
+                            matchStart: match.start,
+                            matchEnd: match.end,
+                            relevanceScore: match.score,
+                            timestamp: session.lastModified,
+                            // Defer context extraction
+                        });
 
-                    // Add context
-                    if (opts.includeContext) {
-                        const contextRadius = 100;
-                        const beforeStart = Math.max(0, match.start - contextRadius);
-                        const afterEnd = Math.min(content.length, match.end + contextRadius);
-
-                        result.context = {
-                            before: content.substring(beforeStart, match.start),
-                            after: content.substring(match.end, afterEnd),
-                        };
+                        // If heap is full, trim and update min score
+                        if (results.length > maxHeapSize) {
+                            results.sort((a, b) => b.relevanceScore - a.relevanceScore);
+                            results.length = maxHeapSize;
+                            minScoreInHeap = results[results.length - 1].relevanceScore;
+                        }
                     }
-
-                    results.push(result);
                 }
             }
         }
 
-        // Sort by relevance score
+        // Final sort of remaining results
         results.sort((a, b) => b.relevanceScore - a.relevanceScore);
 
         // Limit results
         const limitedResults = results.slice(0, opts.maxResults);
+
+        // Add context only to final results
+        if (opts.includeContext) {
+            const contextRadius = 100;
+            for (const result of limitedResults) {
+                if (result.messageIndex !== -1) { // Not a title match
+                    const beforeStart = Math.max(0, result.matchStart - contextRadius);
+                    const afterEnd = Math.min(result.content.length, result.matchEnd + contextRadius);
+
+                    result.context = {
+                        before: result.content.substring(beforeStart, result.matchStart),
+                        after: result.content.substring(result.matchEnd, afterEnd),
+                    };
+                }
+            }
+        }
 
         // Extract top keywords from results
         const topKeywords = this.extractTopKeywords(limitedResults);
@@ -297,6 +329,9 @@ export class SearchService {
         queryTerms: string[],
         options: SearchOptions
     ): { matchedText: string; start: number; end: number; score: number } | null {
+        // Early exit for empty or very short text
+        if (!text || text.length < queryLower.length) return null;
+
         const textToSearch = options.caseSensitive ? text : text.toLowerCase();
 
         // Direct substring match (highest priority)
@@ -310,38 +345,40 @@ export class SearchService {
             };
         }
 
-        // Term-based matching
-        let matchedTerms = 0;
-        let firstMatch = -1;
-        let lastMatch = -1;
+        // Term-based matching (only if we have terms)
+        if (queryTerms.length > 0) {
+            let matchedTerms = 0;
+            let firstMatch = -1;
+            let lastMatch = -1;
 
-        for (const term of queryTerms) {
-            const termIndex = textToSearch.indexOf(term);
-            if (termIndex !== -1) {
-                matchedTerms++;
-                if (firstMatch === -1 || termIndex < firstMatch) {
-                    firstMatch = termIndex;
+            for (const term of queryTerms) {
+                const termIndex = textToSearch.indexOf(term);
+                if (termIndex !== -1) {
+                    matchedTerms++;
+                    if (firstMatch === -1 || termIndex < firstMatch) {
+                        firstMatch = termIndex;
+                    }
+                    const endPos = termIndex + term.length;
+                    if (endPos > lastMatch) {
+                        lastMatch = endPos;
+                    }
                 }
-                const endPos = termIndex + term.length;
-                if (endPos > lastMatch) {
-                    lastMatch = endPos;
-                }
+            }
+
+            if (matchedTerms > 0 && firstMatch !== -1) {
+                // Calculate score based on how many terms matched
+                const termMatchRatio = matchedTerms / queryTerms.length;
+                return {
+                    matchedText: text.substring(firstMatch, lastMatch),
+                    start: firstMatch,
+                    end: lastMatch,
+                    score: 50 * termMatchRatio + matchedTerms * 10,
+                };
             }
         }
 
-        if (matchedTerms > 0 && firstMatch !== -1) {
-            // Calculate score based on how many terms matched
-            const termMatchRatio = matchedTerms / queryTerms.length;
-            return {
-                matchedText: text.substring(firstMatch, lastMatch),
-                start: firstMatch,
-                end: lastMatch,
-                score: 50 * termMatchRatio + matchedTerms * 10,
-            };
-        }
-
-        // Fuzzy matching (if enabled)
-        if (options.fuzzyMatch && queryLower.length >= 3) {
+        // Fuzzy matching (if enabled and text not too long)
+        if (options.fuzzyMatch && queryLower.length >= 3 && textToSearch.length < 5000) {
             const fuzzyResult = this.fuzzyMatch(textToSearch, queryLower);
             if (fuzzyResult) {
                 return {
@@ -365,10 +402,16 @@ export class SearchService {
     ): { start: number; end: number; similarity: number } | null {
         const minSimilarity = 0.6;
 
-        // Sliding window fuzzy match
+        // Sliding window fuzzy match with optimizations
         const windowSize = Math.min(query.length * 2, text.length);
+        const maxIterations = Math.min(1000, text.length - query.length + 1); // Limit iterations
 
-        for (let i = 0; i <= text.length - query.length; i++) {
+        for (let i = 0; i < maxIterations; i++) {
+            // Skip ahead if first character doesn't match at all
+            if (i > 0 && query[0] !== text[i] && query[1] !== text[i]) {
+                continue;
+            }
+
             const window = text.substring(i, i + windowSize);
             const similarity = this.calculateSimilarity(window, query);
 
@@ -418,9 +461,16 @@ export class SearchService {
      */
     private static extractTopKeywords(results: SearchResult[]): string[] {
         const wordCounts = new Map<string, number>();
+        const maxResultsToProcess = Math.min(results.length, 20); // Limit processing
 
-        for (const result of results) {
-            const words = result.content
+        for (let i = 0; i < maxResultsToProcess; i++) {
+            const result = results[i];
+            // Only process matched text and nearby context for efficiency
+            const textToProcess = result.matchedText.length < 500
+                ? result.matchedText
+                : result.matchedText.substring(0, 500);
+
+            const words = textToProcess
                 .toLowerCase()
                 .split(/\W+/)
                 .filter(w => w.length > 3 && !this.stopWords.has(w));
