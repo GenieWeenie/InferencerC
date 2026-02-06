@@ -1268,9 +1268,17 @@ const Chat: React.FC = () => {
                                 // Otherwise maintain stickiness if already at bottom
                                 return isAtBottom ? 'auto' : false;
                             }}
-                            overscan={1000} // Increase overscan for smoother scrolling
-                            increaseViewportBy={500} // Render more items outside viewport
-                            atBottomThreshold={100} // Stick to bottom easier
+                            overscan={{
+                                main: 300,
+                                reverse: 300
+                            }}
+                            increaseViewportBy={{
+                                top: 200,
+                                bottom: 200
+                            }}
+                            defaultItemHeight={150}
+                            atBottomThreshold={100}
+                            alignToBottom
                             className="custom-scrollbar px-6"
                             totalCount={history.length}
                             initialTopMostItemIndex={history.length - 1}
