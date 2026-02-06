@@ -308,6 +308,19 @@ export class KeyboardShortcutsManager {
     }
 
     /**
+     * Update a shortcut's custom chord
+     */
+    updateChordShortcut(id: string, customChord: string[][]): void {
+        const shortcut = this.shortcuts.get(id);
+        if (!shortcut) return;
+
+        shortcut.isChord = true;
+        shortcut.customChord = customChord;
+        delete shortcut.customKeys;
+        this.saveShortcuts();
+    }
+
+    /**
      * Reset a shortcut to default
      */
     resetShortcut(id: string): void {
@@ -315,6 +328,7 @@ export class KeyboardShortcutsManager {
         if (!shortcut) return;
 
         delete shortcut.customKeys;
+        delete shortcut.customChord;
         this.saveShortcuts();
     }
 
