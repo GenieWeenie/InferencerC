@@ -142,6 +142,7 @@ const Chat: React.FC = () => {
     const [showSearch, setShowSearch] = React.useState(false);
     const [searchResults, setSearchResults] = React.useState<number[]>([]);
     const [currentSearchIndex, setCurrentSearchIndex] = React.useState(0);
+    const [showSearchResultsList, setShowSearchResultsList] = React.useState(false);
     const virtuosoRef = React.useRef<any>(null);
     const [bookmarkedMessages, setBookmarkedMessages] = React.useState<Set<number>>(new Set());
     const [showRequestLog, setShowRequestLog] = React.useState(false);
@@ -380,6 +381,12 @@ const Chat: React.FC = () => {
         setSearchResults(matches);
         setCurrentSearchIndex(0);
     }, [debouncedSearchQuery, history]);
+
+    // Navigate to specific search result
+    const navigateToSearchResult = React.useCallback((resultIndex: number) => {
+        setCurrentSearchIndex(resultIndex);
+        setShowSearchResultsList(false);
+    }, []);
 
     // Scroll to current search result
     React.useEffect(() => {
@@ -1534,49 +1541,118 @@ const Chat: React.FC = () => {
                             transition={{ duration: 0.2 }}
                             className="border-b border-slate-800 bg-slate-900/50 overflow-hidden min-w-0"
                         >
-                            <div className="px-6 py-3 flex items-center gap-3 min-w-0 overflow-hidden">
-                                <div className="flex-1 relative">
-                                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                                    <input
-                                        type="text"
-                                        value={searchQuery}
-                                        onChange={(e) => setSearchQuery(e.target.value)}
-                                        placeholder="Search in this conversation..."
-                                        className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-lg pl-10 pr-4 py-2 focus:ring-2 focus:ring-primary/50 focus:border-primary/50 outline-none"
-                                        autoFocus
-                                    />
-                                </div>
-                                {searchResults.length > 0 && (
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-sm text-slate-400">
-                                            {currentSearchIndex + 1} / {searchResults.length}
-                                        </span>
-                                        <button
-                                            onClick={() => setCurrentSearchIndex(prev => (prev > 0 ? prev - 1 : searchResults.length - 1))}
-                                            className="p-1.5 hover:bg-slate-700 rounded transition-colors"
-                                            title="Previous result"
-                                        >
-                                            <ChevronUp size={16} className="text-slate-400" />
-                                        </button>
-                                        <button
-                                            onClick={() => setCurrentSearchIndex(prev => (prev < searchResults.length - 1 ? prev + 1 : 0))}
-                                            className="p-1.5 hover:bg-slate-700 rounded transition-colors"
-                                            title="Next result"
-                                        >
-                                            <ChevronDown size={16} className="text-slate-400" />
-                                        </button>
+                            <div className="relative">
+                                <div className="px-6 py-3 flex items-center gap-3 min-w-0 overflow-hidden">
+                                    <div className="flex-1 relative">
+                                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                                        <input
+                                            type="text"
+                                            value={searchQuery}
+                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                            placeholder="Search in this conversation..."
+                                            className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-lg pl-10 pr-4 py-2 focus:ring-2 focus:ring-primary/50 focus:border-primary/50 outline-none"
+                                            autoFocus
+                                        />
                                     </div>
-                                )}
-                                <button
-                                    onClick={() => {
-                                        setShowSearch(false);
-                                        setSearchQuery('');
-                                    }}
-                                    className="p-1.5 hover:bg-slate-700 rounded transition-colors"
-                                    title="Close search"
-                                >
-                                    <X size={16} className="text-slate-400" />
-                                </button>
+                                    {searchResults.length > 0 && (
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => setShowSearchResultsList(!showSearchResultsList)}
+                                                className="px-2 py-1.5 hover:bg-slate-700 rounded transition-colors text-sm text-slate-400 hover:text-white flex items-center gap-1"
+                                                title="Show all results"
+                                            >
+                                                <span>{currentSearchIndex + 1} / {searchResults.length}</span>
+                                                {showSearchResultsList ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                            </button>
+                                            <button
+                                                onClick={() => setCurrentSearchIndex(prev => (prev > 0 ? prev - 1 : searchResults.length - 1))}
+                                                className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                                                title="Previous result"
+                                            >
+                                                <ChevronUp size={16} className="text-slate-400" />
+                                            </button>
+                                            <button
+                                                onClick={() => setCurrentSearchIndex(prev => (prev < searchResults.length - 1 ? prev + 1 : 0))}
+                                                className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                                                title="Next result"
+                                            >
+                                                <ChevronDown size={16} className="text-slate-400" />
+                                            </button>
+                                        </div>
+                                    )}
+                                    <button
+                                        onClick={() => {
+                                            setShowSearch(false);
+                                            setSearchQuery('');
+                                            setShowSearchResultsList(false);
+                                        }}
+                                        className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                                        title="Close search"
+                                    >
+                                        <X size={16} className="text-slate-400" />
+                                    </button>
+                                </div>
+
+                                {/* Virtualized search results list */}
+                                <AnimatePresence>
+                                    {showSearchResultsList && searchResults.length > 0 && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                            className="border-t border-slate-800 bg-slate-900 overflow-hidden"
+                                        >
+                                            <div className="max-h-80 overflow-y-auto">
+                                                <Virtuoso
+                                                    style={{ height: Math.min(searchResults.length * 60, 320) }}
+                                                    totalCount={searchResults.length}
+                                                    itemContent={(index) => {
+                                                        const messageIndex = searchResults[index];
+                                                        const message = history[messageIndex];
+                                                        const isActive = index === currentSearchIndex;
+                                                        const preview = message.content ?
+                                                            message.content.substring(0, 100) + (message.content.length > 100 ? '...' : '') :
+                                                            '';
+
+                                                        return (
+                                                            <button
+                                                                onClick={() => navigateToSearchResult(index)}
+                                                                className={`w-full text-left px-6 py-3 hover:bg-slate-800 transition-colors border-b border-slate-800/50 ${
+                                                                    isActive ? 'bg-primary/10 border-l-2 border-l-primary' : ''
+                                                                }`}
+                                                            >
+                                                                <div className="flex items-start gap-3">
+                                                                    <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-xs text-slate-400">
+                                                                        {index + 1}
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <div className="flex items-center gap-2 mb-1">
+                                                                            <span className={`text-xs font-semibold ${
+                                                                                message.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
+                                                                            }`}>
+                                                                                {message.role === 'user' ? 'You' : 'Assistant'}
+                                                                            </span>
+                                                                            <span className="text-xs text-slate-500">
+                                                                                Message #{messageIndex + 1}
+                                                                            </span>
+                                                                        </div>
+                                                                        <p className="text-sm text-slate-300 truncate">
+                                                                            {preview}
+                                                                        </p>
+                                                                    </div>
+                                                                    {isActive && (
+                                                                        <Check size={16} className="text-primary flex-shrink-0 mt-1" />
+                                                                    )}
+                                                                </div>
+                                                            </button>
+                                                        );
+                                                    }}
+                                                />
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
                             </div>
                         </motion.div>
                     )}
