@@ -36,6 +36,7 @@ import { FederatedLearningPanel } from '../components/FederatedLearningPanel';
 import { responsiveDesignService } from '../services/responsiveDesign';
 import { onboardingService } from '../services/onboarding';
 import { multiModalAIService } from '../services/multiModalAI';
+import { PerformanceMonitorOverlay } from '../components/PerformanceMonitorOverlay';
 const PromptManager = React.lazy(() => import('../components/PromptManager'));
 import SidebarHistory from '../components/SidebarHistory';
 import { useChat } from '../hooks/useChat';
@@ -3252,6 +3253,9 @@ const Chat: React.FC = () => {
                 isOpen={showFederatedLearning}
                 onClose={() => setShowFederatedLearning(false)}
             />
+
+            {/* Performance Monitor Overlay */}
+            <PerformanceMonitorOverlay messageCount={history.length} />
         </div>
     );
 };
