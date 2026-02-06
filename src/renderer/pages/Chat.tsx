@@ -115,7 +115,10 @@ const Chat: React.FC = () => {
         battleMode, setBattleMode,
         secondaryModel, setSecondaryModel,
         togglePinSession, renameSession,
-        connectionStatus
+        connectionStatus,
+        loadMessageRange,
+        loadedMessageIndices,
+        getVisibleHistory
     } = useChat(handleApiLog, streamingEnabled);
 
     // Default secondary model if not set
@@ -812,7 +815,16 @@ const Chat: React.FC = () => {
                                             ))}
                                         </div>
                                     )}
-                                    {msg.content && <MessageContent content={msg.content} isUser={false} mcpAvailable={mcpAvailable} onInsertToFile={handleInsertToFile} isStreaming={true} />}
+                                    {msg.content && <MessageContent
+                                        content={msg.content}
+                                        isUser={false}
+                                        mcpAvailable={mcpAvailable}
+                                        onInsertToFile={handleInsertToFile}
+                                        isStreaming={true}
+                                        isLazyLoaded={!loadedMessageIndices.has(index)}
+                                        onLoadContent={() => loadMessageRange(index, index, history)}
+                                        messageIndex={index}
+                                    />}
                                     <div className="flex items-center gap-2 text-slate-400 italic text-sm animate-pulse">
                                         <Brain size={16} className="text-primary" /> Thinking...
                                     </div>
@@ -837,7 +849,15 @@ const Chat: React.FC = () => {
                                                     ))}
                                                 </div>
                                             )}
-                                            <MessageContent content={msg.content || ""} isUser={false} mcpAvailable={mcpAvailable} onInsertToFile={handleInsertToFile} />
+                                            <MessageContent
+                                                content={msg.content || ""}
+                                                isUser={false}
+                                                mcpAvailable={mcpAvailable}
+                                                onInsertToFile={handleInsertToFile}
+                                                isLazyLoaded={!loadedMessageIndices.has(index)}
+                                                onLoadContent={() => loadMessageRange(index, index, history)}
+                                                messageIndex={index}
+                                            />
                                         </>
                                     )}
 
@@ -981,7 +1001,15 @@ const Chat: React.FC = () => {
                                 </div>
                             ) : (
                                 <>
-                                    <MessageContent content={msg.content} isUser={true} mcpAvailable={mcpAvailable} onInsertToFile={handleInsertToFile} />
+                                    <MessageContent
+                                        content={msg.content}
+                                        isUser={true}
+                                        mcpAvailable={mcpAvailable}
+                                        onInsertToFile={handleInsertToFile}
+                                        isLazyLoaded={!loadedMessageIndices.has(index)}
+                                        onLoadContent={() => loadMessageRange(index, index, history)}
+                                        messageIndex={index}
+                                    />
                                     {/* Display attached images */}
                                     {msg.images && msg.images.length > 0 && (
                                         <div className="mt-2 flex flex-wrap gap-2">

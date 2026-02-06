@@ -17,6 +17,9 @@ interface MessageContentProps {
     mcpAvailable?: boolean;
     onInsertToFile?: (code: string, language: string) => void;
     isStreaming?: boolean;
+    isLazyLoaded?: boolean;
+    onLoadContent?: () => void;
+    messageIndex?: number;
 }
 
 // Languages that support live preview
@@ -31,8 +34,9 @@ const COMMON_LANGUAGES = [
     'diff', 'git', 'nginx', 'apache', 'graphql', 'vue', 'svelte', 'angular'
 ];
 
-const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAvailable, onInsertToFile, isStreaming }) => {
+const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAvailable, onInsertToFile, isStreaming, isLazyLoaded = false, onLoadContent, messageIndex }) => {
     const [displayContent, setDisplayContent] = React.useState(content);
+    const [isLoadingContent, setIsLoadingContent] = React.useState(false);
 
     // Typewriter effect for streaming
     React.useEffect(() => {
@@ -56,8 +60,29 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
 
         animationFrameId = requestAnimationFrame(animate);
         return () => cancelAnimationFrame(animationFrameId);
-    }, [content, isStreaming, displayContent.length]); // depend on length to allow re-trigger, but be careful of loops. 
+    }, [content, isStreaming, displayContent.length]); // depend on length to allow re-trigger, but be careful of loops.
     // Actually, simple timeout based approach might be more stable in React than rAF due to render cycles.
+
+    // Lazy loading effect: Trigger content load on mount if needed
+    React.useEffect(() => {
+        // Detect if content is lazy-loaded (truncated to 100 chars + "...")
+        const isContentTruncated = content.length > 0 && content.endsWith('...') && content.length <= 103;
+
+        if (isLazyLoaded || isContentTruncated) {
+            if (onLoadContent && !isLoadingContent) {
+                setIsLoadingContent(true);
+                onLoadContent();
+                // The parent will re-render with full content, which will update the content prop
+            }
+        }
+    }, [isLazyLoaded, messageIndex]); // Only run when lazy-loaded state or message index changes
+
+    // Update loading state when content changes (full content loaded)
+    React.useEffect(() => {
+        if (isLoadingContent && content.length > 103 && !content.endsWith('...')) {
+            setIsLoadingContent(false);
+        }
+    }, [content, isLoadingContent]);
 
     const [copiedCode, setCopiedCode] = React.useState<string | null>(null);
     const [previewCode, setPreviewCode] = React.useState<{ code: string; language: string } | null>(null);
@@ -186,6 +211,26 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
             setFilePath('');
         }
     };
+
+    // Show skeleton/spinner while lazy-loading content
+    const isContentTruncated = content.length > 0 && content.endsWith('...') && content.length <= 103;
+    const shouldShowSkeleton = (isLazyLoaded || isContentTruncated) && isLoadingContent;
+
+    if (shouldShowSkeleton) {
+        return (
+            <div className="prose prose-invert max-w-none text-sm">
+                <div className="flex items-center gap-3 p-4 bg-slate-900/50 border border-slate-700/50 rounded-lg animate-pulse">
+                    <div className="flex-shrink-0">
+                        <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                    <div className="flex-1 space-y-2">
+                        <div className="h-3 bg-slate-700/50 rounded w-3/4"></div>
+                        <div className="h-3 bg-slate-700/50 rounded w-1/2"></div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     // Parse <thinking> blocks more robustly
     let thoughtProcess = null;
