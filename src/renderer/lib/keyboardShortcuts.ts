@@ -209,6 +209,12 @@ export class KeyboardShortcutsManager {
     private shortcuts: Map<string, KeyboardShortcut>;
     private listeners: Set<() => void> = new Set();
     private static readonly STORAGE_KEY = 'keyboard-shortcuts';
+    private static readonly CHORD_TIMEOUT = 1500; // 1.5 seconds in milliseconds
+
+    // Chord matching state
+    private chordSequence: string[][] = [];
+    private chordTimeoutId: NodeJS.Timeout | null = null;
+    private pendingChordShortcutId: string | null = null;
 
     constructor() {
         this.shortcuts = new Map();
@@ -422,12 +428,31 @@ export class KeyboardShortcutsManager {
     }
 
     /**
-     * Check if a keyboard event matches a shortcut
+     * Get the active chord for a shortcut (custom or default)
      */
-    matchesShortcut(event: KeyboardEvent, id: string): boolean {
-        const keys = this.getActiveKeys(id);
-        if (!keys) return false;
+    private getActiveChord(id: string): ChordBinding | undefined {
+        const shortcut = this.shortcuts.get(id);
+        if (!shortcut || !shortcut.enabled || !shortcut.isChord) return undefined;
+        return shortcut.customChord || shortcut.defaultChord;
+    }
 
+    /**
+     * Reset the chord sequence
+     */
+    private resetChordSequence(): void {
+        this.chordSequence = [];
+        this.pendingChordShortcutId = null;
+
+        if (this.chordTimeoutId) {
+            clearTimeout(this.chordTimeoutId);
+            this.chordTimeoutId = null;
+        }
+    }
+
+    /**
+     * Extract keys from keyboard event
+     */
+    private extractKeysFromEvent(event: KeyboardEvent): string[] {
         const eventKeys: string[] = [];
 
         if (event.ctrlKey || event.metaKey) eventKeys.push('Ctrl');
@@ -439,6 +464,89 @@ export class KeyboardShortcutsManager {
         if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
             eventKeys.push(key);
         }
+
+        return eventKeys;
+    }
+
+    /**
+     * Check if current sequence matches a chord pattern
+     */
+    private matchesChordPattern(sequence: string[][], chord: ChordBinding): boolean {
+        if (sequence.length !== chord.length) return false;
+
+        return sequence.every((keys, index) =>
+            this.areKeysEqual(keys, chord[index])
+        );
+    }
+
+    /**
+     * Check if current sequence is a partial match for any chord
+     */
+    private isPartialChordMatch(sequence: string[][], chord: ChordBinding): boolean {
+        if (sequence.length >= chord.length) return false;
+
+        return sequence.every((keys, index) =>
+            this.areKeysEqual(keys, chord[index])
+        );
+    }
+
+    /**
+     * Check if a keyboard event matches a chord shortcut
+     * Returns the shortcut ID if matched, null if partial match (waiting for more keys),
+     * undefined if no match
+     */
+    matchesChordShortcut(event: KeyboardEvent): string | null | undefined {
+        const eventKeys = this.extractKeysFromEvent(event);
+
+        // Add current keys to sequence
+        this.chordSequence.push(eventKeys);
+
+        // Clear existing timeout
+        if (this.chordTimeoutId) {
+            clearTimeout(this.chordTimeoutId);
+            this.chordTimeoutId = null;
+        }
+
+        // Check all chord shortcuts
+        const chordShortcuts = Array.from(this.shortcuts.values())
+            .filter(s => s.enabled && s.isChord);
+
+        for (const shortcut of chordShortcuts) {
+            const chord = this.getActiveChord(shortcut.id);
+            if (!chord) continue;
+
+            // Check for complete match
+            if (this.matchesChordPattern(this.chordSequence, chord)) {
+                this.resetChordSequence();
+                return shortcut.id;
+            }
+
+            // Check for partial match
+            if (this.isPartialChordMatch(this.chordSequence, chord)) {
+                this.pendingChordShortcutId = shortcut.id;
+
+                // Set timeout to reset sequence
+                this.chordTimeoutId = setTimeout(() => {
+                    this.resetChordSequence();
+                }, KeyboardShortcutsManager.CHORD_TIMEOUT);
+
+                return null; // Partial match, waiting for more keys
+            }
+        }
+
+        // No match found, reset sequence
+        this.resetChordSequence();
+        return undefined;
+    }
+
+    /**
+     * Check if a keyboard event matches a shortcut
+     */
+    matchesShortcut(event: KeyboardEvent, id: string): boolean {
+        const keys = this.getActiveKeys(id);
+        if (!keys) return false;
+
+        const eventKeys = this.extractKeysFromEvent(event);
 
         return this.areKeysEqual(eventKeys, keys);
     }
