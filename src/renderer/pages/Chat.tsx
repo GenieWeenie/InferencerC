@@ -138,6 +138,7 @@ const Chat: React.FC = () => {
     const [editedMessageContent, setEditedMessageContent] = React.useState<string>('');
     const [showShortcutsModal, setShowShortcutsModal] = React.useState(false);
     const [searchQuery, setSearchQuery] = React.useState('');
+    const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState('');
     const [showSearch, setShowSearch] = React.useState(false);
     const [searchResults, setSearchResults] = React.useState<number[]>([]);
     const [currentSearchIndex, setCurrentSearchIndex] = React.useState(0);
@@ -350,15 +351,24 @@ const Chat: React.FC = () => {
         }
     }, [history.length, currentModel]);
 
+    // Debounce search query (300ms delay)
+    React.useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedSearchQuery(searchQuery);
+        }, 300);
+
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
     // Search within chat
     React.useEffect(() => {
-        if (searchQuery.trim() === '') {
+        if (debouncedSearchQuery.trim() === '') {
             setSearchResults([]);
             setCurrentSearchIndex(0);
             return;
         }
 
-        const query = searchQuery.toLowerCase();
+        const query = debouncedSearchQuery.toLowerCase();
         const matches: number[] = [];
 
         history.forEach((msg, index) => {
@@ -369,7 +379,7 @@ const Chat: React.FC = () => {
 
         setSearchResults(matches);
         setCurrentSearchIndex(0);
-    }, [searchQuery, history]);
+    }, [debouncedSearchQuery, history]);
 
     // Scroll to current search result
     React.useEffect(() => {
