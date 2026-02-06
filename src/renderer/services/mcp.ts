@@ -1,0 +1,407 @@
+/**
+ * MCP (Model Context Protocol) Client Service
+ * 
+ * This service manages connections to MCP servers and handles tool calls.
+ * MCP servers can provide tools for filesystem access, git, databases, etc.
+ */
+
+// Extend Window interface for Electron API
+declare global {
+    interface Window {
+        electronAPI?: {
+            minimize: () => void;
+            maximize: () => void;
+            close: () => void;
+            selectFolder: () => Promise<{ success: boolean; path?: string }>;
+            watchFolder: (folderPath: string) => Promise<{ success: boolean; error?: string }>;
+            stopWatchingFolder: (folderPath: string) => Promise<{ success: boolean }>;
+            readFolderFiles: (folderPath: string, extensions?: string[]) => Promise<{ success: boolean; files?: Array<{ path: string; content: string; relativePath: string }>; error?: string }>;
+            executeCode: (code: string, language: string) => Promise<{ success: boolean; output: string; exitCode: number }>;
+            onFolderChanged: (callback: (event: any, data: { path: string; type: string; file: string }) => void) => (() => void) | undefined;
+            // Auto-updater
+            getAppVersion: () => Promise<string>;
+            checkForUpdates: () => Promise<{ available: boolean; version?: string; error?: string; message?: string }>;
+            quitAndInstall: () => Promise<void>;
+            onUpdateDownloaded: (callback: (event: any, info: any) => void) => (() => void) | undefined;
+            mcpConnect?: (server: any) => Promise<any>;
+            mcpDisconnect?: (id: string) => Promise<void>;
+            mcpExecuteTool?: (toolCall: any) => Promise<any>;
+            downloadModel?: (options: any) => Promise<any>;
+        };
+    }
+}
+
+export interface MCPServer {
+    id: string;
+    name: string;
+    description?: string;
+    command: string; // e.g., "npx", "python", "node"
+    args: string[]; // e.g., ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+    env?: Record<string, string>;
+    status: 'disconnected' | 'connecting' | 'connected' | 'error';
+    errorMessage?: string;
+}
+
+export interface MCPTool {
+    name: string;
+    description?: string;
+    inputSchema?: {
+        type: string;
+        properties?: Record<string, any>;
+        required?: string[];
+    };
+    serverId: string; // Which server provides this tool
+}
+
+export interface MCPToolCall {
+    id: string;
+    name: string;
+    arguments: Record<string, any>;
+    serverId: string;
+}
+
+export interface MCPToolResult {
+    toolCallId: string;
+    content: string;
+    isError?: boolean;
+}
+
+// Storage key for MCP servers configuration
+const MCP_SERVERS_KEY = 'mcp_servers';
+
+/**
+ * MCP Client manages connections to multiple MCP servers
+ */
+class MCPClient {
+    private servers: Map<string, MCPServer> = new Map();
+    private tools: Map<string, MCPTool> = new Map(); // tool name -> tool
+    private processes: Map<string, any> = new Map(); // Server processes (in Electron main)
+    private listeners: Set<() => void> = new Set();
+
+    constructor() {
+        this.loadServers();
+    }
+
+    /**
+     * Load saved servers from localStorage
+     */
+    private loadServers(): void {
+        try {
+            const saved = localStorage.getItem(MCP_SERVERS_KEY);
+            if (saved) {
+                const servers: MCPServer[] = JSON.parse(saved);
+                servers.forEach(s => {
+                    // Reset status on load
+                    s.status = 'disconnected';
+                    this.servers.set(s.id, s);
+                });
+            }
+        } catch (e) {
+            console.error('Failed to load MCP servers:', e);
+        }
+    }
+
+    /**
+     * Save servers to localStorage
+     */
+    private saveServers(): void {
+        try {
+            const servers = Array.from(this.servers.values());
+            localStorage.setItem(MCP_SERVERS_KEY, JSON.stringify(servers));
+        } catch (e) {
+            console.error('Failed to save MCP servers:', e);
+        }
+    }
+
+    /**
+     * Notify listeners of state changes
+     */
+    private notifyListeners(): void {
+        this.listeners.forEach(fn => fn());
+    }
+
+    /**
+     * Subscribe to state changes
+     */
+    subscribe(fn: () => void): () => void {
+        this.listeners.add(fn);
+        return () => this.listeners.delete(fn);
+    }
+
+    /**
+     * Get all configured servers
+     */
+    getServers(): MCPServer[] {
+        return Array.from(this.servers.values());
+    }
+
+    /**
+     * Get all available tools from connected servers
+     */
+    getTools(): MCPTool[] {
+        return Array.from(this.tools.values());
+    }
+
+    /**
+     * Add a new MCP server configuration
+     */
+    addServer(server: Omit<MCPServer, 'id' | 'status'>): MCPServer {
+        const newServer: MCPServer = {
+            id: crypto.randomUUID(),
+            status: 'disconnected',
+            ...server
+        };
+        this.servers.set(newServer.id, newServer);
+        this.saveServers();
+        this.notifyListeners();
+        return newServer;
+    }
+
+    /**
+     * Remove a server configuration
+     */
+    removeServer(id: string): void {
+        this.disconnectServer(id);
+        this.servers.delete(id);
+        this.saveServers();
+        this.notifyListeners();
+    }
+
+    /**
+     * Update server configuration
+     */
+    updateServer(id: string, updates: Partial<MCPServer>): void {
+        const server = this.servers.get(id);
+        if (server) {
+            Object.assign(server, updates);
+            this.saveServers();
+            this.notifyListeners();
+        }
+    }
+
+    /**
+     * Connect to an MCP server
+     * In the renderer process, we'll use IPC to spawn the process in main
+     */
+    async connectServer(id: string): Promise<void> {
+        const server = this.servers.get(id);
+        if (!server) throw new Error(`Server ${id} not found`);
+
+        server.status = 'connecting';
+        server.errorMessage = undefined;
+        this.notifyListeners();
+
+        try {
+            // Use Electron IPC to connect to the server from main process
+            if (window.electronAPI?.mcpConnect) {
+                const result = await window.electronAPI.mcpConnect(server);
+                if (result.success) {
+                    server.status = 'connected';
+                    // Parse and store tools from result
+                    if (result.tools) {
+                        result.tools.forEach((tool: MCPTool) => {
+                            this.tools.set(tool.name, { ...tool, serverId: id });
+                        });
+                    }
+                } else {
+                    throw new Error(result.error || 'Connection failed');
+                }
+            } else {
+                // Fallback: Mock connection for development
+                console.warn('MCP IPC not available, using mock connection');
+                await new Promise(r => setTimeout(r, 1000));
+                server.status = 'connected';
+
+                // Add mock tools for testing
+                this.tools.set('read_file', {
+                    name: 'read_file',
+                    description: 'Read the contents of a file',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            path: { type: 'string', description: 'Path to the file to read' }
+                        },
+                        required: ['path']
+                    },
+                    serverId: id
+                });
+                this.tools.set('write_file', {
+                    name: 'write_file',
+                    description: 'Write content to a file',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            path: { type: 'string', description: 'Path to the file' },
+                            content: { type: 'string', description: 'Content to write' }
+                        },
+                        required: ['path', 'content']
+                    },
+                    serverId: id
+                });
+                this.tools.set('list_directory', {
+                    name: 'list_directory',
+                    description: 'List contents of a directory',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            path: { type: 'string', description: 'Path to the directory' }
+                        },
+                        required: ['path']
+                    },
+                    serverId: id
+                });
+            }
+
+            this.notifyListeners();
+        } catch (e: any) {
+            server.status = 'error';
+            server.errorMessage = e.message;
+            this.notifyListeners();
+            throw e;
+        }
+    }
+
+    /**
+     * Disconnect from an MCP server
+     */
+    async disconnectServer(id: string): Promise<void> {
+        const server = this.servers.get(id);
+        if (!server) return;
+
+        try {
+            if (window.electronAPI?.mcpDisconnect) {
+                await window.electronAPI.mcpDisconnect(id);
+            }
+        } catch (e) {
+            console.error('Error disconnecting:', e);
+        }
+
+        // Remove tools from this server
+        for (const [name, tool] of this.tools) {
+            if (tool.serverId === id) {
+                this.tools.delete(name);
+            }
+        }
+
+        server.status = 'disconnected';
+        this.notifyListeners();
+    }
+
+    /**
+     * Execute a tool call
+     */
+    async executeTool(toolCall: MCPToolCall): Promise<MCPToolResult> {
+        const tool = this.tools.get(toolCall.name);
+        if (!tool) {
+            return {
+                toolCallId: toolCall.id,
+                content: `Tool "${toolCall.name}" not found`,
+                isError: true
+            };
+        }
+
+        try {
+            if (window.electronAPI?.mcpExecuteTool) {
+                const result = await window.electronAPI.mcpExecuteTool({
+                    serverId: tool.serverId,
+                    toolName: toolCall.name,
+                    arguments: toolCall.arguments
+                });
+
+                return {
+                    toolCallId: toolCall.id,
+                    content: result.content || JSON.stringify(result),
+                    isError: result.isError
+                };
+            } else {
+                // Mock tool execution for development
+                console.warn('MCP IPC not available, using mock execution');
+                await new Promise(r => setTimeout(r, 500));
+
+                // Mock responses
+                if (toolCall.name === 'read_file') {
+                    return {
+                        toolCallId: toolCall.id,
+                        content: `[Mock] Contents of ${toolCall.arguments.path}:\n\nThis is mock file content for development purposes.`
+                    };
+                } else if (toolCall.name === 'list_directory') {
+                    return {
+                        toolCallId: toolCall.id,
+                        content: `[Mock] Contents of ${toolCall.arguments.path}:\n- file1.txt\n- file2.js\n- folder1/`
+                    };
+                } else if (toolCall.name === 'write_file') {
+                    return {
+                        toolCallId: toolCall.id,
+                        content: `[Mock] Successfully wrote to ${toolCall.arguments.path}`
+                    };
+                }
+
+                return {
+                    toolCallId: toolCall.id,
+                    content: `[Mock] Executed ${toolCall.name} with args: ${JSON.stringify(toolCall.arguments)}`
+                };
+            }
+        } catch (e: any) {
+            return {
+                toolCallId: toolCall.id,
+                content: `Error executing tool: ${e.message}`,
+                isError: true
+            };
+        }
+    }
+
+    /**
+     * Format tools for OpenAI-compatible API
+     */
+    getToolsForAPI(): any[] {
+        return Array.from(this.tools.values()).map(tool => ({
+            type: 'function',
+            function: {
+                name: tool.name,
+                description: tool.description || '',
+                parameters: tool.inputSchema || { type: 'object', properties: {} }
+            }
+        }));
+    }
+
+    /**
+     * Check if any servers are connected
+     */
+    hasConnectedServers(): boolean {
+        return Array.from(this.servers.values()).some(s => s.status === 'connected');
+    }
+
+    /**
+     * Get connected server count
+     */
+    getConnectedCount(): number {
+        return Array.from(this.servers.values()).filter(s => s.status === 'connected').length;
+    }
+}
+
+// Singleton instance
+export const mcpClient = new MCPClient();
+
+// Extend window type for TypeScript
+declare global {
+    interface Window {
+        electronAPI?: {
+            minimize: () => void;
+            maximize: () => void;
+            close: () => void;
+            // Project Context APIs
+            selectFolder: () => Promise<{ success: boolean; path?: string }>;
+            watchFolder: (folderPath: string) => Promise<{ success: boolean; error?: string }>;
+            stopWatchingFolder: (folderPath: string) => Promise<{ success: boolean }>;
+            readFolderFiles: (folderPath: string, extensions?: string[]) => Promise<{ success: boolean; files?: Array<{ path: string; content: string; relativePath: string }>; error?: string }>;
+            executeCode: (code: string, language: string) => Promise<{ success: boolean; output: string; exitCode: number }>;
+            onFolderChanged: (callback: (event: any, data: { path: string; type: string; file: string }) => void) => (() => void) | undefined;
+            // MCP APIs
+            mcpConnect?: (server: MCPServer) => Promise<{ success: boolean; error?: string; tools?: MCPTool[] }>;
+            mcpDisconnect?: (serverId: string) => Promise<void>;
+            mcpExecuteTool?: (params: { serverId: string; toolName: string; arguments: Record<string, any> }) =>
+                Promise<{ content: string; isError?: boolean }>;
+            downloadModel?: (params: { modelId: string; fileName: string; url: string; size: number }) => Promise<void>;
+        };
+    }
+}

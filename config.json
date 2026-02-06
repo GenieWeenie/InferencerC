@@ -1,0 +1,12 @@
+{
+  "models": [
+    {
+      "id": "local-lmstudio",
+      "name": "LM Studio (Localhost:1234)",
+      "pathOrUrl": "http://localhost:1234",
+      "type": "remote-endpoint",
+      "status": "loaded",
+      "adapter": "lm-studio"
+    }
+  ]
+}

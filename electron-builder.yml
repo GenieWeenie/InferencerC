@@ -1,0 +1,58 @@
+appId: com.inferencer.app
+productName: InferencerC
+copyright: Copyright © 2025
+
+directories:
+  buildResources: build
+  output: dist
+
+files:
+  - dist/**/*
+  - package.json
+  - node_modules/**/*
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - ia32
+  icon: build/icon.ico
+  requestedExecutionLevel: requireAdministrator
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: InferencerC
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  deleteAppDataOnUninstall: false
+  # Portable mode support
+  portable:
+    artifactName: "${productName}-${version}-portable.${ext}"
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: build/icon.icns
+  category: public.app-category.developer-tools
+
+linux:
+  target:
+    - AppImage
+    - deb
+    - rpm
+  icon: build/icon.png
+  category: Development
+
+publish:
+  provider: github
+  owner: your-username
+  repo: inferencer-c
+  releaseType: release

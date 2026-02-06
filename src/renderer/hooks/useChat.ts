@@ -1,0 +1,842 @@
+import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
+import { ChatResponse, Message, TokenLogprob, Model, ChatMessage, ChatSession, ToolCall } from '../../shared/types';
+import { HistoryService } from '../services/history';
+import { simulateLogprobs, detectIntent, findBestModelForIntent } from '../lib/chatUtils';
+import { AVAILABLE_TOOLS } from '../lib/tools';
+import { analyticsService } from '../services/analytics';
+import { webhookService } from '../services/webhooks';
+import { performanceService } from '../services/performance';
+
+export interface ApiLogCallback {
+    (log: {
+        id: string;
+        timestamp: number;
+        type: 'request' | 'response' | 'error';
+        model: string;
+        request?: any;
+        response?: any;
+        error?: string;
+        duration?: number;
+    }): void;
+}
+
+export interface SelectedTokenContext {
+    logprob: TokenLogprob;
+    messageIndex: number;
+    tokenIndex: number;
+}
+
+export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = true) => {
+    // Logic State
+    const [input, setInput] = useState('');
+    const [prefill, setPrefill] = useState<string | null>(null);
+    const [thinkingEnabled, setThinkingEnabled] = useState(false);
+    const [expertMode, setExpertMode] = useState<string | null>(null);
+    const [battleMode, setBattleMode] = useState(false);
+    const [autoRouting, setAutoRouting] = useState(false);
+    const [enabledTools, setEnabledTools] = useState<Set<string>>(new Set());
+    const [responseFormat, setResponseFormat] = useState<'text' | 'json_object'>('text');
+    const [secondaryModel, setSecondaryModel] = useState<string>('');
+
+    const [sessionId, setSessionId] = useState<string>('');
+
+    const [history, setHistory] = useState<ChatMessage[]>([]);
+    const [selectedToken, setSelectedToken] = useState<SelectedTokenContext | null>(null);
+    const [availableModels, setAvailableModels] = useState<Model[]>([]);
+    const [currentModel, setCurrentModel] = useState<string>('');
+    const [systemPrompt, setSystemPrompt] = useState('You are a helpful assistant.');
+    const [temperature, setTemperature] = useState(0.7);
+    const [topP, setTopP] = useState(0.9);
+    const [maxTokens, setMaxTokens] = useState(2048);
+    const [batchSize, setBatchSize] = useState(1);
+    const [abortControllers, setAbortControllers] = useState<AbortController[]>([]);
+
+    // UI State
+    const [savedSessions, setSavedSessions] = useState<ChatSession[]>([]);
+    const [isFetchingWeb, setIsFetchingWeb] = useState(false);
+    const [showUrlInput, setShowUrlInput] = useState(false);
+    const [urlInput, setUrlInput] = useState('');
+    const [showExpertMenu, setShowExpertMenu] = useState(false);
+    const [showAdvanced, setShowAdvanced] = useState(true);
+    const [showHistory, setShowHistory] = useState(false);
+    const [connectionStatus, setConnectionStatus] = useState<{ local: 'online' | 'offline' | 'checking', remote: 'online' | 'offline' | 'checking' | 'none' }>({
+        local: 'checking',
+        remote: 'checking'
+    });
+
+    const openRouterApiKey = localStorage.getItem('openRouterApiKey');
+
+    const handleExpertSelect = (mode: string | null) => {
+        setExpertMode(mode);
+        setShowExpertMenu(false);
+        if (mode === 'coding') {
+            setSystemPrompt("You are an expert software engineer. You write clean, efficient, and well-documented code. Always invoke standard libraries where possible.");
+            setTemperature(0.2);
+            setTopP(0.1);
+        }
+        else if (mode === 'creative') {
+            setSystemPrompt("You are a creative writer. Use vivid imagery, engaging hooks, and varied sentence structures.");
+            setTemperature(0.9);
+            setTopP(0.95);
+        }
+        else if (mode === 'math') {
+            setSystemPrompt("You are a mathematician. Solve problems step-by-step, showing all work. Use LaTeX for math notation.");
+            setTemperature(0.1);
+            setTopP(0.1);
+        }
+        else if (mode === 'reasoning') {
+            setSystemPrompt("You are a logic expert. Analyze every problem deeply. Break it down into first principles.");
+            setTemperature(0.2);
+            setTopP(0.2);
+        }
+        else {
+            setSystemPrompt("You are a helpful assistant.");
+            setTemperature(0.7);
+            setTopP(0.9);
+        }
+    };
+
+    useEffect(() => {
+        let isInitialLoad = true;
+
+        const fetchModels = async () => {
+            let models: Model[] = [];
+            let localStatus: 'online' | 'offline' = 'offline';
+            let remoteStatus: 'online' | 'offline' | 'none' = openRouterApiKey ? 'offline' : 'none';
+
+            try {
+                const res = await fetch('http://localhost:3000/v1/models', { signal: AbortSignal.timeout(3000) });
+                const data = await res.json();
+                if (data && Array.isArray(data.data)) {
+                    models = [...models, ...data.data];
+                    localStatus = 'online';
+                }
+            } catch (e) {
+                console.error("Failed to fetch local models", e);
+                localStatus = 'offline';
+            }
+
+            if (openRouterApiKey) {
+                try {
+                    const res = await fetch('https://openrouter.ai/api/v1/models', {
+                        headers: { 'Authorization': `Bearer ${openRouterApiKey}` },
+                        signal: AbortSignal.timeout(5000)
+                    });
+                    const data = await res.json();
+                    if (data && Array.isArray(data.data)) {
+                        const orModels = data.data.map((m: any) => ({
+                            id: `openrouter/${m.id}`,
+                            name: `[OR] ${m.name || m.id}`,
+                            pathOrUrl: 'https://openrouter.ai',
+                            type: 'remote-endpoint',
+                            status: 'loaded',
+                            adapter: 'openrouter',
+                            contextLength: m.context_length || m.contextLength || undefined
+                        }));
+                        models = [...models, ...orModels];
+                        remoteStatus = 'online';
+                    }
+                } catch (e) {
+                    console.error("Failed to fetch OpenRouter models", e);
+                    remoteStatus = 'offline';
+                }
+            }
+            setAvailableModels(models);
+            setConnectionStatus({ local: localStatus, remote: remoteStatus });
+
+            // Restore last model selection from localStorage (only on initial load)
+            if (isInitialLoad) {
+                isInitialLoad = false;
+                setCurrentModel(prevModel => {
+                    // Only set if not already set
+                    if (!prevModel && models.length > 0) {
+                        const lastModel = localStorage.getItem('app_last_model');
+                        if (lastModel && models.some(m => m.id === lastModel)) {
+                            return lastModel;
+                        }
+                    }
+                    return prevModel;
+                });
+            }
+        };
+
+        fetchModels();
+        // Auto-reconnect / Health check interval
+        const interval = setInterval(fetchModels, 30000); // Check every 30s
+
+        setSavedSessions(HistoryService.getAllSessions());
+        const lastId = HistoryService.getLastActiveSessionId();
+
+        if (lastId) {
+            loadSession(lastId);
+        } else {
+            createNewSession();
+        }
+
+        return () => clearInterval(interval);
+    }, [openRouterApiKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Separate effect to handle model switching with proper history dependency
+    useEffect(() => {
+        // Only auto-select/switch model if:
+        // 1. No active generation is happening (no messages loading)
+        // 2. Models are available
+        const hasActiveGeneration = history.some(msg => msg.isLoading);
+        if (hasActiveGeneration) return; // NEVER change model during generation
+
+        const currentModelExists = availableModels.some(m => m.id === currentModel);
+
+        if (!currentModel && availableModels.length > 0) {
+            const lastModel = localStorage.getItem('app_last_model');
+            const preferredModel = lastModel && availableModels.some(m => m.id === lastModel)
+                ? lastModel
+                : (availableModels.find((m: Model) => m.id === 'local-lmstudio')?.id || availableModels[0].id);
+            setCurrentModel(preferredModel);
+            localStorage.setItem('app_last_model', preferredModel);
+        } else if (currentModel && !currentModelExists && availableModels.length > 0) {
+            // Current model no longer exists, fallback to preferred or first available
+            const lastModel = localStorage.getItem('app_last_model');
+            const preferredModel = lastModel && availableModels.some(m => m.id === lastModel)
+                ? lastModel
+                : (availableModels.find((m: Model) => m.id === 'local-lmstudio')?.id || availableModels[0].id);
+            setCurrentModel(preferredModel);
+            localStorage.setItem('app_last_model', preferredModel);
+        } else if (currentModel && currentModelExists) {
+            // Model still exists, persist it
+            localStorage.setItem('app_last_model', currentModel);
+        }
+    }, [availableModels, history, currentModel]); // Only run when these change, and history check prevents switching during generation
+
+    // Separate effect to adjust maxTokens when model changes
+    useEffect(() => {
+        if (!currentModel || availableModels.length === 0) return;
+
+        const model = availableModels.find(m => m.id === currentModel);
+        if (model?.contextLength && maxTokens > model.contextLength) {
+            // Cap maxTokens to model's context length (but allow up to 95% to leave room for input)
+            const maxAllowed = Math.floor(model.contextLength * 0.95);
+            setMaxTokens(prev => Math.min(prev, maxAllowed));
+        }
+    }, [currentModel, availableModels]); // Only adjust when model changes, not when maxTokens changes
+
+    useEffect(() => {
+        if (!sessionId || !currentModel) return;
+
+        const timer = setTimeout(() => {
+            HistoryService.saveSession({
+                id: sessionId,
+                title: history.length > 0 ? (history[0].content.slice(0, 30) + (history[0].content.length > 30 ? '...' : '')) : 'New Chat',
+                lastModified: Date.now(),
+                modelId: currentModel,
+                messages: history,
+                expertMode,
+                thinkingEnabled,
+                systemPrompt,
+                temperature,
+                topP,
+                maxTokens,
+                batchSize
+            });
+            setSavedSessions(HistoryService.getAllSessions());
+        }, 1000); // 1s debounce
+
+        return () => clearTimeout(timer);
+    }, [history, sessionId, currentModel, expertMode, thinkingEnabled]);
+
+    const createNewSession = () => {
+        const newSession = HistoryService.createNewSession(currentModel || 'local-lmstudio');
+        setSessionId(newSession.id);
+        setHistory([]);
+        setSelectedToken(null);
+        HistoryService.setLastActiveSessionId(newSession.id);
+        HistoryService.saveSession(newSession);
+        setSavedSessions(HistoryService.getAllSessions());
+        setShowHistory(false);
+    };
+
+    const loadSession = (id: string) => {
+        const session = HistoryService.getSession(id);
+        if (session) {
+            setSessionId(session.id);
+            setHistory(session.messages);
+            if (session.modelId) {
+                setCurrentModel(session.modelId);
+                localStorage.setItem('app_last_model', session.modelId);
+            }
+            // Restore all session state
+            if (session.expertMode !== undefined) setExpertMode(session.expertMode);
+            if (session.thinkingEnabled !== undefined) setThinkingEnabled(session.thinkingEnabled);
+            if (session.systemPrompt !== undefined) setSystemPrompt(session.systemPrompt);
+            if (session.temperature !== undefined) setTemperature(session.temperature);
+            if (session.topP !== undefined) setTopP(session.topP);
+            if (session.maxTokens !== undefined) setMaxTokens(session.maxTokens);
+            if (session.batchSize !== undefined) setBatchSize(session.batchSize);
+            HistoryService.setLastActiveSessionId(session.id);
+            setSelectedToken(null);
+            setShowHistory(false);
+        }
+    };
+
+    const deleteSession = (id: string) => {
+        HistoryService.deleteSession(id);
+        setSavedSessions(HistoryService.getAllSessions());
+        if (id === sessionId) createNewSession();
+    };
+
+    const executeWebFetch = async () => {
+        if (!urlInput) { setShowUrlInput(false); return; }
+        const url = urlInput;
+        setShowUrlInput(false);
+        setUrlInput('');
+        setIsFetchingWeb(true);
+
+
+        try {
+            const res = await fetch('http://localhost:3000/v1/tools/web-fetch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            const content = `[CONTEXT FROM WEB: ${url}]\n\n${data.content}`;
+            setHistory(prev => [...prev, { role: 'user', content }]);
+            toast.success("Web content added to conversation context.");
+        } catch (err: any) {
+            toast.error(err.message);
+        } finally {
+            setIsFetchingWeb(false);
+        }
+    };
+
+    const deleteMessage = (index: number) => {
+        const newHistory = history.slice(0, index);
+        setHistory(newHistory);
+        setSelectedToken(null);
+    };
+
+    const selectChoice = (messageIndex: number, choiceIndex: number) => {
+        setHistory(prev => {
+            const newHistory = [...prev];
+            const targetMsg = newHistory[messageIndex];
+            if (!targetMsg || !targetMsg.choices || !targetMsg.choices[choiceIndex]) return prev;
+            newHistory[messageIndex] = {
+                ...targetMsg,
+                selectedChoiceIndex: choiceIndex,
+                content: targetMsg.choices[choiceIndex].message.content
+            };
+            return newHistory;
+        });
+        setSelectedToken(null);
+    };
+
+
+
+    const updateMessageContent = (index: number, content: string, isLoading: boolean, logprobs?: TokenLogprob[], generationTime?: number, toolCalls?: ToolCall[]) => {
+        setHistory(prev => {
+            const newHistory = [...prev];
+            if (!newHistory[index]) return prev;
+
+            const existing = newHistory[index];
+            newHistory[index] = {
+                ...existing,
+                content,
+                isLoading,
+                generationTime: generationTime !== undefined ? generationTime : existing.generationTime,
+                tool_calls: toolCalls || existing.tool_calls,
+                choices: logprobs ? [{
+                    message: { role: 'assistant', content },
+                    index: 0,
+                    logprobs: { content: logprobs }
+                }] : existing.choices
+            };
+            return newHistory;
+        });
+    };
+
+    const updateMessageToken = (messageIndex: number, tokenIndex: number, newToken: string) => {
+        setHistory(prev => {
+            const newHistory = [...prev];
+            const msg = newHistory[messageIndex];
+            if (!msg || !msg.choices?.[0]?.logprobs?.content) return prev;
+
+            const newLogprobs = [...msg.choices[0].logprobs.content];
+            newLogprobs[tokenIndex] = { ...newLogprobs[tokenIndex], token: newToken };
+
+            const newContent = newLogprobs.map(lp => lp.token).join('');
+
+            newHistory[messageIndex] = {
+                ...msg,
+                content: newContent,
+                choices: [{
+                    ...msg.choices[0],
+                    message: { ...msg.choices[0].message, content: newContent },
+                    logprobs: { content: newLogprobs }
+                }]
+            };
+
+            // Also update selected token if it matches
+            if (selectedToken && selectedToken.messageIndex === messageIndex && selectedToken.tokenIndex === tokenIndex) {
+                setSelectedToken({ ...selectedToken, logprob: newLogprobs[tokenIndex] });
+            }
+
+            return newHistory;
+        });
+    };
+
+
+    const streamResponse = async (
+        modelId: string,
+        messages: Message[],
+        targetIndex: number,
+        signal: AbortSignal,
+        labelPrefix: string = ""
+    ) => {
+        const startTime = Date.now(); // Track generation start time
+        const logId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+        try {
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            let url = 'http://localhost:3000/v1/chat/completions';
+            let actualModelId = modelId;
+
+            if (modelId.startsWith('openrouter/') && openRouterApiKey) {
+                url = 'https://openrouter.ai/api/v1/chat/completions';
+                actualModelId = modelId.replace('openrouter/', '');
+                headers['Authorization'] = `Bearer ${openRouterApiKey}`;
+                headers['HTTP-Referer'] = 'http://localhost:5173';
+                headers['X-Title'] = 'WinInferencer';
+            }
+
+            const requestBody = {
+                model: actualModelId,
+                messages,
+                temperature,
+                top_p: topP,
+                max_tokens: maxTokens,
+                n: batchSize,
+                stream: streamingEnabled,
+                response_format: responseFormat === 'json_object' ? { type: 'json_object' } : undefined
+            };
+
+            // OpenAI/compatible APIs require 'JSON' in message if json_object is set
+            if (responseFormat === 'json_object') {
+                const sysMsg = requestBody.messages.find(m => m.role === 'system');
+                if (sysMsg && !sysMsg.content.toLowerCase().includes('json')) {
+                    sysMsg.content += " You are a helpful assistant designed to output JSON.";
+                }
+            }
+
+            // Add Tools
+            const activeTools = AVAILABLE_TOOLS.filter(t => enabledTools.has(t.name)).map(t => ({
+                type: 'function',
+                function: {
+                    name: t.name,
+                    description: t.description,
+                    parameters: t.parameters
+                }
+            }));
+
+            if (activeTools.length > 0) {
+                // @ts-ignore
+                requestBody.tools = activeTools;
+                // @ts-ignore
+                requestBody.tool_choice = "auto";
+            }
+
+            // Log request
+            if (onApiLog) {
+                onApiLog({
+                    id: logId,
+                    timestamp: Date.now(),
+                    type: 'request',
+                    model: actualModelId,
+                    request: requestBody
+                });
+            }
+
+            const res = await fetch(url, {
+                method: 'POST',
+                headers,
+                signal,
+                body: JSON.stringify(requestBody)
+            });
+
+            // Report TTFB Latency
+            performanceService.reportLatency(Date.now() - startTime);
+
+            if (!res.ok) throw new Error(`Server error: ${res.status}`);
+
+            let fullContent = labelPrefix ? `**${labelPrefix}**\n\n` : (prefill || '');
+
+            if (streamingEnabled) {
+                // Streaming mode
+                if (!res.body) throw new Error("No response body");
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let done = false;
+                let buffer = '';
+                let streamBuffer = '';
+                let lastUpdate = Date.now();
+
+                let toolCallsBuffer: Record<number, any> = {};
+
+                while (!done) {
+                    const { value, done: isDone } = await reader.read();
+                    done = isDone;
+                    if (value) {
+                        const chunk = decoder.decode(value, { stream: true });
+                        streamBuffer += chunk;
+                        const lines = streamBuffer.split('\n');
+                        streamBuffer = isDone ? '' : lines.pop() || '';
+
+                        for (const line of lines) {
+                            const trimmed = line.trim();
+                            if (trimmed.startsWith('data:')) {
+                                const dataStr = trimmed.replace(/^data:\s*/, '').trim();
+                                if (!dataStr || dataStr === '[DONE]') continue;
+                                try {
+                                    const parsed = JSON.parse(dataStr);
+                                    const delta = parsed.choices?.[0]?.delta;
+
+                                    if (delta) {
+                                        if (delta.content) buffer += delta.content;
+                                        if (delta.tool_calls) {
+                                            for (const tc of delta.tool_calls) {
+                                                const idx = tc.index;
+                                                if (!toolCallsBuffer[idx]) {
+                                                    toolCallsBuffer[idx] = {
+                                                        id: tc.id || '',
+                                                        type: 'function',
+                                                        function: { name: tc.function?.name || '', arguments: '' }
+                                                    };
+                                                }
+                                                if (tc.id) toolCallsBuffer[idx].id = tc.id;
+                                                if (tc.function?.name) toolCallsBuffer[idx].function.name += tc.function.name;
+                                                if (tc.function?.arguments) toolCallsBuffer[idx].function.arguments += tc.function.arguments;
+                                            }
+                                        }
+                                    }
+                                } catch (e) { }
+                            }
+                        }
+                    }
+
+                    const now = Date.now();
+                    // Optimize: Update more frequently for better UX, but batch small updates
+                    const toolCallsKeys = Object.keys(toolCallsBuffer);
+                    const shouldUpdate = (
+                        done ||
+                        buffer.length > 50 ||
+                        toolCallsKeys.length > 0 && (now - lastUpdate > 100) ||
+                        (now - lastUpdate > 100 && buffer.length > 0)
+                    );
+                    if (shouldUpdate) {
+                        fullContent += buffer;
+                        buffer = '';
+                        lastUpdate = now;
+                        updateMessageContent(targetIndex, fullContent, !done, undefined, undefined, Object.values(toolCallsBuffer));
+                    }
+                }
+            } else {
+                // Non-streaming mode - get full response at once
+                const data = await res.json();
+                const content = data.choices?.[0]?.message?.content || '';
+                fullContent += content;
+                updateMessageContent(targetIndex, fullContent, false);
+            }
+
+            // Final logprob simulation
+            const processedLogprobs = simulateLogprobs(fullContent);
+            const totalTime = Date.now() - startTime;
+            updateMessageContent(targetIndex, fullContent, false, processedLogprobs, totalTime);
+
+            // Track analytics - estimate token count (rough: ~4 chars per token)
+            const estimatedTokens = Math.ceil(fullContent.length / 4);
+            analyticsService.trackMessage(sessionId, modelId, estimatedTokens);
+
+            // Trigger webhooks for conversation_complete event
+            // Get current session for webhook payload
+            const currentSession = HistoryService.getSession(sessionId);
+            if (currentSession) {
+                webhookService.triggerWebhooks('conversation_complete', {
+                    sessionId,
+                    sessionTitle: currentSession.title,
+                    modelId: modelId,
+                    messageCount: history.length + 1, // +1 for the message we just added
+                    messages: currentSession.messages,
+                    metadata: {
+                        temperature: currentSession.temperature,
+                        topP: currentSession.topP,
+                        maxTokens: currentSession.maxTokens,
+                    },
+                });
+            }
+
+            // Log successful response
+            if (onApiLog) {
+                onApiLog({
+                    id: logId,
+                    timestamp: Date.now(),
+                    type: 'response',
+                    model: actualModelId,
+                    response: {
+                        content: fullContent,
+                        finish_reason: 'stop'
+                    },
+                    duration: totalTime
+                });
+            }
+
+        } catch (err: any) {
+            if (err.name === 'AbortError') return;
+            let errorMsg = err.message;
+
+            if (err.message.includes('Failed to fetch')) {
+                if (modelId.startsWith('openrouter/')) {
+                    errorMsg = "Connection error. Check your internet or OpenRouter API key.";
+                } else {
+                    errorMsg = "Could not connect to LM Studio. Make sure it's running on port 3000.";
+                }
+            } else if (err.message.includes('429')) {
+                errorMsg = "Rate limit exceeded (429). Please wait a moment.";
+            } else if (err.message.includes('401')) {
+                errorMsg = "Unauthorized (401). Check your API key.";
+            } else if (err.message.includes('404')) {
+                errorMsg = `Model not found (404): ${modelId}`;
+            }
+
+            // Log error
+            if (onApiLog) {
+                onApiLog({
+                    id: logId,
+                    timestamp: Date.now(),
+                    type: 'error',
+                    model: modelId,
+                    error: errorMsg,
+                    duration: Date.now() - startTime
+                });
+            }
+
+            updateMessageContent(targetIndex, `Error: ${errorMsg}`, false);
+            toast.error(errorMsg);
+        }
+    };
+
+    const stopGeneration = () => {
+        abortControllers.forEach(c => c.abort());
+        setAbortControllers([]);
+        setHistory(prev => prev.map(msg => msg.isLoading ? { ...msg, isLoading: false, content: msg.content + " [Stopped]" } : msg));
+        toast.info("Generation stopped.");
+    };
+
+    const [attachments, setAttachments] = useState<{ id: string, name: string, content: string }[]>([]);
+    const [imageAttachments, setImageAttachments] = useState<{ id: string, name: string, mimeType: string, base64: string, thumbnailUrl: string }[]>([]);
+
+    const addAttachment = (file: { name: string, content: string }) => {
+        setAttachments(prev => [...prev, { id: crypto.randomUUID(), ...file }]);
+    };
+
+    const removeAttachment = (id: string) => {
+        setAttachments(prev => prev.filter(a => a.id !== id));
+    };
+
+    const addImageAttachment = (file: { name: string, mimeType: string, base64: string, thumbnailUrl: string }) => {
+        setImageAttachments(prev => [...prev, { id: crypto.randomUUID(), ...file }]);
+    };
+
+    const removeImageAttachment = (id: string) => {
+        setImageAttachments(prev => prev.filter(a => a.id !== id));
+    };
+
+    const sendMessage = async () => {
+        if (!input.trim() && attachments.length === 0 && imageAttachments.length === 0) return;
+
+        let finalInput = input;
+
+        // Auto-Routing Logic
+        let modelToUse = currentModel;
+        if (autoRouting && availableModels.length > 0 && !battleMode) {
+            const intent = detectIntent(finalInput);
+            const best = findBestModelForIntent(intent, availableModels);
+            if (best && best !== currentModel) {
+                modelToUse = best;
+                // Don't change persistent model, just route this request? 
+                // Or change it? Changing it feels better for continuity.
+                setCurrentModel(best);
+                toast.info(`Auto-routed to ${best} (${intent})`);
+            }
+        }
+
+        // Append text attachments to the user message transparently
+        if (attachments.length > 0) {
+            const attachmentText = attachments.map(a => `\n\n--- FILE: ${a.name} ---\n${a.content}\n--- END FILE ---`).join('');
+            finalInput += attachmentText;
+        }
+
+        // Append project context if provided (will be passed from Chat component)
+        // This is handled in Chat.tsx by modifying input before sendMessage
+
+        let finalSystemPrompt = systemPrompt;
+        if (thinkingEnabled) {
+            finalSystemPrompt += "\n\nIMPORTANT: You must engage in a deep thought process before answering. Enclose your thought process inside <thinking>...</thinking> XML tags. In the thinking block, break down the problem step-by-step, consider multiple angles, and critique your own reasoning. Then provide your final answer outside the tags.";
+        }
+
+        // Build the user message content (may be multimodal with images)
+        let userMessageContent: any = finalInput;
+
+        // If there are images, use the OpenAI vision format
+        if (imageAttachments.length > 0) {
+            const contentParts: any[] = [];
+
+            // Add text content first if present
+            if (finalInput.trim()) {
+                contentParts.push({ type: 'text', text: finalInput });
+            }
+
+            // Add image content parts
+            for (const img of imageAttachments) {
+                contentParts.push({
+                    type: 'image_url',
+                    image_url: {
+                        url: `data:${img.mimeType};base64,${img.base64}`,
+                        detail: 'auto' // Can be 'low', 'high', or 'auto'
+                    }
+                });
+            }
+
+            userMessageContent = contentParts;
+        }
+
+        const baseMessages: Message[] = [
+            { role: 'system', content: finalSystemPrompt },
+            ...history.map(m => ({ role: m.role, content: m.content })),
+            { role: 'user', content: userMessageContent }
+        ];
+
+        // UI display content
+        const imageCountText = imageAttachments.length > 0 ? `[${imageAttachments.length} image(s)]` : '';
+        const fileCountText = attachments.length > 0 ? `[${attachments.length} file(s)]` : '';
+        const uiContent = input || `${imageCountText} ${fileCountText}`.trim() || '[Empty message]';
+
+        // Store image thumbnails in the user message for display
+        const userMsg: ChatMessage = {
+            role: 'user',
+            content: uiContent,
+            images: imageAttachments.map(img => ({
+                id: img.id,
+                name: img.name,
+                mimeType: img.mimeType as any,
+                base64: img.base64,
+                thumbnailUrl: img.thumbnailUrl
+            }))
+        };
+
+        let newHistory = [...history, userMsg];
+        let controllers: AbortController[] = [];
+
+        if (battleMode && secondaryModel) {
+            // Battle Mode: 2 Assistant Messages
+            const indexA = newHistory.length;
+            const indexB = newHistory.length + 1;
+
+            const msgA: ChatMessage = { role: 'assistant', content: '', isLoading: true };
+            const msgB: ChatMessage = { role: 'assistant', content: '', isLoading: true };
+
+            newHistory.push(msgA, msgB);
+            setHistory(newHistory);
+
+            setInput('');
+            setAttachments([]);
+            setImageAttachments([]);
+            setPrefill(null);
+
+            const ctrlA = new AbortController();
+            const ctrlB = new AbortController();
+            controllers = [ctrlA, ctrlB];
+            setAbortControllers([ctrlA, ctrlB]);
+
+            // Model Name Lookup
+            const nameA = availableModels.find(m => m.id === modelToUse)?.name || modelToUse;
+            const nameB = availableModels.find(m => m.id === secondaryModel)?.name || secondaryModel;
+
+            // Trigger Parallel Streams
+            streamResponse(modelToUse, baseMessages, indexA, ctrlA.signal, `Model A: ${nameA}`);
+            streamResponse(secondaryModel, baseMessages, indexB, ctrlB.signal, `Model B: ${nameB}`);
+
+        } else {
+            // Normal Mode
+            const targetIndex = newHistory.length;
+            const loadingItem: ChatMessage = { role: 'assistant', content: prefill || '', isLoading: true };
+            newHistory.push(loadingItem);
+            setHistory(newHistory);
+
+            setInput('');
+            setAttachments([]);
+            setImageAttachments([]);
+            setPrefill(null);
+
+            const ctrl = new AbortController();
+            controllers = [ctrl];
+            setAbortControllers([ctrl]);
+
+            let messagesToSend = [...baseMessages];
+            if (prefill) messagesToSend.push({ role: 'assistant', content: prefill });
+
+            streamResponse(modelToUse, messagesToSend, targetIndex, ctrl.signal);
+        }
+    };
+
+    return {
+        input, setInput,
+        prefill, setPrefill,
+        attachments, addAttachment, removeAttachment,
+        imageAttachments, addImageAttachment, removeImageAttachment, // Vision/Image support
+        thinkingEnabled, setThinkingEnabled,
+        battleMode, setBattleMode,
+        secondaryModel, setSecondaryModel,
+        expertMode, setExpertMode,
+        sessionId,
+        history, setHistory,
+        selectedToken, setSelectedToken,
+        availableModels,
+        currentModel, setCurrentModel,
+        systemPrompt, setSystemPrompt,
+        temperature, setTemperature,
+        topP, setTopP,
+        maxTokens, setMaxTokens,
+        batchSize, setBatchSize,
+        savedSessions,
+        isFetchingWeb,
+        showUrlInput, setShowUrlInput,
+        urlInput, setUrlInput,
+        showExpertMenu, setShowExpertMenu,
+        showAdvanced, setShowAdvanced,
+        showHistory, setShowHistory,
+
+        handleExpertSelect,
+        createNewSession,
+        loadSession,
+        deleteSession,
+        renameSession: (id: string, newTitle: string) => {
+            HistoryService.renameSession(id, newTitle);
+            setSavedSessions(HistoryService.getAllSessions());
+        },
+        togglePinSession: (id: string) => {
+            HistoryService.togglePinSession(id);
+            setSavedSessions(HistoryService.getAllSessions());
+        },
+        executeWebFetch,
+        deleteMessage,
+        selectChoice,
+        sendMessage,
+        stopGeneration,
+        connectionStatus,
+        autoRouting, setAutoRouting,
+        enabledTools, setEnabledTools,
+        responseFormat, setResponseFormat,
+        updateMessageToken
+    };
+};

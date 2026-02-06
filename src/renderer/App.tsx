@@ -1,0 +1,158 @@
+import React, { useState, Suspense } from 'react';
+import { Toaster } from 'sonner';
+import Chat from './pages/Chat';
+import StatusBar from './components/StatusBar';
+import TitleBar from './components/TitleBar';
+import CommandPalette from './components/CommandPalette';
+import ShortcutEditor from './components/ShortcutEditor';
+import { MessageSquare, FolderOpen, Settings as SettingsIcon, Hexagon, Zap, LayoutGrid, Loader2 } from 'lucide-react';
+
+// Lazy load heavy pages
+const Models = React.lazy(() => import('./pages/Models'));
+const Settings = React.lazy(() => import('./pages/Settings'));
+import { motion, AnimatePresence } from 'framer-motion';
+import { PerformanceMonitor } from './components/PerformanceMonitor'; // Import PerformanceMonitor
+import { useCommandPalette } from './hooks/useCommandPalette';
+import { useShortcutEditor } from './hooks/useKeyboardShortcuts';
+import { useCommandRegistry } from './hooks/useCommandRegistry';
+import { FeatureDiscoveryManager } from './components/FeatureDiscovery';
+import { ContextualHelpManager } from './components/ContextualHelpTooltip';
+
+const App: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'chat' | 'models' | 'settings'>('chat');
+  const { isOpen, close } = useCommandPalette();
+  const { isOpen: isShortcutEditorOpen, toggle: toggleShortcutEditor, close: closeShortcutEditor } = useShortcutEditor();
+
+  const [showPerformance, setShowPerformance] = useState(false);
+
+  // Register commands
+  useCommandRegistry({
+    setActiveTab,
+    toggleShortcuts: toggleShortcutEditor,
+    togglePerformanceMonitor: () => setShowPerformance(prev => !prev),
+  });
+
+  const NavItem = ({ id, icon: Icon, label }: { id: typeof activeTab, icon: any, label: string }) => (
+    <button
+      onClick={() => setActiveTab(id)}
+      className={`group relative flex items-center justify-center w-12 h-12 mb-3 rounded-2xl transition-all duration-300 ${activeTab === id
+        ? 'bg-primary text-white shadow-[0_0_20px_rgba(59,130,246,0.5)]'
+        : 'text-slate-500 hover:bg-slate-900 hover:text-slate-300'
+        }`}
+      title={label}
+    >
+      <Icon size={24} strokeWidth={activeTab === id ? 2.5 : 2} />
+      {activeTab === id && (
+        <motion.div
+          layoutId="active-pill"
+          className="absolute -left-1 w-1 h-8 bg-white/50 rounded-full"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3 }}
+        />
+      )}
+    </button>
+  );
+
+  return (
+    <div className="flex flex-col h-screen font-sans bg-background text-text overflow-hidden selection:bg-primary/30">
+
+      {/* Custom Window Title Bar */}
+      <TitleBar />
+
+      <div className="flex flex-1 overflow-hidden relative">
+
+        {/* ULTRA-SLIM SIDEBAR (Inferencer Style) */}
+        <div className="w-[72px] bg-background border-r border-border/50 flex flex-col items-center py-4 z-50">
+          <div className="mb-6 p-2 bg-gradient-to-br from-primary to-blue-600 rounded-xl shadow-lg shadow-blue-900/20">
+            <Hexagon size={28} className="text-white fill-white/20" strokeWidth={2.5} />
+          </div>
+
+          <div className="flex-1 w-full px-2 flex flex-col items-center">
+            <NavItem id="chat" icon={MessageSquare} label="Chat" />
+            <NavItem id="models" icon={LayoutGrid} label="Models" />
+            <div className="h-px w-8 bg-slate-800 my-3 rounded-full" />
+            <button className="w-10 h-10 rounded-xl bg-slate-900/50 flex items-center justify-center text-slate-500 hover:text-amber-400 transition-colors mb-3">
+              <Zap size={20} />
+            </button>
+          </div>
+
+          <div className="mt-auto mb-4 w-full px-2 flex flex-col items-center">
+            <NavItem id="settings" icon={SettingsIcon} label="Settings" />
+            <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 mt-2 hover:border-primary transition-colors cursor-pointer" title="User Profile"></div>
+          </div>
+        </div>
+
+        {/* MAIN AREA */}
+        <div className="flex-1 flex flex-col min-w-0 bg-background relative">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-900/0 to-transparent pointer-events-none" />
+
+          <main className="flex-1 overflow-hidden relative z-10">
+            <Suspense fallback={<div className="flex items-center justify-center h-full"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
+              <AnimatePresence mode="wait">
+                {activeTab === 'chat' && (
+                  <motion.div
+                    key="chat"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ duration: 0.2 }}
+                    className="h-full"
+                  >
+                    <Chat />
+                  </motion.div>
+                )}
+                {activeTab === 'models' && (
+                  <motion.div
+                    key="models"
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 1.05 }}
+                    transition={{ duration: 0.2 }}
+                    className="h-full"
+                  >
+                    <Models />
+                  </motion.div>
+                )}
+                {activeTab === 'settings' && (
+                  <motion.div
+                    key="settings"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    transition={{ duration: 0.2 }}
+                    className="h-full"
+                  >
+                    <Settings />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </Suspense>
+          </main>
+        </div>
+      </div>
+
+      {/* Feature Discovery */}
+      <FeatureDiscoveryManager />
+
+      {/* Contextual Help */}
+      <ContextualHelpManager />
+
+      {/* FOOTER STATS BAR */}
+      <StatusBar />
+
+      {/* PERFORMANCE MONITOR */}
+      {showPerformance && <PerformanceMonitor />}
+
+      {/* COMMAND PALETTE */}
+      <CommandPalette isOpen={isOpen} onClose={close} />
+
+      {/* SHORTCUT EDITOR */}
+      <ShortcutEditor isOpen={isShortcutEditorOpen} onClose={closeShortcutEditor} />
+
+      <Toaster richColors position="top-center" theme="dark" />
+    </div>
+  );
+};
+
+export default App;

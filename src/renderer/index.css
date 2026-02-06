@@ -1,0 +1,271 @@
+@import "@fontsource/inter/300.css";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Theme CSS Variables - Will be set by ThemeService */
+    --theme-primary: #3b82f6;
+    --theme-secondary: #60a5fa;
+    --theme-background: #020617;
+    --theme-surface: #0f172a;
+    --theme-text: #f8fafc;
+    --theme-text-secondary: #cbd5e1;
+    --theme-accent: #3b82f6;
+    --theme-border: #1e293b;
+    --theme-code-bg: #1e1e1e;
+    --theme-code-text: #d4d4d4;
+    
+    /* Legacy variables for backward compatibility */
+    --primary-color: var(--theme-primary);
+    --secondary-color: var(--theme-secondary);
+    --background-color: var(--theme-background);
+    --text-color: var(--theme-text);
+    --accent-color: var(--theme-accent);
+  }
+
+  body {
+    @apply font-sans antialiased;
+    background-color: var(--theme-background) !important;
+    color: var(--theme-text) !important;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-bold tracking-tight;
+    color: var(--theme-text) !important;
+  }
+}
+
+/* Override common hardcoded colors with theme variables */
+/* Using higher specificity to override Tailwind defaults */
+@layer utilities {
+  /* Background overrides - apply to all elements */
+  * {
+    --tw-bg-opacity: 1;
+  }
+  
+  .bg-slate-900,
+  .bg-slate-950,
+  .bg-\[#020617\] {
+    background-color: var(--theme-background) !important;
+  }
+  
+  .bg-slate-800,
+  .bg-slate-800\/50,
+  .bg-slate-800\/30 {
+    background-color: var(--theme-surface) !important;
+  }
+
+  /* Text overrides */
+  .text-white,
+  .text-slate-100,
+  .text-slate-200,
+  .text-slate-300 {
+    color: var(--theme-text) !important;
+  }
+
+  .text-slate-400,
+  .text-slate-500,
+  .text-slate-600 {
+    color: var(--theme-text-secondary) !important;
+  }
+
+  /* Border overrides */
+  .border-slate-700,
+  .border-slate-800,
+  .border-slate-700\/50,
+  .border-slate-800\/50 {
+    border-color: var(--theme-border) !important;
+  }
+}
+
+/* Force theme application on root and body */
+html,
+body {
+  background-color: var(--theme-background) !important;
+  color: var(--theme-text) !important;
+}
+
+/* Custom Scrollbar */
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-slate-900/50;
+    border-radius: 4px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-slate-600 rounded-full;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-500;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:active {
+    @apply bg-slate-400;
+  }
+
+  /* Text wrapping - Force proper wrapping */
+  .overflow-wrap-anywhere {
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+  }
+
+  .word-break-break-word {
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-cta text-white px-6 py-3 rounded-lg font-semibold transition-all duration-200 cursor-pointer hover:opacity-90 hover:-translate-y-px shadow-md;
+  }
+
+  .btn-secondary {
+    @apply bg-transparent text-primary border-2 border-primary px-6 py-3 rounded-lg font-semibold transition-all duration-200 cursor-pointer hover:shadow-md hover:-translate-y-px;
+  }
+
+  .card {
+    @apply bg-background border border-gray-800 rounded-xl p-6 shadow-md transition-all duration-200 cursor-pointer hover:shadow-lg hover:-translate-y-0.5;
+  }
+
+  .input {
+    @apply px-4 py-3 border rounded-lg text-base transition-colors duration-200 focus:outline-none;
+    border-color: var(--theme-border);
+    background-color: var(--theme-surface);
+    color: var(--theme-text);
+  }
+  
+  .input:focus {
+    border-color: var(--theme-primary);
+    box-shadow: 0 0 0 2px var(--theme-primary);
+    box-shadow-opacity: 0.2;
+  }
+  
+  .input::placeholder {
+    color: var(--theme-text-secondary);
+  }
+}
+
+/* Responsive Design */
+@media (max-width: 640px) {
+  .is-mobile {
+    --sidebar-width: 0;
+    --inspector-width: 0;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 1024px) {
+  .is-tablet {
+    --sidebar-width: 240px;
+    --inspector-width: 0;
+  }
+}
+
+@media (min-width: 1025px) {
+  .is-desktop {
+    --sidebar-width: 256px;
+    --inspector-width: 320px;
+  }
+}
+
+@media (min-width: 1920px) {
+  .is-wide {
+    --sidebar-width: 320px;
+    --inspector-width: 400px;
+  }
+}
+
+/* Accessibility */
+.high-contrast {
+  --theme-background: #000000;
+  --theme-surface: #1a1a1a;
+  --theme-text: #ffffff;
+  --theme-text-secondary: #ffffff;
+  --theme-border: #ffffff;
+}
+
+[data-font-size="small"] {
+  font-size: 0.875rem;
+}
+
+[data-font-size="medium"] {
+  font-size: 1rem;
+}
+
+[data-font-size="large"] {
+  font-size: 1.125rem;
+}
+
+[data-font-size="xlarge"] {
+  font-size: 1.25rem;
+}
+
+[data-color-blind="protanopia"] {
+  filter: url(#protanopia);
+}
+
+[data-color-blind="deuteranopia"] {
+  filter: url(#deuteranopia);
+}
+
+[data-color-blind="tritanopia"] {
+  filter: url(#tritanopia);
+}
+
+/* Screen Reader Only */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Focus Visible */
+.focus-visible:focus-visible,
+*:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+[data-motion-reduce="1"] *,
+[data-motion-reduce="1"] *::before,
+[data-motion-reduce="1"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
