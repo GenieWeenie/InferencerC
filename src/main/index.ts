@@ -169,7 +169,15 @@ function loadWindowState(): WindowState {
       return validatedState;
     }
   } catch (e) {
-    console.error('Failed to load window state', e);
+    console.error('Failed to load window state, deleting corrupted file:', e);
+    // Delete corrupted file to prevent repeated errors
+    try {
+      if (fs.existsSync(WINDOW_STATE_PATH)) {
+        fs.unlinkSync(WINDOW_STATE_PATH);
+      }
+    } catch (deleteError) {
+      console.error('Failed to delete corrupted window state file:', deleteError);
+    }
   }
   return { width: 1200, height: 800 };
 }
