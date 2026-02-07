@@ -242,6 +242,15 @@ const Chat: React.FC = () => {
         }
     }, []);
 
+    // Check for crash recovery state on mount
+    React.useEffect(() => {
+        const savedRecoveryState = crashRecoveryService.getRecoveryState();
+        if (savedRecoveryState) {
+            setRecoveryState(savedRecoveryState);
+            setShowRecoveryDialog(true);
+        }
+    }, []);
+
     // Recovery dialog handlers
     const handleRestoreSession = () => {
         if (!recoveryState) return;
