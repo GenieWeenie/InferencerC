@@ -9,8 +9,11 @@ const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const index_1 = require("../server/index");
 const chokidar_1 = __importDefault(require("chokidar"));
+const mcp_client_1 = require("./mcp-client");
 // Start the local inference server
 (0, index_1.startServer)();
+// Initialize MCP Client Manager
+const mcpClientManager = new mcp_client_1.MCPClientManager();
 // Configure auto-updater
 if (electron_1.app.isPackaged) {
     electron_updater_1.autoUpdater.checkForUpdatesAndNotify();
@@ -246,6 +249,48 @@ function createWindow() {
             return {
                 success: false,
                 error: error.message || 'Git commit failed',
+            };
+        }
+    });
+    // MCP Connect Handler
+    electron_1.ipcMain.handle('mcp-connect', async (event, server) => {
+        try {
+            const result = await mcpClientManager.connect(server);
+            return result;
+        }
+        catch (error) {
+            return {
+                success: false,
+                error: error.message || 'Failed to connect to MCP server',
+            };
+        }
+    });
+    // MCP Disconnect Handler
+    electron_1.ipcMain.handle('mcp-disconnect', async (event, serverId) => {
+        try {
+            const result = await mcpClientManager.disconnect(serverId);
+            return result;
+        }
+        catch (error) {
+            return {
+                success: false,
+                error: error.message || 'Failed to disconnect from MCP server',
+            };
+        }
+    });
+    // MCP Execute Tool Handler
+    electron_1.ipcMain.handle('mcp-execute-tool', async (event, params) => {
+        try {
+            const result = await mcpClientManager.callTool(params.serverId, params.toolName, params.arguments);
+            return {
+                success: true,
+                result,
+            };
+        }
+        catch (error) {
+            return {
+                success: false,
+                error: error.message || 'Failed to execute tool',
             };
         }
     });

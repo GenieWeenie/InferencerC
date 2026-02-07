@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeAllListeners('folder-changed');
   },
 
+  // MCP APIs
+  mcpConnect: (server: any) => ipcRenderer.invoke('mcp-connect', server),
+  mcpDisconnect: (serverId: string) => ipcRenderer.invoke('mcp-disconnect', serverId),
+  mcpExecuteTool: (params: any) => ipcRenderer.invoke('mcp-execute-tool', params),
+
   // Auto-updater
   getAppVersion: () => ipcRenderer.invoke('app-version'),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),

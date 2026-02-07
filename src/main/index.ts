@@ -4,9 +4,14 @@ import path from 'path';
 import fs from 'fs';
 import { startServer } from '../server/index';
 import chokidar from 'chokidar';
+import { MCPClientManager } from './mcp-client';
+import { MCPServerConfig } from './mcp-types';
 
 // Start the local inference server
 startServer();
+
+// Initialize MCP Client Manager
+const mcpClientManager = new MCPClientManager();
 
 // Configure auto-updater
 if (app.isPackaged) {
@@ -268,6 +273,48 @@ function createWindow() {
       return {
         success: false,
         error: error.message || 'Git commit failed',
+      };
+    }
+  });
+
+  // MCP Connect Handler
+  ipcMain.handle('mcp-connect', async (event, server: MCPServerConfig) => {
+    try {
+      const result = await mcpClientManager.connect(server);
+      return result;
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to connect to MCP server',
+      };
+    }
+  });
+
+  // MCP Disconnect Handler
+  ipcMain.handle('mcp-disconnect', async (event, serverId: string) => {
+    try {
+      const result = await mcpClientManager.disconnect(serverId);
+      return result;
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to disconnect from MCP server',
+      };
+    }
+  });
+
+  // MCP Execute Tool Handler
+  ipcMain.handle('mcp-execute-tool', async (event, params: { serverId: string; toolName: string; arguments?: Record<string, any> }) => {
+    try {
+      const result = await mcpClientManager.callTool(params.serverId, params.toolName, params.arguments);
+      return {
+        success: true,
+        result,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to execute tool',
       };
     }
   });
