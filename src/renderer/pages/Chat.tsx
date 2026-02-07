@@ -13,7 +13,7 @@ import ComparisonGrid from '../components/ComparisonGrid';
 import BranchNavigator from '../components/BranchNavigator';
 import ConversationTreeView from '../components/ConversationTreeView';
 import ExportDialog from '../components/ExportDialog';
-import GlobalSearchDialog from '../components/GlobalSearchDialog';
+import GlobalSearchDialog, { ExpandMetadata } from '../components/GlobalSearchDialog';
 import ConversationSummaryPanel from '../components/ConversationSummaryPanel';
 import TemplateLibraryDialog from '../components/TemplateLibraryDialog';
 import CollapsedSectionsNav from '../components/CollapsedSectionsNav';
@@ -2595,12 +2595,26 @@ const Chat: React.FC = () => {
             <GlobalSearchDialog
                 isOpen={showGlobalSearch}
                 onClose={() => setShowGlobalSearch(false)}
-                onNavigateToMessage={(targetSessionId, messageIndex) => {
+                onNavigateToMessage={(targetSessionId, messageIndex, expandMetadata) => {
                     // If different session, load it first
                     if (targetSessionId !== sessionId) {
                         loadSession(targetSessionId);
                     }
-                    // Scroll to the message after a short delay to allow session loading
+
+                    // Expand collapsed sections if needed
+                    if (expandMetadata) {
+                        // Expand the message section if it's collapsed
+                        if (expandMetadata.expandMessage) {
+                            collapseHook.setCollapsed('message', false);
+                        }
+
+                        // Expand the specific code block if it's collapsed
+                        if (expandMetadata.expandCodeBlock) {
+                            collapseHook.setCollapsed(expandMetadata.expandCodeBlock, false);
+                        }
+                    }
+
+                    // Scroll to the message after a short delay to allow session loading and expansion
                     setTimeout(() => {
                         if (virtuosoRef.current && messageIndex >= 0) {
                             virtuosoRef.current.scrollToIndex({
@@ -2608,7 +2622,17 @@ const Chat: React.FC = () => {
                                 align: 'center',
                                 behavior: 'smooth'
                             });
-                            toast.success(`Jumped to message #${messageIndex + 1}`);
+
+                            // Show success message with expansion info
+                            if (expandMetadata) {
+                                if (expandMetadata.expandMessage) {
+                                    toast.success(`Jumped to message #${messageIndex + 1} and expanded collapsed section`);
+                                } else if (expandMetadata.expandCodeBlock) {
+                                    toast.success(`Jumped to message #${messageIndex + 1} and expanded code block`);
+                                }
+                            } else {
+                                toast.success(`Jumped to message #${messageIndex + 1}`);
+                            }
                         }
                     }, 300);
                 }}
