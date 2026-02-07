@@ -244,6 +244,47 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         return () => clearTimeout(timer);
     }, [history, sessionId, currentModel, expertMode, thinkingEnabled]);
 
+    // Auto-save recovery state every 30 seconds
+    useEffect(() => {
+        if (!sessionId) return;
+
+        const saveRecoveryState = () => {
+            try {
+                const recoveryState = {
+                    timestamp: Date.now(),
+                    sessionId,
+                    history,
+                    currentModel,
+                    systemPrompt,
+                    temperature,
+                    topP,
+                    maxTokens,
+                    batchSize,
+                    expertMode,
+                    thinkingEnabled,
+                    battleMode,
+                    secondaryModel,
+                    autoRouting,
+                    responseFormat,
+                    input,
+                    prefill,
+                    enabledTools: Array.from(enabledTools)
+                };
+                localStorage.setItem('app_recovery_state', JSON.stringify(recoveryState));
+            } catch (e) {
+                console.error('Failed to save recovery state', e);
+            }
+        };
+
+        // Save immediately on mount
+        saveRecoveryState();
+
+        // Then save every 30 seconds
+        const interval = setInterval(saveRecoveryState, 30000);
+
+        return () => clearInterval(interval);
+    }, [sessionId, history, currentModel, systemPrompt, temperature, topP, maxTokens, batchSize, expertMode, thinkingEnabled, battleMode, secondaryModel, autoRouting, responseFormat, input, prefill, enabledTools]);
+
     const createNewSession = () => {
         const newSession = HistoryService.createNewSession(currentModel || 'local-lmstudio');
         setSessionId(newSession.id);
