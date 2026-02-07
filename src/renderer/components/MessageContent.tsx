@@ -6,6 +6,7 @@ import rehypeKatex from 'rehype-katex';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Copy, Check, Play, X, FileText, Save, PlayCircle, Github, ChevronDown, ChevronUp } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import 'katex/dist/katex.min.css';
 import ArtifactPreview from './ArtifactPreview';
 import { toast } from 'sonner';
@@ -355,85 +356,93 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                         </button>
                                     </div>
                                 </div>
-                                {!collapsedCodeBlocks[codeHash] && (
-                                    <>
-                                        <div className="relative">
-                                            <SyntaxHighlighter
-                                                {...props}
-                                                style={vscDarkPlus}
-                                                language={language}
-                                                PreTag="div"
-                                                customStyle={{ margin: 0, borderRadius: 0, padding: '1.25rem', overflowX: 'auto', background: 'transparent', fontSize: '13px', lineHeight: '1.5' }}
-                                                wrapLines={true}
-                                                wrapLongLines={true}
-                                                showLineNumbers={true}
-                                                lineNumberStyle={{ minWidth: '2em', paddingRight: '1em', color: '#525252', textAlign: 'right' }}
-                                            >
-                                                {codeString}
-                                            </SyntaxHighlighter>
-                                        </div>
-                                        {/* Execution Results */}
-                                        {executionResults[codeHash] && (
-                                    <div className={`px-4 py-3 border-t ${executionResults[codeHash].success ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <span className={`text-xs font-bold ${executionResults[codeHash].success ? 'text-emerald-400' : 'text-red-400'}`}>
-                                                {executionResults[codeHash].success ? '✓ Execution Successful' : '✗ Execution Failed'}
-                                            </span>
-                                            <button
-                                                onClick={() => {
-                                                    const newResults = { ...executionResults };
-                                                    delete newResults[codeHash];
-                                                    setExecutionResults(newResults);
-                                                }}
-                                                className="ml-auto p-1 hover:bg-slate-700 rounded transition-colors"
-                                            >
-                                                <X size={12} className="text-slate-500" />
-                                            </button>
-                                        </div>
-                                        <pre className="text-xs font-mono text-slate-300 whitespace-pre-wrap bg-slate-900/50 p-2 rounded border border-slate-700/50 max-h-48 overflow-y-auto custom-scrollbar">
-                                            {executionResults[codeHash].output}
-                                        </pre>
-                                    </div>
-                                )}
-                                {showFilePathInput === codeString && (
-                                    <div className="px-4 py-3 bg-[#2d2d2d] border-t border-slate-700">
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                type="text"
-                                                value={filePath}
-                                                onChange={(e) => setFilePath(e.target.value)}
-                                                placeholder="Enter file path (e.g., ./src/utils/helper.js)"
-                                                className="flex-1 bg-slate-800 border border-slate-600 text-white text-sm rounded px-3 py-1.5 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
-                                                autoFocus
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') {
-                                                        handleInsertToFile(codeString, language);
-                                                    } else if (e.key === 'Escape') {
-                                                        setShowFilePathInput(null);
-                                                        setFilePath('');
-                                                    }
-                                                }}
-                                            />
-                                            <button
-                                                onClick={() => handleInsertToFile(codeString, language)}
-                                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded font-medium transition-colors"
-                                            >
-                                                Insert
-                                            </button>
-                                            <button
-                                                onClick={() => {
-                                                    setShowFilePathInput(null);
-                                                    setFilePath('');
-                                                }}
-                                                className="p-1.5 hover:bg-slate-700 rounded transition-colors"
-                                            >
-                                                <X size={16} className="text-slate-400" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                                    </>
-                                )}
+                                <AnimatePresence initial={false}>
+                                    {!collapsedCodeBlocks[codeHash] && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: "auto", opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            transition={{ duration: 0.3, ease: "easeInOut" }}
+                                            style={{ overflow: "hidden" }}
+                                        >
+                                            <div className="relative">
+                                                <SyntaxHighlighter
+                                                    {...props}
+                                                    style={vscDarkPlus}
+                                                    language={language}
+                                                    PreTag="div"
+                                                    customStyle={{ margin: 0, borderRadius: 0, padding: '1.25rem', overflowX: 'auto', background: 'transparent', fontSize: '13px', lineHeight: '1.5' }}
+                                                    wrapLines={true}
+                                                    wrapLongLines={true}
+                                                    showLineNumbers={true}
+                                                    lineNumberStyle={{ minWidth: '2em', paddingRight: '1em', color: '#525252', textAlign: 'right' }}
+                                                >
+                                                    {codeString}
+                                                </SyntaxHighlighter>
+                                            </div>
+                                            {/* Execution Results */}
+                                            {executionResults[codeHash] && (
+                                                <div className={`px-4 py-3 border-t ${executionResults[codeHash].success ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <span className={`text-xs font-bold ${executionResults[codeHash].success ? 'text-emerald-400' : 'text-red-400'}`}>
+                                                            {executionResults[codeHash].success ? '✓ Execution Successful' : '✗ Execution Failed'}
+                                                        </span>
+                                                        <button
+                                                            onClick={() => {
+                                                                const newResults = { ...executionResults };
+                                                                delete newResults[codeHash];
+                                                                setExecutionResults(newResults);
+                                                            }}
+                                                            className="ml-auto p-1 hover:bg-slate-700 rounded transition-colors"
+                                                        >
+                                                            <X size={12} className="text-slate-500" />
+                                                        </button>
+                                                    </div>
+                                                    <pre className="text-xs font-mono text-slate-300 whitespace-pre-wrap bg-slate-900/50 p-2 rounded border border-slate-700/50 max-h-48 overflow-y-auto custom-scrollbar">
+                                                        {executionResults[codeHash].output}
+                                                    </pre>
+                                                </div>
+                                            )}
+                                            {showFilePathInput === codeString && (
+                                                <div className="px-4 py-3 bg-[#2d2d2d] border-t border-slate-700">
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type="text"
+                                                            value={filePath}
+                                                            onChange={(e) => setFilePath(e.target.value)}
+                                                            placeholder="Enter file path (e.g., ./src/utils/helper.js)"
+                                                            className="flex-1 bg-slate-800 border border-slate-600 text-white text-sm rounded px-3 py-1.5 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
+                                                            autoFocus
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    handleInsertToFile(codeString, language);
+                                                                } else if (e.key === 'Escape') {
+                                                                    setShowFilePathInput(null);
+                                                                    setFilePath('');
+                                                                }
+                                                            }}
+                                                        />
+                                                        <button
+                                                            onClick={() => handleInsertToFile(codeString, language)}
+                                                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded font-medium transition-colors"
+                                                        >
+                                                            Insert
+                                                        </button>
+                                                        <button
+                                                            onClick={() => {
+                                                                setShowFilePathInput(null);
+                                                                setFilePath('');
+                                                            }}
+                                                            className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                                                        >
+                                                            <X size={16} className="text-slate-400" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
                             </div>
                         ) : (
                             <code className={`${className} bg-slate-800/80 px-1.5 py-0.5 rounded text-amber-200 font-mono text-[0.85em] border border-slate-700/50 box-decoration-clone break-all`} {...props}>
