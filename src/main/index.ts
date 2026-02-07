@@ -70,6 +70,12 @@ ipcMain.handle('quit-and-install', () => {
 
 const WINDOW_STATE_PATH = path.join(app.getPath('userData'), 'window-state.json');
 
+// Window size constraints
+const MIN_WINDOW_WIDTH = 400;
+const MIN_WINDOW_HEIGHT = 300;
+const MAX_WINDOW_WIDTH = 4000;
+const MAX_WINDOW_HEIGHT = 3000;
+
 interface WindowState {
   x?: number;
   y?: number;
@@ -77,6 +83,34 @@ interface WindowState {
   height: number;
   isMaximized?: boolean;
   isFullscreen?: boolean;
+}
+
+function validateBounds(state: WindowState): WindowState {
+  // Get the primary display dimensions
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+
+  // Clamp width and height to reasonable bounds
+  const maxWidth = Math.min(MAX_WINDOW_WIDTH, screenWidth);
+  const maxHeight = Math.min(MAX_WINDOW_HEIGHT, screenHeight);
+
+  const validatedState = { ...state };
+
+  // Validate and clamp width
+  if (typeof validatedState.width !== 'number' || validatedState.width < MIN_WINDOW_WIDTH) {
+    validatedState.width = 1200;
+  } else if (validatedState.width > maxWidth) {
+    validatedState.width = maxWidth;
+  }
+
+  // Validate and clamp height
+  if (typeof validatedState.height !== 'number' || validatedState.height < MIN_WINDOW_HEIGHT) {
+    validatedState.height = 800;
+  } else if (validatedState.height > maxHeight) {
+    validatedState.height = maxHeight;
+  }
+
+  return validatedState;
 }
 
 function isPositionVisible(bounds: { x?: number; y?: number; width: number; height: number }): boolean {
@@ -118,18 +152,21 @@ function loadWindowState(): WindowState {
     if (fs.existsSync(WINDOW_STATE_PATH)) {
       const savedState = JSON.parse(fs.readFileSync(WINDOW_STATE_PATH, 'utf-8'));
 
+      // Validate bounds (size constraints)
+      const validatedState = validateBounds(savedState);
+
       // Validate that the saved position is on-screen
-      if (!isPositionVisible(savedState)) {
+      if (!isPositionVisible(validatedState)) {
         // Position is not visible, return defaults without x/y to center on primary display
         return {
-          width: savedState.width || 1200,
-          height: savedState.height || 800,
-          isMaximized: savedState.isMaximized,
-          isFullscreen: savedState.isFullscreen
+          width: validatedState.width,
+          height: validatedState.height,
+          isMaximized: validatedState.isMaximized,
+          isFullscreen: validatedState.isFullscreen
         };
       }
 
-      return savedState;
+      return validatedState;
     }
   } catch (e) {
     console.error('Failed to load window state', e);
