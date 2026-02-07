@@ -68,6 +68,44 @@ ipcMain.handle('quit-and-install', () => {
   autoUpdater.quitAndInstall();
 });
 
+// Recovery State IPC Handlers
+const RECOVERY_STATE_PATH = path.join(app.getPath('userData'), 'recovery-state.json');
+
+ipcMain.handle('save-recovery-state', async (event, state: any) => {
+  try {
+    fs.writeFileSync(RECOVERY_STATE_PATH, JSON.stringify(state));
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to save recovery state:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-recovery-state', async () => {
+  try {
+    if (fs.existsSync(RECOVERY_STATE_PATH)) {
+      const data = fs.readFileSync(RECOVERY_STATE_PATH, 'utf-8');
+      return { success: true, state: JSON.parse(data) };
+    }
+    return { success: true, state: null };
+  } catch (error: any) {
+    console.error('Failed to load recovery state:', error);
+    return { success: false, error: error.message, state: null };
+  }
+});
+
+ipcMain.handle('clear-recovery-state', async () => {
+  try {
+    if (fs.existsSync(RECOVERY_STATE_PATH)) {
+      fs.unlinkSync(RECOVERY_STATE_PATH);
+    }
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to clear recovery state:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 const WINDOW_STATE_PATH = path.join(app.getPath('userData'), 'window-state.json');
 
 function saveWindowState(win: BrowserWindow) {
