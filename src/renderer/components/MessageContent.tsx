@@ -538,6 +538,20 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                 {contentToRender}
             </ReactMarkdown>
 
+            {/* Expand button at end of collapsed summary */}
+            {isLongMessage && isMessageCollapsed && (
+                <div className="mt-3 flex justify-start">
+                    <button
+                        onClick={() => toggleCollapse(messageCollapseKey)}
+                        className="inline-flex items-center gap-2 text-sm text-primary hover:text-primary-300 transition-colors py-2 px-3 rounded-lg hover:bg-slate-800/50 border border-slate-700/50 hover:border-primary/50 font-medium"
+                        title="Expand full message"
+                    >
+                        <span>Read more...</span>
+                        <ChevronDown size={16} />
+                    </button>
+                </div>
+            )}
+
             {/* Artifact Preview Modal */}
             {previewCode && (
                 <div className="mt-4 animate-in slide-in-from-bottom-4 duration-300">
