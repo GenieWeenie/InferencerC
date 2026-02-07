@@ -24,6 +24,7 @@ export interface SearchResult {
     matchEnd: number;
     relevanceScore: number;
     timestamp: number;
+    isInCollapsedSection?: boolean;
     context?: {
         before?: string;
         after?: string;
@@ -61,6 +62,57 @@ export class SearchService {
         'she', 'that', 'the', 'this', 'to', 'was', 'were', 'will', 'with',
         'you', 'your', 'i', 'me', 'my', 'we', 'our', 'they', 'their'
     ]);
+
+    /**
+     * Check if content is in a collapsed section
+     */
+    private static isInCollapsedSection(
+        sessionId: string,
+        content: string,
+        matchStart: number,
+        matchEnd: number
+    ): boolean {
+        try {
+            // Load collapse state from sessionStorage
+            const storageKey = `collapse-state-${sessionId}`;
+            const stored = sessionStorage.getItem(storageKey);
+            if (!stored) return false;
+
+            const collapseState = JSON.parse(stored) as Record<string, boolean>;
+
+            // Check if entire message is collapsed (for long messages)
+            if (collapseState['message'] === true) {
+                return true;
+            }
+
+            // Check if match is within a collapsed code block
+            // Code blocks are identified by the first 50 chars of their content
+            const codeBlockRegex = /```[\s\S]*?```/g;
+            let match: RegExpExecArray | null;
+
+            while ((match = codeBlockRegex.exec(content)) !== null) {
+                const blockStart = match.index;
+                const blockEnd = blockStart + match[0].length;
+
+                // Check if the search match is within this code block
+                if (matchStart >= blockStart && matchEnd <= blockEnd) {
+                    // Extract the code content (without the backticks and language identifier)
+                    const codeContent = match[0].replace(/^```[\w]*\n?/, '').replace(/```$/, '');
+                    const codeHash = codeContent.substring(0, 50);
+
+                    // Check if this code block is collapsed
+                    if (collapseState[codeHash] === true) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        } catch (e) {
+            // If we can't determine collapse state, assume not collapsed
+            return false;
+        }
+    }
 
     /**
      * Search across all conversations
@@ -162,6 +214,12 @@ export class SearchService {
                         matchEnd: match.end,
                         relevanceScore: match.score,
                         timestamp: session.lastModified,
+                        isInCollapsedSection: this.isInCollapsedSection(
+                            session.id,
+                            content,
+                            match.start,
+                            match.end
+                        ),
                     };
 
                     // Add context

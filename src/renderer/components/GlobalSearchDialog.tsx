@@ -28,6 +28,7 @@ import {
     Sparkles,
     History,
     ChevronDown,
+    EyeOff,
 } from 'lucide-react';
 import { SearchService, SearchResult, SearchFilters, SearchStats } from '../services/search';
 
@@ -389,6 +390,18 @@ const GlobalSearchDialog: React.FC<GlobalSearchDialogProps> = ({
                                                 <span className="text-xs text-slate-500">
                                                     {formatTimestamp(result.timestamp)}
                                                 </span>
+                                                {result.isInCollapsedSection && (
+                                                    <>
+                                                        <span className="text-xs text-slate-600">•</span>
+                                                        <span
+                                                            className="flex items-center gap-1 text-xs px-2 py-0.5 bg-amber-900/30 border border-amber-700/50 rounded-full text-amber-400"
+                                                            title="Match is in a collapsed section"
+                                                        >
+                                                            <EyeOff size={12} />
+                                                            <span>Collapsed</span>
+                                                        </span>
+                                                    </>
+                                                )}
                                                 <span className="ml-auto text-xs px-2 py-0.5 bg-slate-700/50 rounded-full text-slate-400">
                                                     {Math.round(result.relevanceScore)}% match
                                                 </span>
