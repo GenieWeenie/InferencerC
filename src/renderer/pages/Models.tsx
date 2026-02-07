@@ -307,7 +307,7 @@ const Models: React.FC = () => {
 
         {isSearching ? (
           <div className="flex flex-col items-center justify-center py-16 text-slate-500 gap-4">
-            <Loader2 size={48} className="animate-spin text-blue-500" />
+            <Loader2 size={48} className="animate-spin text-primary" />
             <p className="text-lg">Searching Hugging Face...</p>
           </div>
         ) : (
