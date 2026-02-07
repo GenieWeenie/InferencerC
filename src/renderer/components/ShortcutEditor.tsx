@@ -9,6 +9,7 @@ import {
     AlertTriangle,
     Search,
     Check,
+    ArrowRight,
 } from 'lucide-react';
 import {
     KeyboardShortcut,
@@ -29,6 +30,8 @@ const ShortcutEditor: React.FC<ShortcutEditorProps> = ({ isOpen, onClose }) => {
     const [selectedCategory, setSelectedCategory] = useState<ShortcutCategory | 'All'>('All');
     const [editingShortcut, setEditingShortcut] = useState<string | null>(null);
     const [recordingKeys, setRecordingKeys] = useState<string[]>([]);
+    const [isChordMode, setIsChordMode] = useState(false);
+    const [chordSequence, setChordSequence] = useState<string[][]>([]);
 
     // Load shortcuts
     useEffect(() => {
@@ -53,6 +56,8 @@ const ShortcutEditor: React.FC<ShortcutEditorProps> = ({ isOpen, onClose }) => {
             if (e.key === 'Escape') {
                 setEditingShortcut(null);
                 setRecordingKeys([]);
+                setIsChordMode(false);
+                setChordSequence([]);
                 return;
             }
 
@@ -71,9 +76,19 @@ const ShortcutEditor: React.FC<ShortcutEditorProps> = ({ isOpen, onClose }) => {
 
         const handleKeyUp = (e: KeyboardEvent) => {
             if (recordingKeys.length > 0) {
-                keyboardShortcutsManager.updateShortcut(editingShortcut, recordingKeys);
-                setEditingShortcut(null);
-                setRecordingKeys([]);
+                if (isChordMode) {
+                    // Add to chord sequence
+                    const newSequence = [...chordSequence, recordingKeys];
+                    setChordSequence(newSequence);
+                    setRecordingKeys([]);
+                } else {
+                    // Single key binding
+                    keyboardShortcutsManager.updateShortcut(editingShortcut, recordingKeys);
+                    setEditingShortcut(null);
+                    setRecordingKeys([]);
+                    setIsChordMode(false);
+                    setChordSequence([]);
+                }
             }
         };
 
@@ -84,7 +99,7 @@ const ShortcutEditor: React.FC<ShortcutEditorProps> = ({ isOpen, onClose }) => {
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
         };
-    }, [editingShortcut, recordingKeys]);
+    }, [editingShortcut, recordingKeys, isChordMode, chordSequence]);
 
     // Filter shortcuts
     const filteredShortcuts = shortcuts.filter(shortcut => {
@@ -159,6 +174,29 @@ const ShortcutEditor: React.FC<ShortcutEditorProps> = ({ isOpen, onClose }) => {
         input.click();
     };
 
+    const handleToggleChordMode = () => {
+        setIsChordMode(!isChordMode);
+        setChordSequence([]);
+        setRecordingKeys([]);
+    };
+
+    const handleSaveChord = () => {
+        if (editingShortcut && chordSequence.length > 0) {
+            keyboardShortcutsManager.updateChordShortcut(editingShortcut, chordSequence);
+            setEditingShortcut(null);
+            setRecordingKeys([]);
+            setIsChordMode(false);
+            setChordSequence([]);
+        }
+    };
+
+    const handleCancelEdit = () => {
+        setEditingShortcut(null);
+        setRecordingKeys([]);
+        setIsChordMode(false);
+        setChordSequence([]);
+    };
+
     const renderKeys = (keys: string[]) => {
         return (
             <div className="flex items-center gap-1">
@@ -169,6 +207,21 @@ const ShortcutEditor: React.FC<ShortcutEditorProps> = ({ isOpen, onClose }) => {
                         </kbd>
                         {index < keys.length - 1 && (
                             <span className="text-slate-500 text-xs">+</span>
+                        )}
+                    </React.Fragment>
+                ))}
+            </div>
+        );
+    };
+
+    const renderChord = (chord: string[][]) => {
+        return (
+            <div className="flex items-center gap-2">
+                {chord.map((keys, index) => (
+                    <React.Fragment key={index}>
+                        {renderKeys(keys)}
+                        {index < chord.length - 1 && (
+                            <ArrowRight size={14} className="text-slate-500" />
                         )}
                     </React.Fragment>
                 ))}
@@ -307,7 +360,8 @@ const ShortcutEditor: React.FC<ShortcutEditorProps> = ({ isOpen, onClose }) => {
                                         <div className="space-y-2">
                                             {categoryShortcuts.map((shortcut) => {
                                                 const keys = shortcut.customKeys || shortcut.defaultKeys;
-                                                const isCustom = !!shortcut.customKeys;
+                                                const chord = shortcut.customChord || shortcut.defaultChord;
+                                                const isCustom = !!(shortcut.customKeys || shortcut.customChord);
                                                 const isEditing = editingShortcut === shortcut.id;
                                                 const hasConflict = conflicts.some(
                                                     (c) =>
@@ -335,6 +389,11 @@ const ShortcutEditor: React.FC<ShortcutEditorProps> = ({ isOpen, onClose }) => {
                                                                             Custom
                                                                         </span>
                                                                     )}
+                                                                    {shortcut.isChord && (
+                                                                        <span className="px-2 py-0.5 text-xs bg-purple-500/20 text-purple-400 rounded">
+                                                                            Chord
+                                                                        </span>
+                                                                    )}
                                                                     {hasConflict && (
                                                                         <span className="px-2 py-0.5 text-xs bg-yellow-500/20 text-yellow-500 rounded">
                                                                             Conflict
@@ -347,22 +406,98 @@ const ShortcutEditor: React.FC<ShortcutEditorProps> = ({ isOpen, onClose }) => {
                                                             </div>
                                                             <div className="flex items-center gap-3">
                                                                 {isEditing ? (
-                                                                    <div className="px-3 py-2 bg-primary/20 border border-primary rounded-lg">
-                                                                        <p className="text-xs text-primary font-medium">
-                                                                            {recordingKeys.length > 0
-                                                                                ? renderKeys(recordingKeys)
-                                                                                : 'Press keys...'}
-                                                                        </p>
+                                                                    <div className="flex items-center gap-2">
+                                                                        {isChordMode ? (
+                                                                            <>
+                                                                                <div className="px-3 py-2 bg-purple-500/20 border border-purple-400 rounded-lg">
+                                                                                    <div className="flex flex-col gap-2">
+                                                                                        <p className="text-xs text-purple-400 font-medium">
+                                                                                            Chord Mode - Step {chordSequence.length + 1}
+                                                                                        </p>
+                                                                                        <div className="flex items-center gap-2">
+                                                                                            {chordSequence.map((keys, index) => (
+                                                                                                <React.Fragment key={index}>
+                                                                                                    <motion.div
+                                                                                                        initial={{ scale: 0.8, opacity: 0 }}
+                                                                                                        animate={{ scale: 1, opacity: 1 }}
+                                                                                                        className="flex items-center gap-1"
+                                                                                                    >
+                                                                                                        <div className="flex items-center gap-1 px-2 py-1 bg-green-500/20 border border-green-500/40 rounded">
+                                                                                                            {renderKeys(keys)}
+                                                                                                            <Check size={12} className="text-green-500 ml-1" />
+                                                                                                        </div>
+                                                                                                    </motion.div>
+                                                                                                    {index < chordSequence.length && (
+                                                                                                        <ArrowRight size={14} className="text-purple-400" />
+                                                                                                    )}
+                                                                                                </React.Fragment>
+                                                                                            ))}
+                                                                                            {recordingKeys.length > 0 ? (
+                                                                                                <motion.div
+                                                                                                    initial={{ scale: 0.9 }}
+                                                                                                    animate={{ scale: 1 }}
+                                                                                                    className="flex items-center gap-1 px-2 py-1 bg-primary/20 border border-primary rounded"
+                                                                                                >
+                                                                                                    {renderKeys(recordingKeys)}
+                                                                                                </motion.div>
+                                                                                            ) : (
+                                                                                                <span className="text-xs text-purple-300 italic">Press keys...</span>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                                {chordSequence.length > 0 && (
+                                                                                    <button
+                                                                                        onClick={handleSaveChord}
+                                                                                        className="p-2 bg-green-500/20 hover:bg-green-500/30 border border-green-500 rounded transition-colors"
+                                                                                        title="Save chord"
+                                                                                    >
+                                                                                        <Check size={16} className="text-green-500" />
+                                                                                    </button>
+                                                                                )}
+                                                                                <button
+                                                                                    onClick={handleCancelEdit}
+                                                                                    className="p-2 hover:bg-slate-700 rounded transition-colors"
+                                                                                    title="Cancel"
+                                                                                >
+                                                                                    <X size={16} className="text-slate-400" />
+                                                                                </button>
+                                                                            </>
+                                                                        ) : (
+                                                                            <>
+                                                                                <div className="px-3 py-2 bg-primary/20 border border-primary rounded-lg">
+                                                                                    <p className="text-xs text-primary font-medium">
+                                                                                        {recordingKeys.length > 0
+                                                                                            ? renderKeys(recordingKeys)
+                                                                                            : 'Press keys...'}
+                                                                                    </p>
+                                                                                </div>
+                                                                                <button
+                                                                                    onClick={handleToggleChordMode}
+                                                                                    className="px-3 py-2 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-400 rounded-lg text-xs text-purple-400 font-medium transition-colors"
+                                                                                    title="Enter chord mode"
+                                                                                >
+                                                                                    Chord
+                                                                                </button>
+                                                                                <button
+                                                                                    onClick={handleCancelEdit}
+                                                                                    className="p-2 hover:bg-slate-700 rounded transition-colors"
+                                                                                    title="Cancel"
+                                                                                >
+                                                                                    <X size={16} className="text-slate-400" />
+                                                                                </button>
+                                                                            </>
+                                                                        )}
                                                                     </div>
                                                                 ) : (
                                                                     <button
                                                                         onClick={() => setEditingShortcut(shortcut.id)}
                                                                         className="hover:bg-slate-700 rounded px-3 py-2 transition-colors"
                                                                     >
-                                                                        {renderKeys(keys)}
+                                                                        {shortcut.isChord && chord ? renderChord(chord) : renderKeys(keys)}
                                                                     </button>
                                                                 )}
-                                                                {isCustom && (
+                                                                {isCustom && !isEditing && (
                                                                     <button
                                                                         onClick={() => handleReset(shortcut.id)}
                                                                         className="p-2 hover:bg-slate-700 rounded transition-colors"
@@ -390,7 +525,7 @@ const ShortcutEditor: React.FC<ShortcutEditorProps> = ({ isOpen, onClose }) => {
                             {/* Footer */}
                             <div className="px-6 py-4 border-t border-slate-700 flex items-center justify-between">
                                 <p className="text-xs text-slate-400">
-                                    Click on a shortcut to customize it. Press Escape to cancel.
+                                    Click on a shortcut to customize it. Use "Chord" button for multi-step sequences. Press Escape to cancel.
                                 </p>
                                 <button
                                     onClick={onClose}

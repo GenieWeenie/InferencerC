@@ -1,42 +1,31 @@
-import React from 'react';
-import { X, Command, Keyboard } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Command, Keyboard, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+    KeyboardShortcut,
+    keyboardShortcutsManager,
+} from '../lib/keyboardShortcuts';
 
 interface KeyboardShortcutsModalProps {
     isOpen: boolean;
     onClose: () => void;
 }
 
-interface Shortcut {
-    keys: string[];
-    description: string;
-    category: string;
-}
-
-const shortcuts: Shortcut[] = [
-    // Navigation
-    { keys: ['Ctrl', 'P'], description: 'Open command palette', category: 'Navigation' },
-    { keys: ['Ctrl', 'N'], description: 'Create new chat', category: 'Navigation' },
-    { keys: ['Ctrl', '/'], description: 'Toggle history sidebar', category: 'Navigation' },
-    { keys: ['Ctrl', '.'], description: 'Toggle sidebar', category: 'Navigation' },
-
-    // Actions
-    { keys: ['Ctrl', 'K'], description: 'Quick model switcher', category: 'Actions' },
-    { keys: ['Ctrl', 'Shift', 'C'], description: 'Copy last response', category: 'Actions' },
-    { keys: ['Ctrl', 'Enter'], description: 'Send with prefill', category: 'Actions' },
-    { keys: ['Escape'], description: 'Stop generation / Close modals', category: 'Actions' },
-
-    // Editing
-    { keys: ['Ctrl', 'L'], description: 'Clear current chat', category: 'Editing' },
-    { keys: ['Ctrl', 'S'], description: 'Save/Export chat', category: 'Editing' },
-
-    // Slash Commands
-    { keys: ['/'], description: 'Trigger slash commands menu', category: 'Input' },
-    { keys: ['↑', '↓'], description: 'Navigate slash commands', category: 'Input' },
-    { keys: ['Enter', 'Tab'], description: 'Insert selected command', category: 'Input' },
-];
-
 const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ isOpen, onClose }) => {
+    const [shortcuts, setShortcuts] = useState<KeyboardShortcut[]>([]);
+
+    // Load shortcuts
+    useEffect(() => {
+        const loadShortcuts = () => {
+            setShortcuts(keyboardShortcutsManager.getAllShortcuts());
+        };
+
+        loadShortcuts();
+
+        const unsubscribe = keyboardShortcutsManager.subscribe(loadShortcuts);
+        return unsubscribe;
+    }, []);
+
     // Group shortcuts by category
     const groupedShortcuts = shortcuts.reduce((acc, shortcut) => {
         if (!acc[shortcut.category]) {
@@ -44,7 +33,7 @@ const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ isOpen,
         }
         acc[shortcut.category].push(shortcut);
         return acc;
-    }, {} as Record<string, Shortcut[]>);
+    }, {} as Record<string, KeyboardShortcut[]>);
 
     // Detect OS for key display
     const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -57,6 +46,38 @@ const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ isOpen,
         if (key === 'Enter') return isMac ? '↵' : 'Enter';
         if (key === 'Escape') return 'Esc';
         return key;
+    };
+
+    const renderKeys = (keys: string[]) => {
+        return (
+            <div className="flex items-center gap-1">
+                {keys.map((key, index) => (
+                    <React.Fragment key={index}>
+                        <kbd className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs font-mono text-slate-300 shadow-sm min-w-[2rem] text-center">
+                            {formatKey(key)}
+                        </kbd>
+                        {index < keys.length - 1 && (
+                            <span className="text-slate-600 text-xs mx-0.5">+</span>
+                        )}
+                    </React.Fragment>
+                ))}
+            </div>
+        );
+    };
+
+    const renderChord = (chord: string[][]) => {
+        return (
+            <div className="flex items-center gap-2">
+                {chord.map((keys, index) => (
+                    <React.Fragment key={index}>
+                        {renderKeys(keys)}
+                        {index < chord.length - 1 && (
+                            <ArrowRight size={14} className="text-slate-500" />
+                        )}
+                    </React.Fragment>
+                ))}
+            </div>
+        );
     };
 
     return (
@@ -105,26 +126,22 @@ const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ isOpen,
                                         {category}
                                     </h3>
                                     <div className="space-y-2">
-                                        {categoryShortcuts.map((shortcut, index) => (
-                                            <div
-                                                key={index}
-                                                className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-800/50 transition-colors"
-                                            >
-                                                <span className="text-slate-200 text-sm">{shortcut.description}</span>
-                                                <div className="flex items-center gap-1">
-                                                    {shortcut.keys.map((key, keyIndex) => (
-                                                        <React.Fragment key={keyIndex}>
-                                                            <kbd className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs font-mono text-slate-300 shadow-sm min-w-[2rem] text-center">
-                                                                {formatKey(key)}
-                                                            </kbd>
-                                                            {keyIndex < shortcut.keys.length - 1 && (
-                                                                <span className="text-slate-600 text-xs mx-0.5">+</span>
-                                                            )}
-                                                        </React.Fragment>
-                                                    ))}
+                                        {categoryShortcuts.map((shortcut, index) => {
+                                            const keys = shortcut.customKeys || shortcut.defaultKeys;
+                                            const chord = shortcut.customChord || shortcut.defaultChord;
+
+                                            return (
+                                                <div
+                                                    key={index}
+                                                    className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-800/50 transition-colors"
+                                                >
+                                                    <span className="text-slate-200 text-sm">{shortcut.description}</span>
+                                                    <div className="flex items-center gap-1">
+                                                        {shortcut.isChord && chord ? renderChord(chord) : renderKeys(keys)}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             ))}

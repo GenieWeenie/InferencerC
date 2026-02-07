@@ -13,6 +13,9 @@ export interface KeyboardShortcut {
     defaultKeys: string[];
     customKeys?: string[];
     enabled: boolean;
+    isChord?: boolean;
+    defaultChord?: string[][];
+    customChord?: string[][];
 }
 
 export type ShortcutCategory =
@@ -28,6 +31,12 @@ export interface ShortcutConflict {
     shortcut2: KeyboardShortcut;
     keys: string[];
 }
+
+/**
+ * Chord binding represents a sequence of key combinations
+ * Example: [['Ctrl', 'K'], ['Ctrl', 'C']] means press Ctrl+K, then press Ctrl+C
+ */
+export type ChordBinding = string[][];
 
 // Default keyboard shortcuts configuration
 export const DEFAULT_SHORTCUTS: KeyboardShortcut[] = [
@@ -55,6 +64,26 @@ export const DEFAULT_SHORTCUTS: KeyboardShortcut[] = [
         category: 'Navigation',
         defaultKeys: ['Ctrl', 'K'],
         enabled: true,
+    },
+    {
+        id: 'nav.quickOpen',
+        label: 'Quick Open File',
+        description: 'Quickly open a file from the project',
+        category: 'Navigation',
+        defaultKeys: [],
+        enabled: true,
+        isChord: true,
+        defaultChord: [['Ctrl', 'K'], ['Ctrl', 'O']],
+    },
+    {
+        id: 'nav.goToLine',
+        label: 'Go to Line',
+        description: 'Jump to a specific line number',
+        category: 'Navigation',
+        defaultKeys: [],
+        enabled: true,
+        isChord: true,
+        defaultChord: [['Ctrl', 'K'], ['Ctrl', 'G']],
     },
 
     // Chat
@@ -200,6 +229,12 @@ export class KeyboardShortcutsManager {
     private shortcuts: Map<string, KeyboardShortcut>;
     private listeners: Set<() => void> = new Set();
     private static readonly STORAGE_KEY = 'keyboard-shortcuts';
+    private static readonly CHORD_TIMEOUT = 1500; // 1.5 seconds in milliseconds
+
+    // Chord matching state
+    private chordSequence: string[][] = [];
+    private chordTimeoutId: NodeJS.Timeout | null = null;
+    private pendingChordShortcutId: string | null = null;
 
     constructor() {
         this.shortcuts = new Map();
@@ -293,6 +328,19 @@ export class KeyboardShortcutsManager {
     }
 
     /**
+     * Update a shortcut's custom chord
+     */
+    updateChordShortcut(id: string, customChord: string[][]): void {
+        const shortcut = this.shortcuts.get(id);
+        if (!shortcut) return;
+
+        shortcut.isChord = true;
+        shortcut.customChord = customChord;
+        delete shortcut.customKeys;
+        this.saveShortcuts();
+    }
+
+    /**
      * Reset a shortcut to default
      */
     resetShortcut(id: string): void {
@@ -300,6 +348,7 @@ export class KeyboardShortcutsManager {
         if (!shortcut) return;
 
         delete shortcut.customKeys;
+        delete shortcut.customChord;
         this.saveShortcuts();
     }
 
@@ -309,6 +358,7 @@ export class KeyboardShortcutsManager {
     resetAllShortcuts(): void {
         this.shortcuts.forEach(shortcut => {
             delete shortcut.customKeys;
+            delete shortcut.customChord;
         });
         this.saveShortcuts();
     }
@@ -333,20 +383,130 @@ export class KeyboardShortcutsManager {
 
         for (let i = 0; i < shortcuts.length; i++) {
             for (let j = i + 1; j < shortcuts.length; j++) {
-                const keys1 = shortcuts[i].customKeys || shortcuts[i].defaultKeys;
-                const keys2 = shortcuts[j].customKeys || shortcuts[j].defaultKeys;
-
-                if (this.areKeysEqual(keys1, keys2)) {
-                    conflicts.push({
-                        shortcut1: shortcuts[i],
-                        shortcut2: shortcuts[j],
-                        keys: keys1,
-                    });
+                const conflict = this.checkShortcutConflict(shortcuts[i], shortcuts[j]);
+                if (conflict) {
+                    conflicts.push(conflict);
                 }
             }
         }
 
         return conflicts;
+    }
+
+    /**
+     * Check if two shortcuts conflict
+     * Handles single-key, chord, and prefix conflicts
+     */
+    private checkShortcutConflict(
+        shortcut1: KeyboardShortcut,
+        shortcut2: KeyboardShortcut
+    ): ShortcutConflict | null {
+        const isChord1 = shortcut1.isChord;
+        const isChord2 = shortcut2.isChord;
+
+        // Case 1: Both are single-key shortcuts
+        if (!isChord1 && !isChord2) {
+            const keys1 = shortcut1.customKeys || shortcut1.defaultKeys;
+            const keys2 = shortcut2.customKeys || shortcut2.defaultKeys;
+
+            if (this.areKeysEqual(keys1, keys2)) {
+                return {
+                    shortcut1,
+                    shortcut2,
+                    keys: keys1,
+                };
+            }
+        }
+
+        // Case 2: Both are chord shortcuts
+        if (isChord1 && isChord2) {
+            const chord1 = shortcut1.customChord || shortcut1.defaultChord;
+            const chord2 = shortcut2.customChord || shortcut2.defaultChord;
+
+            if (!chord1 || !chord2) return null;
+
+            // Check for exact chord match
+            if (this.areChordsEqual(chord1, chord2)) {
+                return {
+                    shortcut1,
+                    shortcut2,
+                    keys: chord1[0], // Use first key combo as representative
+                };
+            }
+
+            // Check for prefix conflicts (one chord is prefix of another)
+            if (this.isChordPrefix(chord1, chord2) || this.isChordPrefix(chord2, chord1)) {
+                return {
+                    shortcut1,
+                    shortcut2,
+                    keys: chord1[0], // Use first key combo as representative
+                };
+            }
+        }
+
+        // Case 3: One is chord, one is single-key
+        if (isChord1 && !isChord2) {
+            const chord1 = shortcut1.customChord || shortcut1.defaultChord;
+            const keys2 = shortcut2.customKeys || shortcut2.defaultKeys;
+
+            if (chord1 && this.doesSingleKeyConflictWithChord(keys2, chord1)) {
+                return {
+                    shortcut1,
+                    shortcut2,
+                    keys: keys2,
+                };
+            }
+        }
+
+        if (!isChord1 && isChord2) {
+            const keys1 = shortcut1.customKeys || shortcut1.defaultKeys;
+            const chord2 = shortcut2.customChord || shortcut2.defaultChord;
+
+            if (chord2 && this.doesSingleKeyConflictWithChord(keys1, chord2)) {
+                return {
+                    shortcut1,
+                    shortcut2,
+                    keys: keys1,
+                };
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Check if two chords are equal
+     */
+    private areChordsEqual(chord1: ChordBinding, chord2: ChordBinding): boolean {
+        if (chord1.length !== chord2.length) return false;
+
+        return chord1.every((keys, index) =>
+            this.areKeysEqual(keys, chord2[index])
+        );
+    }
+
+    /**
+     * Check if chord1 is a prefix of chord2
+     * Example: [['Ctrl', 'K']] is a prefix of [['Ctrl', 'K'], ['Ctrl', 'C']]
+     */
+    private isChordPrefix(chord1: ChordBinding, chord2: ChordBinding): boolean {
+        if (chord1.length >= chord2.length) return false;
+
+        return chord1.every((keys, index) =>
+            this.areKeysEqual(keys, chord2[index])
+        );
+    }
+
+    /**
+     * Check if a single-key shortcut conflicts with the first part of a chord
+     * Example: ['Ctrl', 'K'] conflicts with [['Ctrl', 'K'], ['Ctrl', 'C']]
+     */
+    private doesSingleKeyConflictWithChord(
+        singleKeys: string[],
+        chord: ChordBinding
+    ): boolean {
+        if (chord.length === 0) return false;
+        return this.areKeysEqual(singleKeys, chord[0]);
     }
 
     /**
@@ -413,12 +573,31 @@ export class KeyboardShortcutsManager {
     }
 
     /**
-     * Check if a keyboard event matches a shortcut
+     * Get the active chord for a shortcut (custom or default)
      */
-    matchesShortcut(event: KeyboardEvent, id: string): boolean {
-        const keys = this.getActiveKeys(id);
-        if (!keys) return false;
+    private getActiveChord(id: string): ChordBinding | undefined {
+        const shortcut = this.shortcuts.get(id);
+        if (!shortcut || !shortcut.enabled || !shortcut.isChord) return undefined;
+        return shortcut.customChord || shortcut.defaultChord;
+    }
 
+    /**
+     * Reset the chord sequence
+     */
+    private resetChordSequence(): void {
+        this.chordSequence = [];
+        this.pendingChordShortcutId = null;
+
+        if (this.chordTimeoutId) {
+            clearTimeout(this.chordTimeoutId);
+            this.chordTimeoutId = null;
+        }
+    }
+
+    /**
+     * Extract keys from keyboard event
+     */
+    private extractKeysFromEvent(event: KeyboardEvent): string[] {
         const eventKeys: string[] = [];
 
         if (event.ctrlKey || event.metaKey) eventKeys.push('Ctrl');
@@ -430,6 +609,89 @@ export class KeyboardShortcutsManager {
         if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
             eventKeys.push(key);
         }
+
+        return eventKeys;
+    }
+
+    /**
+     * Check if current sequence matches a chord pattern
+     */
+    private matchesChordPattern(sequence: string[][], chord: ChordBinding): boolean {
+        if (sequence.length !== chord.length) return false;
+
+        return sequence.every((keys, index) =>
+            this.areKeysEqual(keys, chord[index])
+        );
+    }
+
+    /**
+     * Check if current sequence is a partial match for any chord
+     */
+    private isPartialChordMatch(sequence: string[][], chord: ChordBinding): boolean {
+        if (sequence.length >= chord.length) return false;
+
+        return sequence.every((keys, index) =>
+            this.areKeysEqual(keys, chord[index])
+        );
+    }
+
+    /**
+     * Check if a keyboard event matches a chord shortcut
+     * Returns the shortcut ID if matched, null if partial match (waiting for more keys),
+     * undefined if no match
+     */
+    matchesChordShortcut(event: KeyboardEvent): string | null | undefined {
+        const eventKeys = this.extractKeysFromEvent(event);
+
+        // Add current keys to sequence
+        this.chordSequence.push(eventKeys);
+
+        // Clear existing timeout
+        if (this.chordTimeoutId) {
+            clearTimeout(this.chordTimeoutId);
+            this.chordTimeoutId = null;
+        }
+
+        // Check all chord shortcuts
+        const chordShortcuts = Array.from(this.shortcuts.values())
+            .filter(s => s.enabled && s.isChord);
+
+        for (const shortcut of chordShortcuts) {
+            const chord = this.getActiveChord(shortcut.id);
+            if (!chord) continue;
+
+            // Check for complete match
+            if (this.matchesChordPattern(this.chordSequence, chord)) {
+                this.resetChordSequence();
+                return shortcut.id;
+            }
+
+            // Check for partial match
+            if (this.isPartialChordMatch(this.chordSequence, chord)) {
+                this.pendingChordShortcutId = shortcut.id;
+
+                // Set timeout to reset sequence
+                this.chordTimeoutId = setTimeout(() => {
+                    this.resetChordSequence();
+                }, KeyboardShortcutsManager.CHORD_TIMEOUT);
+
+                return null; // Partial match, waiting for more keys
+            }
+        }
+
+        // No match found, reset sequence
+        this.resetChordSequence();
+        return undefined;
+    }
+
+    /**
+     * Check if a keyboard event matches a shortcut
+     */
+    matchesShortcut(event: KeyboardEvent, id: string): boolean {
+        const keys = this.getActiveKeys(id);
+        if (!keys) return false;
+
+        const eventKeys = this.extractKeysFromEvent(event);
 
         return this.areKeysEqual(eventKeys, keys);
     }
