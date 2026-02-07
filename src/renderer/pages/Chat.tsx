@@ -664,24 +664,49 @@ const Chat: React.FC = () => {
                 return;
             }
 
-            // Ctrl+Shift+C: Copy last response
+            // Ctrl+Shift+C: Collapse all code blocks
             if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'C' && !isTyping) {
                 e.preventDefault();
-                const lastAssistantMessage = [...history].reverse().find(m => m.role === 'assistant');
-                if (lastAssistantMessage?.content) {
-                    navigator.clipboard.writeText(lastAssistantMessage.content);
-                    toast.success('Last response copied to clipboard');
+                // Extract all code blocks from messages
+                const codeBlockIds: string[] = [];
+                const codeBlockRegex = /```[\s\S]*?```/g;
+
+                history.forEach(msg => {
+                    if (msg.content) {
+                        const matches = msg.content.match(codeBlockRegex);
+                        if (matches) {
+                            matches.forEach(block => {
+                                // Extract code content (remove language and backticks)
+                                const codeContent = block.replace(/```\w*\n/, '').replace(/```$/, '');
+                                const codeHash = codeContent.substring(0, 50); // Use first 50 chars as hash
+                                if (codeHash) {
+                                    codeBlockIds.push(codeHash);
+                                }
+                            });
+                        }
+                    }
+                });
+
+                if (codeBlockIds.length > 0) {
+                    collapseHook.collapseAll(codeBlockIds);
+                    toast.success(`Collapsed ${codeBlockIds.length} code block${codeBlockIds.length > 1 ? 's' : ''}`);
+                } else {
+                    toast.info('No code blocks to collapse');
                 }
                 return;
             }
 
-            // Ctrl+Shift+E: Open Export Dialog
+            // Ctrl+Shift+E: Expand all sections
             if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'E' && !isTyping) {
                 e.preventDefault();
-                if (history.length > 0) {
-                    setShowExportDialog(true);
+                // Get all currently collapsed items
+                const collapsedItems = collapseHook.getCollapsedItems();
+
+                if (collapsedItems.length > 0) {
+                    collapseHook.expandAll(collapsedItems);
+                    toast.success(`Expanded ${collapsedItems.length} section${collapsedItems.length > 1 ? 's' : ''}`);
                 } else {
-                    toast.info('No messages to export');
+                    toast.info('No collapsed sections to expand');
                 }
                 return;
             }
@@ -754,7 +779,7 @@ const Chat: React.FC = () => {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [createNewSession, setShowHistory, stopGeneration, showShortcutsModal, editingMessageIndex, history, handleCancelEdit, setHistory, showCollapsedNav]);
+    }, [createNewSession, setShowHistory, stopGeneration, showShortcutsModal, editingMessageIndex, history, handleCancelEdit, setHistory, showCollapsedNav, collapseHook]);
 
     return (
         <div className="flex h-full flex-row relative bg-background text-text font-body overflow-hidden min-w-0 max-w-full">

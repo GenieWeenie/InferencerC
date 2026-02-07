@@ -22,7 +22,8 @@ const shortcuts: Shortcut[] = [
 
     // Actions
     { keys: ['Ctrl', 'K'], description: 'Quick model switcher', category: 'Actions' },
-    { keys: ['Ctrl', 'Shift', 'C'], description: 'Copy last response', category: 'Actions' },
+    { keys: ['Ctrl', 'Shift', 'C'], description: 'Collapse all code blocks', category: 'Actions' },
+    { keys: ['Ctrl', 'Shift', 'E'], description: 'Expand all sections', category: 'Actions' },
     { keys: ['Ctrl', 'Enter'], description: 'Send with prefill', category: 'Actions' },
     { keys: ['Escape'], description: 'Stop generation / Close modals', category: 'Actions' },
 
