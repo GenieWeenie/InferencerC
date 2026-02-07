@@ -12,6 +12,7 @@ interface ComparisonGridProps {
     onClose?: () => void;
     mcpAvailable?: boolean;
     onInsertToFile?: (code: string, language: string) => void;
+    sessionId?: string;
 }
 
 /**
@@ -24,7 +25,8 @@ const ComparisonGrid: React.FC<ComparisonGridProps> = ({
     modelBName,
     onClose,
     mcpAvailable,
-    onInsertToFile
+    onInsertToFile,
+    sessionId
 }) => {
     const [isFullscreen, setIsFullscreen] = React.useState(false);
     const [showDiff, setShowDiff] = React.useState(false);
@@ -207,6 +209,7 @@ ${contentB}
                                 isUser={false}
                                 mcpAvailable={mcpAvailable}
                                 onInsertToFile={onInsertToFile}
+                                sessionId={sessionId}
                             />
                         )}
                     </div>
@@ -246,6 +249,7 @@ ${contentB}
                                 isUser={false}
                                 mcpAvailable={mcpAvailable}
                                 onInsertToFile={onInsertToFile}
+                                sessionId={sessionId}
                             />
                         )}
                     </div>

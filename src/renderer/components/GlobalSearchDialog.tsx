@@ -28,13 +28,19 @@ import {
     Sparkles,
     History,
     ChevronDown,
+    EyeOff,
 } from 'lucide-react';
 import { SearchService, SearchResult, SearchFilters, SearchStats } from '../services/search';
+
+export interface ExpandMetadata {
+    expandMessage?: boolean;
+    expandCodeBlock?: string; // Code hash to expand
+}
 
 interface GlobalSearchDialogProps {
     isOpen: boolean;
     onClose: () => void;
-    onNavigateToMessage: (sessionId: string, messageIndex: number) => void;
+    onNavigateToMessage: (sessionId: string, messageIndex: number, expandMetadata?: ExpandMetadata) => void;
 }
 
 const GlobalSearchDialog: React.FC<GlobalSearchDialogProps> = ({
@@ -136,7 +142,54 @@ const GlobalSearchDialog: React.FC<GlobalSearchDialogProps> = ({
 
     const handleResultClick = useCallback((result: SearchResult) => {
         SearchService.saveRecentSearch(query);
-        onNavigateToMessage(result.sessionId, result.messageIndex);
+
+        // Determine what needs to be expanded if result is in collapsed section
+        let expandMetadata: ExpandMetadata | undefined;
+
+        if (result.isInCollapsedSection) {
+            expandMetadata = {};
+
+            try {
+                // Load collapse state from sessionStorage
+                const storageKey = `collapse-state-${result.sessionId}`;
+                const stored = sessionStorage.getItem(storageKey);
+
+                if (stored) {
+                    const collapseState = JSON.parse(stored) as Record<string, boolean>;
+
+                    // Check if entire message is collapsed
+                    if (collapseState['message'] === true) {
+                        expandMetadata.expandMessage = true;
+                    }
+
+                    // Check if match is within a collapsed code block
+                    const codeBlockRegex = /```[\s\S]*?```/g;
+                    let match: RegExpExecArray | null;
+
+                    while ((match = codeBlockRegex.exec(result.content)) !== null) {
+                        const blockStart = match.index;
+                        const blockEnd = blockStart + match[0].length;
+
+                        // Check if the search match is within this code block
+                        if (result.matchStart >= blockStart && result.matchEnd <= blockEnd) {
+                            // Extract the code content (without the backticks and language identifier)
+                            const codeContent = match[0].replace(/^```[\w]*\n?/, '').replace(/```$/, '');
+                            const codeHash = codeContent.substring(0, 50);
+
+                            // Check if this code block is collapsed
+                            if (collapseState[codeHash] === true) {
+                                expandMetadata.expandCodeBlock = codeHash;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                // If we can't determine what to expand, just navigate without expansion metadata
+            }
+        }
+
+        onNavigateToMessage(result.sessionId, result.messageIndex, expandMetadata);
         onClose();
     }, [query, onNavigateToMessage, onClose]);
 
@@ -389,6 +442,18 @@ const GlobalSearchDialog: React.FC<GlobalSearchDialogProps> = ({
                                                 <span className="text-xs text-slate-500">
                                                     {formatTimestamp(result.timestamp)}
                                                 </span>
+                                                {result.isInCollapsedSection && (
+                                                    <>
+                                                        <span className="text-xs text-slate-600">•</span>
+                                                        <span
+                                                            className="flex items-center gap-1 text-xs px-2 py-0.5 bg-amber-900/30 border border-amber-700/50 rounded-full text-amber-400"
+                                                            title="Match is in a collapsed section"
+                                                        >
+                                                            <EyeOff size={12} />
+                                                            <span>Collapsed</span>
+                                                        </span>
+                                                    </>
+                                                )}
                                                 <span className="ml-auto text-xs px-2 py-0.5 bg-slate-700/50 rounded-full text-slate-400">
                                                     {Math.round(result.relevanceScore)}% match
                                                 </span>
