@@ -17,6 +17,9 @@ interface DownloadStatus {
   progress: number;
   status: 'downloading' | 'completed' | 'error';
   error?: string;
+  speed?: number; // KB/s
+  eta?: number; // seconds
+  bytesDownloaded?: number;
 }
 
 interface HFFile {
