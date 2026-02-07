@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, screen } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'path';
 import fs from 'fs';
@@ -69,6 +69,31 @@ ipcMain.handle('quit-and-install', () => {
 });
 
 const WINDOW_STATE_PATH = path.join(app.getPath('userData'), 'window-state.json');
+
+function isPositionVisible(bounds: { x?: number; y?: number; width: number; height: number }): boolean {
+  if (bounds.x === undefined || bounds.y === undefined) {
+    return false;
+  }
+
+  const displays = screen.getAllDisplays();
+
+  for (const display of displays) {
+    const displayBounds = display.bounds;
+
+    // Check if window bounds intersect with display bounds
+    const intersects =
+      bounds.x < displayBounds.x + displayBounds.width &&
+      bounds.x + bounds.width > displayBounds.x &&
+      bounds.y < displayBounds.y + displayBounds.height &&
+      bounds.y + bounds.height > displayBounds.y;
+
+    if (intersects) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 function saveWindowState(win: BrowserWindow) {
   try {
