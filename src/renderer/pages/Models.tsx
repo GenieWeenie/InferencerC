@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Model } from '../../shared/types';
 import { HistoryService } from '../services/history';
 import { Search, Download, Upload, FileText, HardDrive, Cpu, X, Check, AlertCircle, Loader2, Database, Heart, Tag } from 'lucide-react';
+import ProgressBar from '../components/ProgressBar';
 
 interface SearchResult {
   id: string;
@@ -137,6 +138,27 @@ const Models: React.FC = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  const formatSpeed = (kbps: number) => {
+    if (kbps < 1024) {
+      return `${kbps.toFixed(1)} KB/s`;
+    }
+    return `${(kbps / 1024).toFixed(2)} MB/s`;
+  };
+
+  const formatETA = (seconds: number) => {
+    if (seconds < 60) {
+      return `${Math.round(seconds)}s`;
+    } else if (seconds < 3600) {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.round(seconds % 60);
+      return `${mins}m ${secs}s`;
+    } else {
+      const hours = Math.floor(seconds / 3600);
+      const mins = Math.floor((seconds % 3600) / 60);
+      return `${hours}h ${mins}m`;
+    }
+  };
+
   return (
     <div className="p-8 max-w-7xl mx-auto h-full overflow-y-auto custom-scrollbar space-y-8 pb-20">
 
@@ -172,22 +194,51 @@ const Models: React.FC = () => {
       {activeDownloads.length > 0 && (
         <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-6 backdrop-blur-sm animate-in fade-in slide-in-from-top-4">
           <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-            <Loader2 className="animate-spin text-primary" size={20} /> Active Downloads
+            <Download className="animate-bounce text-primary" size={20} /> Active Downloads
           </h3>
           <div className="space-y-4">
             {activeDownloads.map((d, i) => (
               <div key={i} className="bg-slate-950 rounded-lg p-4 border border-slate-800">
-                <div className="flex justify-between mb-2">
-                  <span className="font-bold text-slate-200 flex items-center gap-2"><FileText size={14} /> {d.fileName}</span>
-                  <span className="text-sm font-mono text-primary">{d.status === 'downloading' ? `${d.progress}%` : d.status}</span>
+                <div className="flex justify-between mb-3">
+                  <span className="font-bold text-slate-200 flex items-center gap-2">
+                    <FileText size={14} /> {d.fileName}
+                  </span>
+                  {d.status === 'completed' && (
+                    <span className="text-sm font-bold text-emerald-400 flex items-center gap-1">
+                      <Check size={14} /> Completed
+                    </span>
+                  )}
+                  {d.status === 'error' && (
+                    <span className="text-sm font-bold text-red-400 flex items-center gap-1">
+                      <AlertCircle size={14} /> Error
+                    </span>
+                  )}
                 </div>
-                <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${d.status === 'error' ? 'bg-red-500' : 'bg-primary'}`}
-                    style={{ width: `${d.progress}%` }}
-                  ></div>
-                </div>
-                {d.error && <small className="text-red-400 mt-2 block flex items-center gap-1"><AlertCircle size={12} /> {d.error}</small>}
+
+                <ProgressBar
+                  progress={d.progress}
+                  showPercentage={true}
+                  height="md"
+                  color={d.status === 'error' ? 'gray' : 'blue'}
+                  className="mb-3"
+                />
+
+                {d.status === 'downloading' && (
+                  <div className="flex justify-between text-xs text-slate-400">
+                    <span>
+                      {d.speed && d.speed > 0 ? formatSpeed(d.speed) : 'Calculating...'}
+                    </span>
+                    <span>
+                      {d.eta && d.eta > 0 ? `ETA: ${formatETA(d.eta)}` : 'Calculating ETA...'}
+                    </span>
+                  </div>
+                )}
+
+                {d.error && (
+                  <div className="text-red-400 mt-2 text-sm flex items-center gap-1">
+                    <AlertCircle size={12} /> {d.error}
+                  </div>
+                )}
               </div>
             ))}
           </div>
