@@ -29,7 +29,7 @@ interface CollapsedItem {
     preview: string;
     language?: string;
     messageIndex: number;
-    messageRole: 'user' | 'assistant' | 'system';
+    messageRole: 'user' | 'assistant' | 'system' | 'tool';
 }
 
 interface CollapsedSectionsNavProps {
