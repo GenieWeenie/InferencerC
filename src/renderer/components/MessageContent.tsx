@@ -11,6 +11,7 @@ import 'katex/dist/katex.min.css';
 import ArtifactPreview from './ArtifactPreview';
 import { toast } from 'sonner';
 import { githubService } from '../services/github';
+import { useCollapseState } from '../hooks/useCollapseState';
 
 interface MessageContentProps {
     content: string;
@@ -18,6 +19,7 @@ interface MessageContentProps {
     mcpAvailable?: boolean;
     onInsertToFile?: (code: string, language: string) => void;
     isStreaming?: boolean;
+    sessionId?: string;
 }
 
 // Languages that support live preview
@@ -32,7 +34,7 @@ const COMMON_LANGUAGES = [
     'diff', 'git', 'nginx', 'apache', 'graphql', 'vue', 'svelte', 'angular'
 ];
 
-const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAvailable, onInsertToFile, isStreaming }) => {
+const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAvailable, onInsertToFile, isStreaming, sessionId = 'default' }) => {
     const [displayContent, setDisplayContent] = React.useState(content);
 
     // Typewriter effect for streaming
@@ -68,8 +70,9 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
     const [codeBlockLanguages, setCodeBlockLanguages] = React.useState<Record<string, string>>({});
     const [executingCode, setExecutingCode] = React.useState<string | null>(null);
     const [executionResults, setExecutionResults] = React.useState<Record<string, { output: string; success: boolean }>>({});
-    // Track collapsed state per code block (keyed by code content hash)
-    const [collapsedCodeBlocks, setCollapsedCodeBlocks] = React.useState<Record<string, boolean>>({});
+
+    // Use collapse state hook for persistent code block collapse state
+    const { isCollapsed, toggleCollapse } = useCollapseState(sessionId);
 
     const handleCopy = (code: string) => {
         navigator.clipboard.writeText(code);
@@ -262,11 +265,11 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                             ))}
                                         </select>
                                         <button
-                                            onClick={() => setCollapsedCodeBlocks(prev => ({ ...prev, [codeHash]: !prev[codeHash] }))}
+                                            onClick={() => toggleCollapse(codeHash)}
                                             className="p-1 hover:bg-slate-700/50 rounded transition-colors"
-                                            title={collapsedCodeBlocks[codeHash] ? "Expand code block" : "Collapse code block"}
+                                            title={isCollapsed(codeHash) ? "Expand code block" : "Collapse code block"}
                                         >
-                                            {collapsedCodeBlocks[codeHash] ? (
+                                            {isCollapsed(codeHash) ? (
                                                 <ChevronDown size={16} className="text-slate-400" />
                                             ) : (
                                                 <ChevronUp size={16} className="text-slate-400" />
@@ -357,7 +360,7 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                     </div>
                                 </div>
                                 <AnimatePresence initial={false}>
-                                    {!collapsedCodeBlocks[codeHash] && (
+                                    {!isCollapsed(codeHash) && (
                                         <motion.div
                                             initial={{ height: 0, opacity: 0 }}
                                             animate={{ height: "auto", opacity: 1 }}
