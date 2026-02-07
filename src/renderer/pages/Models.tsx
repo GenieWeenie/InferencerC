@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Model } from '../../shared/types';
 import { HistoryService } from '../services/history';
 import { Search, Download, Upload, FileText, HardDrive, Cpu, X, Check, AlertCircle, Loader2, Database, Heart, Tag } from 'lucide-react';
+import ProgressBar from '../components/ProgressBar';
 
 interface SearchResult {
   id: string;
@@ -17,6 +18,9 @@ interface DownloadStatus {
   progress: number;
   status: 'downloading' | 'completed' | 'error';
   error?: string;
+  speed?: number; // KB/s
+  eta?: number; // seconds
+  bytesDownloaded?: number;
 }
 
 interface HFFile {
@@ -134,6 +138,27 @@ const Models: React.FC = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  const formatSpeed = (kbps: number) => {
+    if (kbps < 1024) {
+      return `${kbps.toFixed(1)} KB/s`;
+    }
+    return `${(kbps / 1024).toFixed(2)} MB/s`;
+  };
+
+  const formatETA = (seconds: number) => {
+    if (seconds < 60) {
+      return `${Math.round(seconds)}s`;
+    } else if (seconds < 3600) {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.round(seconds % 60);
+      return `${mins}m ${secs}s`;
+    } else {
+      const hours = Math.floor(seconds / 3600);
+      const mins = Math.floor((seconds % 3600) / 60);
+      return `${hours}h ${mins}m`;
+    }
+  };
+
   return (
     <div className="p-8 max-w-7xl mx-auto h-full overflow-y-auto custom-scrollbar space-y-8 pb-20">
 
@@ -169,22 +194,51 @@ const Models: React.FC = () => {
       {activeDownloads.length > 0 && (
         <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-6 backdrop-blur-sm animate-in fade-in slide-in-from-top-4">
           <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-            <Loader2 className="animate-spin text-primary" size={20} /> Active Downloads
+            <Download className="animate-bounce text-primary" size={20} /> Active Downloads
           </h3>
           <div className="space-y-4">
             {activeDownloads.map((d, i) => (
               <div key={i} className="bg-slate-950 rounded-lg p-4 border border-slate-800">
-                <div className="flex justify-between mb-2">
-                  <span className="font-bold text-slate-200 flex items-center gap-2"><FileText size={14} /> {d.fileName}</span>
-                  <span className="text-sm font-mono text-primary">{d.status === 'downloading' ? `${d.progress}%` : d.status}</span>
+                <div className="flex justify-between mb-3">
+                  <span className="font-bold text-slate-200 flex items-center gap-2">
+                    <FileText size={14} /> {d.fileName}
+                  </span>
+                  {d.status === 'completed' && (
+                    <span className="text-sm font-bold text-emerald-400 flex items-center gap-1">
+                      <Check size={14} /> Completed
+                    </span>
+                  )}
+                  {d.status === 'error' && (
+                    <span className="text-sm font-bold text-red-400 flex items-center gap-1">
+                      <AlertCircle size={14} /> Error
+                    </span>
+                  )}
                 </div>
-                <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${d.status === 'error' ? 'bg-red-500' : 'bg-primary'}`}
-                    style={{ width: `${d.progress}%` }}
-                  ></div>
-                </div>
-                {d.error && <small className="text-red-400 mt-2 block flex items-center gap-1"><AlertCircle size={12} /> {d.error}</small>}
+
+                <ProgressBar
+                  progress={d.progress}
+                  showPercentage={true}
+                  height="md"
+                  color={d.status === 'error' ? 'gray' : 'blue'}
+                  className="mb-3"
+                />
+
+                {d.status === 'downloading' && (
+                  <div className="flex justify-between text-xs text-slate-400">
+                    <span>
+                      {d.speed && d.speed > 0 ? formatSpeed(d.speed) : 'Calculating...'}
+                    </span>
+                    <span>
+                      {d.eta && d.eta > 0 ? `ETA: ${formatETA(d.eta)}` : 'Calculating ETA...'}
+                    </span>
+                  </div>
+                )}
+
+                {d.error && (
+                  <div className="text-red-400 mt-2 text-sm flex items-center gap-1">
+                    <AlertCircle size={12} /> {d.error}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -251,35 +305,42 @@ const Models: React.FC = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {searchResults.map(result => (
-            <div key={result.id} className="bg-slate-900 border border-slate-800 rounded-xl p-6 hover:shadow-xl hover:border-slate-700 transition-all flex flex-col group cursor-default">
-              <div className="flex justify-between items-start mb-4">
-                <h4 className="font-bold text-lg text-white break-all pr-2 line-clamp-2">{result.modelId}</h4>
-              </div>
+        {isSearching ? (
+          <div className="flex flex-col items-center justify-center py-16 text-slate-500 gap-4">
+            <Loader2 size={48} className="animate-spin text-primary" />
+            <p className="text-lg">Searching Hugging Face...</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {searchResults.map(result => (
+              <div key={result.id} className="bg-slate-900 border border-slate-800 rounded-xl p-6 hover:shadow-xl hover:border-slate-700 transition-all flex flex-col group cursor-default">
+                <div className="flex justify-between items-start mb-4">
+                  <h4 className="font-bold text-lg text-white break-all pr-2 line-clamp-2">{result.modelId}</h4>
+                </div>
 
-              <div className="flex gap-4 text-sm text-slate-400 mb-6 font-mono">
-                <div className="flex items-center gap-1"><Heart size={14} className="text-red-400" /> {result.likes}</div>
-                <div className="flex items-center gap-1"><Download size={14} className="text-blue-400" /> {result.downloads}</div>
-              </div>
+                <div className="flex gap-4 text-sm text-slate-400 mb-6 font-mono">
+                  <div className="flex items-center gap-1"><Heart size={14} className="text-red-400" /> {result.likes}</div>
+                  <div className="flex items-center gap-1"><Download size={14} className="text-blue-400" /> {result.downloads}</div>
+                </div>
 
-              <div className="flex flex-wrap gap-2 mb-6 flex-1 content-start">
-                {result.tags.slice(0, 5).map(tag => (
-                  <span key={tag} className="bg-slate-950 text-slate-400 px-2 py-1 rounded text-xs border border-slate-800 flex items-center gap-1">
-                    <Tag size={10} /> {tag}
-                  </span>
-                ))}
-              </div>
+                <div className="flex flex-wrap gap-2 mb-6 flex-1 content-start">
+                  {result.tags.slice(0, 5).map(tag => (
+                    <span key={tag} className="bg-slate-950 text-slate-400 px-2 py-1 rounded text-xs border border-slate-800 flex items-center gap-1">
+                      <Tag size={10} /> {tag}
+                    </span>
+                  ))}
+                </div>
 
-              <button
-                onClick={() => openDownloadModal(result)}
-                className="w-full py-2.5 bg-slate-800 text-white rounded-lg hover:bg-primary hover:text-slate-900 font-bold transition-all flex items-center justify-center gap-2 group-hover:shadow-lg"
-              >
-                <Download size={16} /> Select File
-              </button>
-            </div>
-          ))}
-        </div>
+                <button
+                  onClick={() => openDownloadModal(result)}
+                  className="w-full py-2.5 bg-slate-800 text-white rounded-lg hover:bg-primary hover:text-slate-900 font-bold transition-all flex items-center justify-center gap-2 group-hover:shadow-lg"
+                >
+                  <Download size={16} /> Select File
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* File Selection Modal */}

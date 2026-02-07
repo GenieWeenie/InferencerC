@@ -8,6 +8,7 @@ import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Copy, Check, Play, X, FileText, Save, PlayCircle, Github } from 'lucide-react';
 import 'katex/dist/katex.min.css';
 import ArtifactPreview from './ArtifactPreview';
+import StreamingIndicator from './StreamingIndicator';
 import { toast } from 'sonner';
 import { githubService } from '../services/github';
 
@@ -501,6 +502,13 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
             >
                 {cleanContent}
             </ReactMarkdown>
+
+            {/* Streaming Indicator */}
+            {isStreaming && !isUser && (
+                <div className="mt-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <StreamingIndicator />
+                </div>
+            )}
 
             {/* Artifact Preview Modal */}
             {previewCode && (

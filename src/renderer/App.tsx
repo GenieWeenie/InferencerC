@@ -88,7 +88,7 @@ const App: React.FC = () => {
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-900/10 via-slate-900/0 to-transparent pointer-events-none" />
 
           <main className="flex-1 overflow-hidden relative z-10">
-            <Suspense fallback={<div className="flex items-center justify-center h-full"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>}>
+            <Suspense fallback={<div className="flex items-center justify-center h-full"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}>
               <AnimatePresence mode="wait">
                 {activeTab === 'chat' && (
                   <motion.div

@@ -31,6 +31,7 @@ import {
     EyeOff,
 } from 'lucide-react';
 import { SearchService, SearchResult, SearchFilters, SearchStats } from '../services/search';
+import LoadingSpinner from './LoadingSpinner';
 
 export interface ExpandMetadata {
     expandMessage?: boolean;
@@ -277,7 +278,7 @@ const GlobalSearchDialog: React.FC<GlobalSearchDialogProps> = ({
                                         className="w-full bg-slate-800 border border-slate-600/50 rounded-xl pl-10 pr-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all text-lg"
                                     />
                                     {isSearching && (
-                                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-400 animate-spin" />
+                                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-primary animate-spin" />
                                     )}
                                 </div>
                                 <button
@@ -411,8 +412,16 @@ const GlobalSearchDialog: React.FC<GlobalSearchDialogProps> = ({
                                 </div>
                             )}
 
+                            {/* Loading state */}
+                            {query && isSearching && (
+                                <div className="flex flex-col items-center justify-center py-16">
+                                    <LoadingSpinner size="lg" className="mb-4" />
+                                    <p className="text-sm text-slate-400">Searching conversations...</p>
+                                </div>
+                            )}
+
                             {/* Search results */}
-                            {query && results.length > 0 && (
+                            {query && !isSearching && results.length > 0 && (
                                 <div className="divide-y divide-slate-800">
                                     {results.map((result, index) => (
                                         <motion.button

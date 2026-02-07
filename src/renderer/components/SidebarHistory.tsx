@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Clock, MessageSquare, Trash2, Calendar, Archive, Pin, Edit2, Search, X, Check, Filter } from 'lucide-react';
 import { ChatSession } from '../services/history';
+import SkeletonLoader from './SkeletonLoader';
 
 interface SidebarHistoryProps {
     sessions: ChatSession[];
@@ -9,9 +10,10 @@ interface SidebarHistoryProps {
     onDeleteSession: (id: string) => void;
     onRenameSession: (id: string, newTitle: string) => void;
     onTogglePinSession: (id: string) => void;
+    isLoading?: boolean;
 }
 
-const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessionId, onLoadSession, onDeleteSession, onRenameSession, onTogglePinSession }) => {
+const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessionId, onLoadSession, onDeleteSession, onRenameSession, onTogglePinSession, isLoading = false }) => {
 
     // Inline rename state
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -193,6 +195,34 @@ const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessio
         );
     };
 
+    // Render skeleton loader for session item
+    const SessionSkeleton = () => (
+        <div className="px-4 py-3 border-l-2 border-l-transparent">
+            <div className="flex justify-between items-start pr-12 min-h-[24px]">
+                <SkeletonLoader variant="text" width="w-3/4" className="mb-2" />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+                <SkeletonLoader variant="text" width="w-16" height="h-3" />
+                <SkeletonLoader variant="text" width="w-20" height="h-3" />
+            </div>
+        </div>
+    );
+
+    // Render skeleton group
+    const renderSkeletonGroup = (label: string, count: number) => (
+        <div key={label} className="mb-6">
+            <div className="px-4 mb-2 text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                {label === 'Today' && <Calendar size={12} />}
+                {label}
+            </div>
+            <div className="space-y-0.5">
+                {Array.from({ length: count }).map((_, i) => (
+                    <SessionSkeleton key={`skeleton-${label}-${i}`} />
+                ))}
+            </div>
+        </div>
+    );
+
     const renderGroup = (label: string, list: ChatSession[]) => {
         if (list.length === 0) return null;
         return (
@@ -363,48 +393,58 @@ const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessio
 
             {/* Sessions List */}
             <div className="flex-1 overflow-y-auto custom-scrollbar py-4">
-                {/* Show search results count when searching or filtering */}
-                {(searchQuery || filterModel || dateRangeStart || dateRangeEnd) && (
-                    <div className="px-4 mb-3 text-xs text-slate-500">
-                        Found <span className="text-primary font-bold">{filteredSessions.length}</span> result{filteredSessions.length !== 1 ? 's' : ''}
-                        {filterModel && (
-                            <span className="ml-1">
-                                for <span className="text-blue-400 font-medium">{filterModel.split('/').pop()}</span>
-                            </span>
+                {isLoading ? (
+                    <>
+                        {renderSkeletonGroup('Today', 3)}
+                        {renderSkeletonGroup('Yesterday', 2)}
+                        {renderSkeletonGroup('Previous 7 Days', 4)}
+                    </>
+                ) : (
+                    <>
+                        {/* Show search results count when searching or filtering */}
+                        {(searchQuery || filterModel || dateRangeStart || dateRangeEnd) && (
+                            <div className="px-4 mb-3 text-xs text-slate-500">
+                                Found <span className="text-primary font-bold">{filteredSessions.length}</span> result{filteredSessions.length !== 1 ? 's' : ''}
+                                {filterModel && (
+                                    <span className="ml-1">
+                                        for <span className="text-blue-400 font-medium">{filterModel.split('/').pop()}</span>
+                                    </span>
+                                )}
+                                {(dateRangeStart || dateRangeEnd) && (
+                                    <span className="ml-1">
+                                        {dateRangeStart && dateRangeEnd
+                                            ? `from ${new Date(dateRangeStart).toLocaleDateString()} to ${new Date(dateRangeEnd).toLocaleDateString()}`
+                                            : dateRangeStart
+                                                ? `from ${new Date(dateRangeStart).toLocaleDateString()}`
+                                                : `until ${new Date(dateRangeEnd).toLocaleDateString()}`
+                                        }
+                                    </span>
+                                )}
+                            </div>
                         )}
-                        {(dateRangeStart || dateRangeEnd) && (
-                            <span className="ml-1">
-                                {dateRangeStart && dateRangeEnd 
-                                    ? `from ${new Date(dateRangeStart).toLocaleDateString()} to ${new Date(dateRangeEnd).toLocaleDateString()}`
-                                    : dateRangeStart 
-                                        ? `from ${new Date(dateRangeStart).toLocaleDateString()}`
-                                        : `until ${new Date(dateRangeEnd).toLocaleDateString()}`
-                                }
-                            </span>
+
+                        {renderGroup('Pinned', groupedSessions['Pinned'])}
+                        {renderGroup('Today', groupedSessions['Today'])}
+                        {renderGroup('Yesterday', groupedSessions['Yesterday'])}
+                        {renderGroup('Previous 7 Days', groupedSessions['Previous 7 Days'])}
+                        {renderGroup('Older', groupedSessions['Older'])}
+
+                        {filteredSessions.length === 0 && searchQuery && (
+                            <div className="flex flex-col items-center justify-center h-48 text-slate-600 text-center px-6">
+                                <Search size={32} className="mb-3 opacity-20" />
+                                <p className="text-sm">No matches found.</p>
+                                <p className="text-xs mt-1">Try a different search term.</p>
+                            </div>
                         )}
-                    </div>
-                )}
 
-                {renderGroup('Pinned', groupedSessions['Pinned'])}
-                {renderGroup('Today', groupedSessions['Today'])}
-                {renderGroup('Yesterday', groupedSessions['Yesterday'])}
-                {renderGroup('Previous 7 Days', groupedSessions['Previous 7 Days'])}
-                {renderGroup('Older', groupedSessions['Older'])}
-
-                {filteredSessions.length === 0 && searchQuery && (
-                    <div className="flex flex-col items-center justify-center h-48 text-slate-600 text-center px-6">
-                        <Search size={32} className="mb-3 opacity-20" />
-                        <p className="text-sm">No matches found.</p>
-                        <p className="text-xs mt-1">Try a different search term.</p>
-                    </div>
-                )}
-
-                {sessions.length === 0 && !searchQuery && (
-                    <div className="flex flex-col items-center justify-center h-48 text-slate-600 text-center px-6">
-                        <MessageSquare size={32} className="mb-3 opacity-20" />
-                        <p className="text-sm">No recent chats.</p>
-                        <p className="text-xs mt-1">Start a new conversation to save it here.</p>
-                    </div>
+                        {sessions.length === 0 && !searchQuery && (
+                            <div className="flex flex-col items-center justify-center h-48 text-slate-600 text-center px-6">
+                                <MessageSquare size={32} className="mb-3 opacity-20" />
+                                <p className="text-sm">No recent chats.</p>
+                                <p className="text-xs mt-1">Start a new conversation to save it here.</p>
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
         </div>

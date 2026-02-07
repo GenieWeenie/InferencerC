@@ -8,7 +8,9 @@
       "Bash(timeout 10 tail:*)",
       "Bash(npx tsc:*)",
       "Bash(wc:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(git commit:*)",
+      "Bash(findstr:*)"
     ]
   }
 }
