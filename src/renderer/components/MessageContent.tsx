@@ -5,7 +5,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check, Play, X, FileText, Save, PlayCircle, Github } from 'lucide-react';
+import { Copy, Check, Play, X, FileText, Save, PlayCircle, Github, ChevronDown, ChevronUp } from 'lucide-react';
 import 'katex/dist/katex.min.css';
 import ArtifactPreview from './ArtifactPreview';
 import { toast } from 'sonner';
@@ -67,6 +67,8 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
     const [codeBlockLanguages, setCodeBlockLanguages] = React.useState<Record<string, string>>({});
     const [executingCode, setExecutingCode] = React.useState<string | null>(null);
     const [executionResults, setExecutionResults] = React.useState<Record<string, { output: string; success: boolean }>>({});
+    // Track collapsed state per code block (keyed by code content hash)
+    const [collapsedCodeBlocks, setCollapsedCodeBlocks] = React.useState<Record<string, boolean>>({});
 
     const handleCopy = (code: string) => {
         navigator.clipboard.writeText(code);
@@ -258,6 +260,17 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                                 </option>
                                             ))}
                                         </select>
+                                        <button
+                                            onClick={() => setCollapsedCodeBlocks(prev => ({ ...prev, [codeHash]: !prev[codeHash] }))}
+                                            className="p-1 hover:bg-slate-700/50 rounded transition-colors"
+                                            title={collapsedCodeBlocks[codeHash] ? "Expand code block" : "Collapse code block"}
+                                        >
+                                            {collapsedCodeBlocks[codeHash] ? (
+                                                <ChevronDown size={16} className="text-slate-400" />
+                                            ) : (
+                                                <ChevronUp size={16} className="text-slate-400" />
+                                            )}
+                                        </button>
                                     </div>
                                     <div className="flex items-center gap-1">
                                         {isPreviewable && (
@@ -342,23 +355,25 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                         </button>
                                     </div>
                                 </div>
-                                <div className="relative">
-                                    <SyntaxHighlighter
-                                        {...props}
-                                        style={vscDarkPlus}
-                                        language={language}
-                                        PreTag="div"
-                                        customStyle={{ margin: 0, borderRadius: 0, padding: '1.25rem', overflowX: 'auto', background: 'transparent', fontSize: '13px', lineHeight: '1.5' }}
-                                        wrapLines={true}
-                                        wrapLongLines={true}
-                                        showLineNumbers={true}
-                                        lineNumberStyle={{ minWidth: '2em', paddingRight: '1em', color: '#525252', textAlign: 'right' }}
-                                    >
-                                        {codeString}
-                                    </SyntaxHighlighter>
-                                </div>
-                                {/* Execution Results */}
-                                {executionResults[codeHash] && (
+                                {!collapsedCodeBlocks[codeHash] && (
+                                    <>
+                                        <div className="relative">
+                                            <SyntaxHighlighter
+                                                {...props}
+                                                style={vscDarkPlus}
+                                                language={language}
+                                                PreTag="div"
+                                                customStyle={{ margin: 0, borderRadius: 0, padding: '1.25rem', overflowX: 'auto', background: 'transparent', fontSize: '13px', lineHeight: '1.5' }}
+                                                wrapLines={true}
+                                                wrapLongLines={true}
+                                                showLineNumbers={true}
+                                                lineNumberStyle={{ minWidth: '2em', paddingRight: '1em', color: '#525252', textAlign: 'right' }}
+                                            >
+                                                {codeString}
+                                            </SyntaxHighlighter>
+                                        </div>
+                                        {/* Execution Results */}
+                                        {executionResults[codeHash] && (
                                     <div className={`px-4 py-3 border-t ${executionResults[codeHash].success ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
                                         <div className="flex items-center gap-2 mb-2">
                                             <span className={`text-xs font-bold ${executionResults[codeHash].success ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -416,6 +431,8 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                             </button>
                                         </div>
                                     </div>
+                                )}
+                                    </>
                                 )}
                             </div>
                         ) : (
