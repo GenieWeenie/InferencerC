@@ -62,6 +62,24 @@ electron_1.ipcMain.handle('quit-and-install', () => {
     electron_updater_1.autoUpdater.quitAndInstall();
 });
 const WINDOW_STATE_PATH = path_1.default.join(electron_1.app.getPath('userData'), 'window-state.json');
+function isPositionVisible(bounds) {
+    if (bounds.x === undefined || bounds.y === undefined) {
+        return false;
+    }
+    const displays = electron_1.screen.getAllDisplays();
+    for (const display of displays) {
+        const displayBounds = display.bounds;
+        // Check if window bounds intersect with display bounds
+        const intersects = bounds.x < displayBounds.x + displayBounds.width &&
+            bounds.x + bounds.width > displayBounds.x &&
+            bounds.y < displayBounds.y + displayBounds.height &&
+            bounds.y + bounds.height > displayBounds.y;
+        if (intersects) {
+            return true;
+        }
+    }
+    return false;
+}
 function saveWindowState(win) {
     try {
         const bounds = win.getBounds();
@@ -74,7 +92,18 @@ function saveWindowState(win) {
 function loadWindowState() {
     try {
         if (fs_1.default.existsSync(WINDOW_STATE_PATH)) {
-            return JSON.parse(fs_1.default.readFileSync(WINDOW_STATE_PATH, 'utf-8'));
+            const savedState = JSON.parse(fs_1.default.readFileSync(WINDOW_STATE_PATH, 'utf-8'));
+            // Validate that the saved position is on-screen
+            if (!isPositionVisible(savedState)) {
+                // Position is not visible, return defaults without x/y to center on primary display
+                return {
+                    width: savedState.width || 1200,
+                    height: savedState.height || 800,
+                    isMaximized: savedState.isMaximized,
+                    isFullscreen: savedState.isFullscreen
+                };
+            }
+            return savedState;
         }
     }
     catch (e) {
@@ -105,6 +134,9 @@ function createWindow() {
     if (savedState.isMaximized) {
         win.maximize();
     }
+    if (savedState.isFullscreen) {
+        win.setFullScreen(true);
+    }
     const devUrl = 'http://localhost:5173';
     if (!electron_1.app.isPackaged) {
         win.loadURL(devUrl);
@@ -116,12 +148,15 @@ function createWindow() {
     // Window state change tracking
     const trackState = () => {
         const isMaximized = win.isMaximized();
-        if (!isMaximized) {
+        const isFullscreen = win.isFullScreen();
+        if (!isMaximized && !isFullscreen) {
             saveWindowState(win);
         }
-        // We also want to store the maximized state separately
+        // We also want to store the maximized and fullscreen states separately
         try {
-            const state = isMaximized ? { ...loadWindowState(), isMaximized: true } : { ...win.getBounds(), isMaximized: false };
+            const state = isMaximized || isFullscreen
+                ? { ...loadWindowState(), isMaximized, isFullscreen }
+                : { ...win.getBounds(), isMaximized: false, isFullscreen: false };
             fs_1.default.writeFileSync(WINDOW_STATE_PATH, JSON.stringify(state));
         }
         catch (e) { }
@@ -129,6 +164,8 @@ function createWindow() {
     win.on('resize', trackState);
     win.on('move', trackState);
     win.on('close', trackState);
+    win.on('enter-full-screen', trackState);
+    win.on('leave-full-screen', trackState);
     // Window Control IPC Handlers
     electron_1.ipcMain.on('window-minimize', () => win.minimize());
     electron_1.ipcMain.on('window-maximize', () => {

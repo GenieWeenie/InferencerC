@@ -70,6 +70,15 @@ ipcMain.handle('quit-and-install', () => {
 
 const WINDOW_STATE_PATH = path.join(app.getPath('userData'), 'window-state.json');
 
+interface WindowState {
+  x?: number;
+  y?: number;
+  width: number;
+  height: number;
+  isMaximized?: boolean;
+  isFullscreen?: boolean;
+}
+
 function isPositionVisible(bounds: { x?: number; y?: number; width: number; height: number }): boolean {
   if (bounds.x === undefined || bounds.y === undefined) {
     return false;
@@ -104,7 +113,7 @@ function saveWindowState(win: BrowserWindow) {
   }
 }
 
-function loadWindowState() {
+function loadWindowState(): WindowState {
   try {
     if (fs.existsSync(WINDOW_STATE_PATH)) {
       const savedState = JSON.parse(fs.readFileSync(WINDOW_STATE_PATH, 'utf-8'));
@@ -115,7 +124,8 @@ function loadWindowState() {
         return {
           width: savedState.width || 1200,
           height: savedState.height || 800,
-          isMaximized: savedState.isMaximized
+          isMaximized: savedState.isMaximized,
+          isFullscreen: savedState.isFullscreen
         };
       }
 
@@ -153,6 +163,10 @@ function createWindow() {
     win.maximize();
   }
 
+  if (savedState.isFullscreen) {
+    win.setFullScreen(true);
+  }
+
   const devUrl = 'http://localhost:5173';
 
   if (!app.isPackaged) {
@@ -165,12 +179,15 @@ function createWindow() {
   // Window state change tracking
   const trackState = () => {
     const isMaximized = win.isMaximized();
-    if (!isMaximized) {
+    const isFullscreen = win.isFullScreen();
+    if (!isMaximized && !isFullscreen) {
       saveWindowState(win);
     }
-    // We also want to store the maximized state separately
+    // We also want to store the maximized and fullscreen states separately
     try {
-      const state = isMaximized ? { ...loadWindowState(), isMaximized: true } : { ...win.getBounds(), isMaximized: false };
+      const state: WindowState = isMaximized || isFullscreen
+        ? { ...loadWindowState(), isMaximized, isFullscreen }
+        : { ...win.getBounds(), isMaximized: false, isFullscreen: false };
       fs.writeFileSync(WINDOW_STATE_PATH, JSON.stringify(state));
     } catch (e) { }
   };
@@ -178,6 +195,8 @@ function createWindow() {
   win.on('resize', trackState);
   win.on('move', trackState);
   win.on('close', trackState);
+  win.on('enter-full-screen', trackState);
+  win.on('leave-full-screen', trackState);
 
   // Window Control IPC Handlers
   ipcMain.on('window-minimize', () => win.minimize());

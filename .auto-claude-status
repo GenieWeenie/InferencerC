@@ -1,0 +1,25 @@
+{
+  "active": true,
+  "spec": "005-window-management-position-persistence",
+  "state": "building",
+  "subtasks": {
+    "completed": 2,
+    "total": 7,
+    "in_progress": 1,
+    "failed": 0
+  },
+  "phase": {
+    "current": "Window Docking State Persistence",
+    "id": null,
+    "total": 2
+  },
+  "workers": {
+    "active": 0,
+    "max": 1
+  },
+  "session": {
+    "number": 4,
+    "started_at": "2026-02-06T17:45:45.010587"
+  },
+  "last_update": "2026-02-06T17:54:01.789871"
+}
