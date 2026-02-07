@@ -16,6 +16,7 @@ import ExportDialog from '../components/ExportDialog';
 import GlobalSearchDialog from '../components/GlobalSearchDialog';
 import ConversationSummaryPanel from '../components/ConversationSummaryPanel';
 import TemplateLibraryDialog from '../components/TemplateLibraryDialog';
+import CollapsedSectionsNav from '../components/CollapsedSectionsNav';
 import { ABTestingPanel } from '../components/ABTestingPanel';
 import { PromptOptimizationPanel } from '../components/PromptOptimizationPanel';
 import { CalendarScheduleDialog } from '../components/CalendarScheduleDialog';
@@ -41,6 +42,7 @@ import SidebarHistory from '../components/SidebarHistory';
 import { useChat } from '../hooks/useChat';
 import { usePrompts, PromptSnippet } from '../hooks/usePrompts';
 import { useConversationTree } from '../hooks/useConversationTree';
+import { useCollapseState } from '../hooks/useCollapseState';
 import { calculateEntropy, compressImage } from '../lib/chatUtils';
 import { useMCP } from '../hooks/useMCP';
 import { analyticsService } from '../services/analytics';
@@ -162,6 +164,9 @@ const Chat: React.FC = () => {
     // Global search dialog state
     const [showGlobalSearch, setShowGlobalSearch] = React.useState(false);
 
+    // Collapsed sections navigation state
+    const [showCollapsedNav, setShowCollapsedNav] = React.useState(false);
+
     // A/B Testing panel state
     const [showABTesting, setShowABTesting] = React.useState(false);
 
@@ -199,6 +204,9 @@ const Chat: React.FC = () => {
 
     // Initialize conversation tree (always initialize, will sync when enabled)
     const treeHook = useConversationTree();
+
+    // Initialize collapse state for navigation
+    const collapseHook = useCollapseState(sessionId);
 
     // Responsive design subscription
     React.useEffect(() => {
@@ -570,6 +578,25 @@ const Chat: React.FC = () => {
         });
     };
 
+    // Handle jumping to collapsed section from navigation
+    const handleJumpToSection = (messageIndex: number, itemId: string) => {
+        // First, expand the collapsed section
+        collapseHook.setCollapsed(itemId, false);
+
+        // Then scroll to the message
+        if (virtuosoRef.current && messageIndex >= 0) {
+            setTimeout(() => {
+                virtuosoRef.current.scrollToIndex({
+                    index: messageIndex,
+                    align: 'center',
+                    behavior: 'smooth'
+                });
+            }, 100); // Small delay to allow expansion animation
+        }
+
+        toast.success('Jumped to section');
+    };
+
     // Load bookmarks when session changes
     React.useEffect(() => {
         try {
@@ -666,6 +693,13 @@ const Chat: React.FC = () => {
                 return;
             }
 
+            // Ctrl+Shift+N: Toggle Collapsed Sections Navigation
+            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'N') {
+                e.preventDefault();
+                setShowCollapsedNav(prev => !prev);
+                return;
+            }
+
             // Ctrl+Shift+R: Open Recommendations
             if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'r') {
                 e.preventDefault();
@@ -720,7 +754,7 @@ const Chat: React.FC = () => {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [createNewSession, setShowHistory, stopGeneration, showShortcutsModal, editingMessageIndex, history, handleCancelEdit, setHistory]);
+    }, [createNewSession, setShowHistory, stopGeneration, showShortcutsModal, editingMessageIndex, history, handleCancelEdit, setHistory, showCollapsedNav]);
 
     return (
         <div className="flex h-full flex-row relative bg-background text-text font-body overflow-hidden min-w-0 max-w-full">
@@ -1220,6 +1254,17 @@ const Chat: React.FC = () => {
 
                 {/* Messages List */}
                 <div className="flex-1 overflow-hidden bg-background relative min-w-0 max-w-full">
+                    {/* Collapsed Sections Navigation */}
+                    {history.length > 0 && showCollapsedNav && (
+                        <div className="px-6 pt-4">
+                            <CollapsedSectionsNav
+                                sessionId={sessionId}
+                                messages={history}
+                                onJumpToSection={handleJumpToSection}
+                            />
+                        </div>
+                    )}
+
                     {history.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-full max-w-2xl mx-auto p-8 text-center space-y-8 animate-in fade-in duration-700">
                             <div className="relative">
