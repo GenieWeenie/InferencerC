@@ -59,6 +59,22 @@ import { TemplateService, ConversationTemplate } from '../services/templates';
 import { PromptVariableService } from '../services/promptVariables';
 import VariableInsertMenu from '../components/VariableInsertMenu';
 import { AVAILABLE_TOOLS } from '../lib/tools';
+import SkeletonLoader from '../components/SkeletonLoader';
+
+// Message skeleton component for loading states
+const MessageSkeleton: React.FC<{ isUser?: boolean }> = ({ isUser = false }) => {
+    return (
+        <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} py-3`}>
+            <div className={`p-4 rounded-2xl max-w-[85%] ${isUser ? 'bg-primary/20 rounded-tr-sm' : 'bg-slate-800/80 rounded-tl-sm'}`}>
+                <div className="space-y-2">
+                    <SkeletonLoader variant="text" width="w-64" />
+                    <SkeletonLoader variant="text" width="w-48" />
+                    <SkeletonLoader variant="text" width="w-56" />
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const Chat: React.FC = () => {
     // API logs state (defined before useChat so it can be passed as callback)
@@ -66,6 +82,7 @@ const Chat: React.FC = () => {
 
     const [streamingEnabled, setStreamingEnabled] = React.useState(true);
     const [isLoadingSessions, setIsLoadingSessions] = React.useState(true);
+    const [isLoadingMessages, setIsLoadingMessages] = React.useState(true);
 
     const handleApiLog = React.useCallback((log: LogEntry) => {
         setApiLogs(prev => [...prev, log]);
@@ -126,6 +143,13 @@ const Chat: React.FC = () => {
         }, 300);
         return () => clearTimeout(timer);
     }, []);
+
+    // Show skeleton loaders on initial message load
+    React.useEffect(() => {
+        if (history.length > 0 && isLoadingMessages) {
+            setIsLoadingMessages(false);
+        }
+    }, [history, isLoadingMessages]);
 
     // Default secondary model if not set
     React.useEffect(() => {
@@ -434,6 +458,16 @@ const Chat: React.FC = () => {
         }, 10);
     };
 
+    // Wrapper for loadSession with loading state
+    const handleLoadSession = React.useCallback((id: string) => {
+        setIsLoadingMessages(true);
+        loadSession(id);
+        // Simulate brief loading state for smooth skeleton transition
+        setTimeout(() => {
+            setIsLoadingMessages(false);
+        }, 300);
+    }, [loadSession]);
+
     // Message Actions Handlers
     const handleEditMessage = (index: number) => {
         const message = history[index];
@@ -529,7 +563,7 @@ const Chat: React.FC = () => {
             localStorage.setItem('app_chat_sessions', JSON.stringify(updatedSessions));
 
             // Load the new branched session
-            loadSession(newSessionId);
+            handleLoadSession(newSessionId);
             toast.success('Conversation branched!');
         } catch (err) {
             toast.error('Failed to branch conversation');
@@ -743,7 +777,7 @@ const Chat: React.FC = () => {
                     <SidebarHistory
                         sessions={savedSessions}
                         currentSessionId={sessionId}
-                        onLoadSession={loadSession}
+                        onLoadSession={handleLoadSession}
                         onDeleteSession={deleteSession}
                         onRenameSession={renameSession}
                         onTogglePinSession={togglePinSession}
@@ -1270,7 +1304,7 @@ const Chat: React.FC = () => {
                         <Virtuoso
                             ref={virtuosoRef}
                             style={{ height: '100%', width: '100%' }}
-                            data={history}
+                            data={isLoadingMessages ? Array(6).fill(null) : history}
                             followOutput={(isAtBottom: boolean) => {
                                 // If we are streaming (last message is loading), force scroll to bottom
                                 const lastMsg = history[history.length - 1];
@@ -1282,10 +1316,14 @@ const Chat: React.FC = () => {
                             increaseViewportBy={500} // Render more items outside viewport
                             atBottomThreshold={100} // Stick to bottom easier
                             className="custom-scrollbar px-6"
-                            totalCount={history.length}
-                            initialTopMostItemIndex={history.length - 1}
-                            computeItemKey={(index, item) => `${index}-${item.role}`}
+                            totalCount={isLoadingMessages ? 6 : history.length}
+                            initialTopMostItemIndex={isLoadingMessages ? 0 : history.length - 1}
+                            computeItemKey={(index, item) => isLoadingMessages ? `skeleton-${index}` : `${index}-${item.role}`}
                             itemContent={(index, msg) => {
+                                // Show skeleton loaders when loading messages
+                                if (isLoadingMessages) {
+                                    return <MessageSkeleton isUser={index % 2 === 0} />;
+                                }
                                 const isSearchResult = searchResults.includes(index);
                                 const isCurrentSearchResult = searchResults[currentSearchIndex] === index;
                                 const isLastMessage = index === history.length - 1;
@@ -2562,7 +2600,7 @@ const Chat: React.FC = () => {
                 onNavigateToMessage={(targetSessionId, messageIndex) => {
                     // If different session, load it first
                     if (targetSessionId !== sessionId) {
-                        loadSession(targetSessionId);
+                        handleLoadSession(targetSessionId);
                     }
                     // Scroll to the message after a short delay to allow session loading
                     setTimeout(() => {
@@ -2772,7 +2810,7 @@ const Chat: React.FC = () => {
                 currentMessage={input}
                 conversationHistory={history}
                 onSelectConversation={(sessionId) => {
-                    loadSession(sessionId);
+                    handleLoadSession(sessionId);
                     setShowRecommendations(false);
                 }}
             />
@@ -2857,7 +2895,7 @@ const Chat: React.FC = () => {
                     model: undefined,
                 }))}
                 onSelectConversation={(id) => {
-                    loadSession(id);
+                    handleLoadSession(id);
                     setShowWorkspaceViews(false);
                 }}
             />
