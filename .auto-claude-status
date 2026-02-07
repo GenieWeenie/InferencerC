@@ -1,10 +1,10 @@
 {
   "active": true,
   "spec": "007-collapsible-code-blocks-message-sections",
-  "state": "planning",
+  "state": "building",
   "subtasks": {
-    "completed": 0,
-    "total": 0,
+    "completed": 1,
+    "total": 15,
     "in_progress": 1,
     "failed": 0
   },
@@ -18,8 +18,8 @@
     "max": 1
   },
   "session": {
-    "number": 2,
+    "number": 3,
     "started_at": "2026-02-06T22:41:07.179282"
   },
-  "last_update": "2026-02-06T22:46:18.476824"
+  "last_update": "2026-02-06T22:48:16.902424"
 }

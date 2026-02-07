@@ -102,6 +102,9 @@ export interface ChatMessage extends Message {
   selectedChoiceIndex?: number;
   isLoading?: boolean;
   generationTime?: number; // Time in milliseconds to generate this response
+  collapsedCodeBlocks?: string[]; // Array of code block identifiers that are collapsed
+  collapsedSections?: boolean; // Whether the message section itself is collapsed
+  wordCount?: number; // Word count for determining if message should be collapsible
 }
 
 export interface ChatSession {
