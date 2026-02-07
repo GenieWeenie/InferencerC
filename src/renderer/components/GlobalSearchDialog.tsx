@@ -30,6 +30,7 @@ import {
     ChevronDown,
 } from 'lucide-react';
 import { SearchService, SearchResult, SearchFilters, SearchStats } from '../services/search';
+import LoadingSpinner from './LoadingSpinner';
 
 interface GlobalSearchDialogProps {
     isOpen: boolean;
@@ -358,8 +359,16 @@ const GlobalSearchDialog: React.FC<GlobalSearchDialogProps> = ({
                                 </div>
                             )}
 
+                            {/* Loading state */}
+                            {query && isSearching && (
+                                <div className="flex flex-col items-center justify-center py-16">
+                                    <LoadingSpinner size="lg" className="mb-4" />
+                                    <p className="text-sm text-slate-400">Searching conversations...</p>
+                                </div>
+                            )}
+
                             {/* Search results */}
-                            {query && results.length > 0 && (
+                            {query && !isSearching && results.length > 0 && (
                                 <div className="divide-y divide-slate-800">
                                     {results.map((result, index) => (
                                         <motion.button
