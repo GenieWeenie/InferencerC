@@ -107,7 +107,19 @@ function saveWindowState(win: BrowserWindow) {
 function loadWindowState() {
   try {
     if (fs.existsSync(WINDOW_STATE_PATH)) {
-      return JSON.parse(fs.readFileSync(WINDOW_STATE_PATH, 'utf-8'));
+      const savedState = JSON.parse(fs.readFileSync(WINDOW_STATE_PATH, 'utf-8'));
+
+      // Validate that the saved position is on-screen
+      if (!isPositionVisible(savedState)) {
+        // Position is not visible, return defaults without x/y to center on primary display
+        return {
+          width: savedState.width || 1200,
+          height: savedState.height || 800,
+          isMaximized: savedState.isMaximized
+        };
+      }
+
+      return savedState;
     }
   } catch (e) {
     console.error('Failed to load window state', e);
