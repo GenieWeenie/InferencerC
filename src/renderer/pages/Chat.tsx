@@ -65,6 +65,7 @@ const Chat: React.FC = () => {
     const [apiLogs, setApiLogs] = React.useState<LogEntry[]>([]);
 
     const [streamingEnabled, setStreamingEnabled] = React.useState(true);
+    const [isLoadingSessions, setIsLoadingSessions] = React.useState(true);
 
     const handleApiLog = React.useCallback((log: LogEntry) => {
         setApiLogs(prev => [...prev, log]);
@@ -117,6 +118,14 @@ const Chat: React.FC = () => {
         togglePinSession, renameSession,
         connectionStatus
     } = useChat(handleApiLog, streamingEnabled);
+
+    // Simulate initial session loading for skeleton UI
+    React.useEffect(() => {
+        const timer = setTimeout(() => {
+            setIsLoadingSessions(false);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, []);
 
     // Default secondary model if not set
     React.useEffect(() => {
@@ -738,6 +747,7 @@ const Chat: React.FC = () => {
                         onDeleteSession={deleteSession}
                         onRenameSession={renameSession}
                         onTogglePinSession={togglePinSession}
+                        isLoading={isLoadingSessions}
                     />
                 </div>
             )}
