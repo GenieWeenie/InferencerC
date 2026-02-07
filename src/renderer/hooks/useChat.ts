@@ -7,6 +7,7 @@ import { AVAILABLE_TOOLS } from '../lib/tools';
 import { analyticsService } from '../services/analytics';
 import { webhookService } from '../services/webhooks';
 import { performanceService } from '../services/performance';
+import { crashRecoveryService } from '../services/crashRecovery';
 
 export interface ApiLogCallback {
     (log: {
@@ -284,6 +285,58 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         return () => clearTimeout(timer);
     }, [history, sessionId, currentModel, expertMode, thinkingEnabled, loadedMessageIndices, fullMessageCache]);
 
+    // Auto-save recovery state every 30 seconds
+    useEffect(() => {
+        if (!sessionId) return;
+
+        const saveRecoveryState = () => {
+            try {
+                const recoveryState = {
+                    timestamp: Date.now(),
+                    sessionId,
+                    history,
+                    currentModel,
+                    systemPrompt,
+                    temperature,
+                    topP,
+                    maxTokens,
+                    batchSize,
+                    expertMode,
+                    thinkingEnabled,
+                    battleMode,
+                    secondaryModel,
+                    autoRouting,
+                    responseFormat,
+                    input,
+                    prefill,
+                    enabledTools: Array.from(enabledTools)
+                };
+                localStorage.setItem('app_recovery_state', JSON.stringify(recoveryState));
+            } catch (e) {
+                console.error('Failed to save recovery state', e);
+            }
+        };
+
+        // Save immediately on mount
+        saveRecoveryState();
+
+        // Then save every 30 seconds
+        const interval = setInterval(saveRecoveryState, 30000);
+
+        return () => clearInterval(interval);
+    }, [sessionId, history, currentModel, systemPrompt, temperature, topP, maxTokens, batchSize, expertMode, thinkingEnabled, battleMode, secondaryModel, autoRouting, responseFormat, input, prefill, enabledTools]);
+
+    // Draft persistence - save draft message whenever input changes
+    useEffect(() => {
+        if (!sessionId) return;
+
+        const timer = setTimeout(() => {
+            crashRecoveryService.saveDraft(sessionId, input);
+        }, 500); // 500ms debounce
+
+        return () => clearTimeout(timer);
+    }, [input, sessionId]);
+
     const createNewSession = () => {
         const newSession = HistoryService.createNewSession(currentModel || 'local-lmstudio');
         setSessionId(newSession.id);
@@ -296,6 +349,14 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         HistoryService.saveSession(newSession);
         setSavedSessions(HistoryService.getAllSessions());
         setShowHistory(false);
+
+        // Restore draft for new session
+        const draft = crashRecoveryService.getDraft(newSession.id);
+        if (draft) {
+            setInput(draft);
+        } else {
+            setInput('');
+        }
     };
 
     const loadSession = (id: string) => {
@@ -363,6 +424,14 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             HistoryService.setLastActiveSessionId(session.id);
             setSelectedToken(null);
             setShowHistory(false);
+
+            // Restore draft for this session
+            const draft = crashRecoveryService.getDraft(session.id);
+            if (draft) {
+                setInput(draft);
+            } else {
+                setInput('');
+            }
         }
     };
 
@@ -961,6 +1030,9 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             setImageAttachments([]);
             setPrefill(null);
 
+            // Clear draft after sending message
+            crashRecoveryService.saveDraft(sessionId, '');
+
             const ctrlA = new AbortController();
             const ctrlB = new AbortController();
             controllers = [ctrlA, ctrlB];
@@ -992,6 +1064,9 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             setAttachments([]);
             setImageAttachments([]);
             setPrefill(null);
+
+            // Clear draft after sending message
+            crashRecoveryService.saveDraft(sessionId, '');
 
             const ctrl = new AbortController();
             controllers = [ctrl];

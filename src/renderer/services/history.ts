@@ -1,4 +1,4 @@
-import { Message, TokenLogprob, ChatMessage, ChatSession } from '../../shared/types';
+import { Message, TokenLogprob, ChatMessage, ChatSession, RecoveryState } from '../../shared/types';
 import { encryptionService } from './encryption';
 import { SearchIndexService } from './searchIndex';
 
@@ -15,6 +15,7 @@ const SESSION_PASSWORDS_KEY = 'app_session_passwords'; // Store password hashes 
 const SESSION_DATA_PREFIX = 'app_session_';
 const MESSAGE_CONTENT_PREFIX = 'app_message_content_'; // Store large message content separately
 const CONTENT_CHUNK_THRESHOLD = 1024; // 1KB threshold for chunking
+const RECOVERY_STATE_KEY = 'app_recovery_state';
 
 /**
  * Calculate message size in bytes
@@ -605,6 +606,41 @@ export const HistoryService = {
       session.pinned = !session.pinned;
       const uniqueKey = `${SESSION_DATA_PREFIX}${id}`;
       localStorage.setItem(uniqueKey, JSON.stringify(session));
+    }
+  },
+
+  /**
+   * Save recovery state for crash recovery
+   */
+  saveRecoveryState: (state: RecoveryState) => {
+    try {
+      localStorage.setItem(RECOVERY_STATE_KEY, JSON.stringify(state));
+    } catch (e) {
+      console.error("Failed to save recovery state", e);
+    }
+  },
+
+  /**
+   * Get recovery state from storage
+   */
+  getRecoveryState: (): RecoveryState | null => {
+    try {
+      const raw = localStorage.getItem(RECOVERY_STATE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      console.error("Failed to load recovery state", e);
+      return null;
+    }
+  },
+
+  /**
+   * Clear recovery state from storage
+   */
+  clearRecoveryState: () => {
+    try {
+      localStorage.removeItem(RECOVERY_STATE_KEY);
+    } catch (e) {
+      console.error("Failed to clear recovery state", e);
     }
   }
 };

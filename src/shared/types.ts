@@ -123,3 +123,11 @@ export interface ChatSession {
   conversationTree?: any;
   usesTreeStructure?: boolean;
 }
+
+// Crash Recovery Types
+export interface RecoveryState {
+  sessionId: string;
+  timestamp: number;
+  draftMessage?: string;
+  pendingResponse?: boolean;
+}

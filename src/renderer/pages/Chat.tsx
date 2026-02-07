@@ -37,6 +37,7 @@ import { responsiveDesignService } from '../services/responsiveDesign';
 import { onboardingService } from '../services/onboarding';
 import { multiModalAIService } from '../services/multiModalAI';
 import { PerformanceMonitorOverlay } from '../components/PerformanceMonitorOverlay';
+import { crashRecoveryService } from '../services/crashRecovery';
 const PromptManager = React.lazy(() => import('../components/PromptManager'));
 import SidebarHistory from '../components/SidebarHistory';
 import { useChat } from '../hooks/useChat';
@@ -60,6 +61,7 @@ import { TemplateService, ConversationTemplate } from '../services/templates';
 import { PromptVariableService } from '../services/promptVariables';
 import VariableInsertMenu from '../components/VariableInsertMenu';
 import { AVAILABLE_TOOLS } from '../lib/tools';
+import { RecoveryState } from '../../shared/types';
 
 const Chat: React.FC = () => {
     // API logs state (defined before useChat so it can be passed as callback)
@@ -207,6 +209,10 @@ const Chat: React.FC = () => {
     const [showAIAgents, setShowAIAgents] = React.useState(false);
     const [showFederatedLearning, setShowFederatedLearning] = React.useState(false);
 
+    // Recovery dialog state
+    const [showRecoveryDialog, setShowRecoveryDialog] = React.useState(false);
+    const [recoveryState, setRecoveryState] = React.useState<RecoveryState | null>(null);
+
     // Template library dialog state
     const [showTemplateLibrary, setShowTemplateLibrary] = React.useState(false);
 
@@ -236,6 +242,29 @@ const Chat: React.FC = () => {
         }
     }, []);
 
+    // Recovery dialog handlers
+    const handleRestoreSession = () => {
+        if (!recoveryState) return;
+
+        // Restore the session
+        loadSession(recoveryState.sessionId);
+
+        // Restore draft message if exists
+        if (recoveryState.draftMessage) {
+            setInput(recoveryState.draftMessage);
+        }
+
+        // Clear recovery state
+        HistoryService.clearRecoveryState();
+        setShowRecoveryDialog(false);
+        setRecoveryState(null);
+    };
+
+    const handleDismissRecovery = () => {
+        HistoryService.clearRecoveryState();
+        setShowRecoveryDialog(false);
+        setRecoveryState(null);
+    };
 
     // Sync tree with history when branching is enabled or when history changes
     React.useEffect(() => {
@@ -3256,6 +3285,15 @@ const Chat: React.FC = () => {
 
             {/* Performance Monitor Overlay */}
             <PerformanceMonitorOverlay messageCount={history.length} />
+
+            {/* Recovery Dialog */}
+            <RecoveryDialog
+                isOpen={showRecoveryDialog}
+                onClose={() => setShowRecoveryDialog(false)}
+                onRestore={handleRestoreSession}
+                onDismiss={handleDismissRecovery}
+                recoveryState={recoveryState}
+            />
         </div>
     );
 };
