@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, screen } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'path';
 import fs from 'fs';
@@ -113,6 +113,74 @@ ipcMain.handle('clear-recovery-state', async () => {
 
 const WINDOW_STATE_PATH = path.join(app.getPath('userData'), 'window-state.json');
 
+// Window size constraints
+const MIN_WINDOW_WIDTH = 400;
+const MIN_WINDOW_HEIGHT = 300;
+const MAX_WINDOW_WIDTH = 4000;
+const MAX_WINDOW_HEIGHT = 3000;
+
+interface WindowState {
+  x?: number;
+  y?: number;
+  width: number;
+  height: number;
+  isMaximized?: boolean;
+  isFullscreen?: boolean;
+}
+
+function validateBounds(state: WindowState): WindowState {
+  // Get the primary display dimensions
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+
+  // Clamp width and height to reasonable bounds
+  const maxWidth = Math.min(MAX_WINDOW_WIDTH, screenWidth);
+  const maxHeight = Math.min(MAX_WINDOW_HEIGHT, screenHeight);
+
+  const validatedState = { ...state };
+
+  // Validate and clamp width
+  if (typeof validatedState.width !== 'number' || validatedState.width < MIN_WINDOW_WIDTH) {
+    validatedState.width = 1200;
+  } else if (validatedState.width > maxWidth) {
+    validatedState.width = maxWidth;
+  }
+
+  // Validate and clamp height
+  if (typeof validatedState.height !== 'number' || validatedState.height < MIN_WINDOW_HEIGHT) {
+    validatedState.height = 800;
+  } else if (validatedState.height > maxHeight) {
+    validatedState.height = maxHeight;
+  }
+
+  return validatedState;
+}
+
+function isPositionVisible(bounds: { x?: number; y?: number; width: number; height: number }): boolean {
+  if (bounds.x === undefined || bounds.y === undefined) {
+    return false;
+  }
+
+  const displays = screen.getAllDisplays();
+
+  for (const display of displays) {
+    const displayBounds = display.bounds;
+
+    // Check if window bounds intersect with display bounds
+    const intersects =
+      bounds.x < displayBounds.x + displayBounds.width &&
+      bounds.x + bounds.width > displayBounds.x &&
+      bounds.y < displayBounds.y + displayBounds.height &&
+      bounds.y + bounds.height > displayBounds.y;
+
+    if (intersects) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function saveWindowState(win: BrowserWindow) {
   try {
     const bounds = win.getBounds();
@@ -122,13 +190,37 @@ function saveWindowState(win: BrowserWindow) {
   }
 }
 
-function loadWindowState() {
+function loadWindowState(): WindowState {
   try {
     if (fs.existsSync(WINDOW_STATE_PATH)) {
-      return JSON.parse(fs.readFileSync(WINDOW_STATE_PATH, 'utf-8'));
+      const savedState = JSON.parse(fs.readFileSync(WINDOW_STATE_PATH, 'utf-8'));
+
+      // Validate bounds (size constraints)
+      const validatedState = validateBounds(savedState);
+
+      // Validate that the saved position is on-screen
+      if (!isPositionVisible(validatedState)) {
+        // Position is not visible, return defaults without x/y to center on primary display
+        return {
+          width: validatedState.width,
+          height: validatedState.height,
+          isMaximized: validatedState.isMaximized,
+          isFullscreen: validatedState.isFullscreen
+        };
+      }
+
+      return validatedState;
     }
   } catch (e) {
-    console.error('Failed to load window state', e);
+    console.error('Failed to load window state, deleting corrupted file:', e);
+    // Delete corrupted file to prevent repeated errors
+    try {
+      if (fs.existsSync(WINDOW_STATE_PATH)) {
+        fs.unlinkSync(WINDOW_STATE_PATH);
+      }
+    } catch (deleteError) {
+      console.error('Failed to delete corrupted window state file:', deleteError);
+    }
   }
   return { width: 1200, height: 800 };
 }
@@ -159,6 +251,10 @@ function createWindow() {
     win.maximize();
   }
 
+  if (savedState.isFullscreen) {
+    win.setFullScreen(true);
+  }
+
   const devUrl = 'http://localhost:5173';
 
   if (!app.isPackaged) {
@@ -171,12 +267,15 @@ function createWindow() {
   // Window state change tracking
   const trackState = () => {
     const isMaximized = win.isMaximized();
-    if (!isMaximized) {
+    const isFullscreen = win.isFullScreen();
+    if (!isMaximized && !isFullscreen) {
       saveWindowState(win);
     }
-    // We also want to store the maximized state separately
+    // We also want to store the maximized and fullscreen states separately
     try {
-      const state = isMaximized ? { ...loadWindowState(), isMaximized: true } : { ...win.getBounds(), isMaximized: false };
+      const state: WindowState = isMaximized || isFullscreen
+        ? { ...loadWindowState(), isMaximized, isFullscreen }
+        : { ...win.getBounds(), isMaximized: false, isFullscreen: false };
       fs.writeFileSync(WINDOW_STATE_PATH, JSON.stringify(state));
     } catch (e) { }
   };
@@ -184,6 +283,8 @@ function createWindow() {
   win.on('resize', trackState);
   win.on('move', trackState);
   win.on('close', trackState);
+  win.on('enter-full-screen', trackState);
+  win.on('leave-full-screen', trackState);
 
   // Window Control IPC Handlers
   ipcMain.on('window-minimize', () => win.minimize());
