@@ -34,6 +34,21 @@ const COMMON_LANGUAGES = [
     'diff', 'git', 'nginx', 'apache', 'graphql', 'vue', 'svelte', 'angular'
 ];
 
+// Utility function to count words in text, stripping markdown
+const countWords = (text: string): number => {
+    // Remove code blocks first (both inline and block)
+    let cleanText = text.replace(/```[\s\S]*?```/g, '');
+    cleanText = cleanText.replace(/`[^`]+`/g, '');
+
+    // Remove markdown formatting
+    cleanText = cleanText.replace(/[#*_~`\[\]()]/g, '');
+
+    // Remove extra whitespace and split by whitespace
+    const words = cleanText.trim().split(/\s+/).filter(word => word.length > 0);
+
+    return words.length;
+};
+
 const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAvailable, onInsertToFile, isStreaming, sessionId = 'default' }) => {
     const [displayContent, setDisplayContent] = React.useState(content);
 
@@ -59,7 +74,7 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
 
         animationFrameId = requestAnimationFrame(animate);
         return () => cancelAnimationFrame(animationFrameId);
-    }, [content, isStreaming, displayContent.length]); // depend on length to allow re-trigger, but be careful of loops. 
+    }, [content, isStreaming, displayContent.length]); // depend on length to allow re-trigger, but be careful of loops.
     // Actually, simple timeout based approach might be more stable in React than rAF due to render cycles.
 
     const [copiedCode, setCopiedCode] = React.useState<string | null>(null);
@@ -73,6 +88,14 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
 
     // Use collapse state hook for persistent code block collapse state
     const { isCollapsed, toggleCollapse } = useCollapseState(sessionId);
+
+    // Calculate word count and determine if message should be collapsible
+    const wordCount = React.useMemo(() => countWords(displayContent), [displayContent]);
+    const isLongMessage = wordCount > 500;
+
+    // State for message collapse (using 'message' as the key)
+    const messageCollapseKey = 'message';
+    const isMessageCollapsed = isCollapsed(messageCollapseKey);
 
     const handleCopy = (code: string) => {
         navigator.clipboard.writeText(code);
@@ -212,8 +235,37 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
         }
     }
 
+    // Create preview content for collapsed long messages
+    const getPreviewContent = (text: string): string => {
+        const words = text.split(/\s+/);
+        if (words.length <= 100) return text;
+        return words.slice(0, 100).join(' ') + '...';
+    };
+
+    const contentToRender = isLongMessage && isMessageCollapsed
+        ? getPreviewContent(cleanContent)
+        : cleanContent;
+
     return (
         <div className={`prose ${isUser ? 'prose-invert' : 'prose-invert'} max-w-none text-sm break-words overflow-wrap-anywhere word-break-break-word`}>
+            {/* Long message collapse toggle */}
+            {isLongMessage && (
+                <div className="flex items-center justify-end mb-2 -mt-2">
+                    <button
+                        onClick={() => toggleCollapse(messageCollapseKey)}
+                        className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-300 transition-colors py-1 px-2 rounded hover:bg-slate-800/50 border border-slate-700/50 hover:border-slate-600"
+                        title={isMessageCollapsed ? "Expand message" : "Collapse message"}
+                    >
+                        <span className="font-mono">{wordCount} words</span>
+                        {isMessageCollapsed ? (
+                            <ChevronDown size={14} />
+                        ) : (
+                            <ChevronUp size={14} />
+                        )}
+                    </button>
+                </div>
+            )}
+
             {thoughtProcess && (
                 <details className="mb-4 group bg-slate-900/50 border border-slate-700/50 rounded-lg overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300" open={cleanContent === ""}>
                     <summary className="px-4 py-2 cursor-pointer bg-slate-900 hover:bg-slate-800 transition-colors flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider select-none">
@@ -483,7 +535,7 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                     hr: () => <hr className="my-8 border-slate-800" />,
                 }}
             >
-                {cleanContent}
+                {contentToRender}
             </ReactMarkdown>
 
             {/* Artifact Preview Modal */}
