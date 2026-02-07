@@ -36,6 +36,7 @@ import { FederatedLearningPanel } from '../components/FederatedLearningPanel';
 import { responsiveDesignService } from '../services/responsiveDesign';
 import { onboardingService } from '../services/onboarding';
 import { multiModalAIService } from '../services/multiModalAI';
+import { PerformanceMonitorOverlay } from '../components/PerformanceMonitorOverlay';
 const PromptManager = React.lazy(() => import('../components/PromptManager'));
 import SidebarHistory from '../components/SidebarHistory';
 import { useChat } from '../hooks/useChat';
@@ -115,7 +116,10 @@ const Chat: React.FC = () => {
         battleMode, setBattleMode,
         secondaryModel, setSecondaryModel,
         togglePinSession, renameSession,
-        connectionStatus
+        connectionStatus,
+        loadMessageRange,
+        loadedMessageIndices,
+        getVisibleHistory
     } = useChat(handleApiLog, streamingEnabled);
 
     // Default secondary model if not set
@@ -135,10 +139,22 @@ const Chat: React.FC = () => {
     const [editedMessageContent, setEditedMessageContent] = React.useState<string>('');
     const [showShortcutsModal, setShowShortcutsModal] = React.useState(false);
     const [searchQuery, setSearchQuery] = React.useState('');
+    const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState('');
     const [showSearch, setShowSearch] = React.useState(false);
     const [searchResults, setSearchResults] = React.useState<number[]>([]);
     const [currentSearchIndex, setCurrentSearchIndex] = React.useState(0);
+    const [showSearchResultsList, setShowSearchResultsList] = React.useState(false);
     const virtuosoRef = React.useRef<any>(null);
+
+    // FPS monitoring refs
+    const fpsFrameCount = React.useRef(0);
+    const fpsLastTime = React.useRef(performance.now());
+    const fpsAnimationFrameId = React.useRef<number | null>(null);
+
+    // Memory monitoring refs
+    const memoryMonitorInterval = React.useRef<NodeJS.Timeout | null>(null);
+    const lastMemoryWarning = React.useRef<number>(0);
+
     const [bookmarkedMessages, setBookmarkedMessages] = React.useState<Set<number>>(new Set());
     const [showRequestLog, setShowRequestLog] = React.useState(false);
     const [messageRatings, setMessageRatings] = React.useState<Record<number, 'up' | 'down'>>({});
@@ -229,6 +245,109 @@ const Chat: React.FC = () => {
             treeHook.replaceMessages(history);
         }
     }, [branchingEnabled, history.length]); // Run when branching is enabled OR history length changes
+
+    // FPS monitoring for Virtuoso scroll performance
+    React.useEffect(() => {
+        let isScrolling = false;
+        let scrollTimeout: NodeJS.Timeout;
+
+        const measureFPS = () => {
+            fpsFrameCount.current++;
+            const now = performance.now();
+            const delta = now - fpsLastTime.current;
+
+            // Log FPS every second during scrolling
+            if (delta >= 1000 && isScrolling) {
+                const fps = Math.round((fpsFrameCount.current * 1000) / delta);
+                console.log(`[FPS Monitor] Virtuoso Scroll: ${fps} FPS`);
+
+                fpsFrameCount.current = 0;
+                fpsLastTime.current = now;
+            }
+
+            if (isScrolling) {
+                fpsAnimationFrameId.current = requestAnimationFrame(measureFPS);
+            }
+        };
+
+        const handleScroll = () => {
+            if (!isScrolling) {
+                isScrolling = true;
+                fpsFrameCount.current = 0;
+                fpsLastTime.current = performance.now();
+                fpsAnimationFrameId.current = requestAnimationFrame(measureFPS);
+            }
+
+            clearTimeout(scrollTimeout);
+            scrollTimeout = setTimeout(() => {
+                isScrolling = false;
+                if (fpsAnimationFrameId.current !== null) {
+                    cancelAnimationFrame(fpsAnimationFrameId.current);
+                    fpsAnimationFrameId.current = null;
+                }
+            }, 150);
+        };
+
+        // Get the Virtuoso scroller element
+        const virtuosoElement = virtuosoRef.current?.getScrollerElement?.();
+        if (virtuosoElement) {
+            virtuosoElement.addEventListener('scroll', handleScroll, { passive: true });
+        }
+
+        return () => {
+            if (virtuosoElement) {
+                virtuosoElement.removeEventListener('scroll', handleScroll);
+            }
+            clearTimeout(scrollTimeout);
+            if (fpsAnimationFrameId.current !== null) {
+                cancelAnimationFrame(fpsAnimationFrameId.current);
+            }
+        };
+    }, []);
+
+    // Memory usage monitoring for long conversations
+    React.useEffect(() => {
+        const monitorMemory = () => {
+            // Check if performance.memory API is available (Chrome/Chromium)
+            if ((performance as any).memory) {
+                const memory = (performance as any).memory;
+                const usedMB = Math.round(memory.usedJSHeapSize / 1024 / 1024);
+                const totalMB = Math.round(memory.totalJSHeapSize / 1024 / 1024);
+                const limitMB = Math.round(memory.jsHeapSizeLimit / 1024 / 1024);
+                const usagePercent = Math.round((memory.usedJSHeapSize / memory.jsHeapSizeLimit) * 100);
+
+                // Log memory usage every 30 seconds
+                console.log(`[Memory Monitor] Used: ${usedMB}MB / ${limitMB}MB (${usagePercent}%) | Total Allocated: ${totalMB}MB | Messages: ${history.length}`);
+
+                // Warn if memory usage is high (> 75% of limit)
+                if (usagePercent > 75) {
+                    const now = Date.now();
+                    // Only show warning once per minute to avoid spam
+                    if (now - lastMemoryWarning.current > 60000) {
+                        console.warn(`[Memory Monitor] HIGH MEMORY USAGE: ${usedMB}MB / ${limitMB}MB (${usagePercent}%) - Consider closing some conversations`);
+                        lastMemoryWarning.current = now;
+                    }
+                }
+
+                // Critical warning if approaching 2GB limit
+                if (usedMB > 1800) {
+                    console.error(`[Memory Monitor] CRITICAL: Memory usage exceeds 1.8GB (${usedMB}MB) - Performance may degrade`);
+                }
+            }
+        };
+
+        // Start monitoring - check every 30 seconds
+        memoryMonitorInterval.current = setInterval(monitorMemory, 30000);
+
+        // Initial check
+        monitorMemory();
+
+        return () => {
+            if (memoryMonitorInterval.current) {
+                clearInterval(memoryMonitorInterval.current);
+            }
+        };
+    }, [history.length]); // Re-run when history length changes to log message count
 
     // GitHub file fetching
     const executeGithubFetch = async () => {
@@ -347,15 +466,24 @@ const Chat: React.FC = () => {
         }
     }, [history.length, currentModel]);
 
+    // Debounce search query (300ms delay)
+    React.useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedSearchQuery(searchQuery);
+        }, 300);
+
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
     // Search within chat
     React.useEffect(() => {
-        if (searchQuery.trim() === '') {
+        if (debouncedSearchQuery.trim() === '') {
             setSearchResults([]);
             setCurrentSearchIndex(0);
             return;
         }
 
-        const query = searchQuery.toLowerCase();
+        const query = debouncedSearchQuery.toLowerCase();
         const matches: number[] = [];
 
         history.forEach((msg, index) => {
@@ -366,7 +494,13 @@ const Chat: React.FC = () => {
 
         setSearchResults(matches);
         setCurrentSearchIndex(0);
-    }, [searchQuery, history]);
+    }, [debouncedSearchQuery, history]);
+
+    // Navigate to specific search result
+    const navigateToSearchResult = React.useCallback((resultIndex: number) => {
+        setCurrentSearchIndex(resultIndex);
+        setShowSearchResultsList(false);
+    }, []);
 
     // Scroll to current search result
     React.useEffect(() => {
@@ -721,6 +855,368 @@ const Chat: React.FC = () => {
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [createNewSession, setShowHistory, stopGeneration, showShortcutsModal, editingMessageIndex, history, handleCancelEdit, setHistory]);
+
+    // Memoized itemContent callback to prevent recreation on every render
+    const renderItemContent = React.useCallback((index: number, msg: any) => {
+        const isSearchResult = searchResults.includes(index);
+        const isCurrentSearchResult = searchResults[currentSearchIndex] === index;
+        const isLastMessage = index === history.length - 1;
+        const activeChoice = msg.choices?.[msg.selectedChoiceIndex || 0];
+        const currentLogprobs = activeChoice?.logprobs?.content || [];
+        const hasLogprobs = Array.isArray(currentLogprobs) && currentLogprobs.length > 0;
+        const showMissingLogprobsWarning = msg.role === 'assistant' && !hasLogprobs && isLastMessage;
+
+        // Check if this is a Battle Mode pair
+        const isBattleModePair = msg.role === 'assistant' &&
+            index < history.length - 1 &&
+            history[index + 1]?.role === 'assistant' &&
+            msg.content?.includes('Model A:') &&
+            history[index + 1].content?.includes('Model B:');
+
+        const isShowingComparison = comparisonIndex === index;
+
+        // Hide second message in Battle Mode pair when comparison is shown
+        const isSecondInBattlePair = msg.role === 'assistant' &&
+            index > 0 &&
+            history[index - 1]?.role === 'assistant' &&
+            history[index - 1].content?.includes('Model A:') &&
+            msg.content?.includes('Model B:') &&
+            comparisonIndex === index - 1;
+
+        if (isSecondInBattlePair) {
+            return null; // Hide second message when comparison is shown
+        }
+
+        return (
+            <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+                className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} group py-3 min-w-0 w-full overflow-hidden`}
+            >
+                <div className={`relative p-4 rounded-2xl max-w-[85%] min-w-0 shadow-md transition-all break-words overflow-hidden ${isCurrentSearchResult
+                    ? 'ring-2 ring-yellow-500 ring-offset-2 ring-offset-background'
+                    : isSearchResult
+                        ? 'ring-1 ring-yellow-500/50'
+                        : ''
+                    } ${msg.role === 'user' ? 'bg-primary/20 text-white rounded-tr-sm border border-primary/20' : 'bg-slate-800/80 text-slate-200 rounded-tl-sm border border-slate-700/50 backdrop-blur-sm'}`}
+                style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+                    {/* Message actions */}
+                    <div className="absolute -top-2 -right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                        <button
+                            onClick={() => toggleBookmark(index)}
+                            className={`w-6 h-6 rounded-full text-white flex items-center justify-center shadow-lg cursor-pointer transition-all ${bookmarkedMessages.has(index)
+                                ? 'bg-yellow-500 hover:bg-yellow-600'
+                                : 'bg-slate-700 hover:bg-slate-600'
+                                }`}
+                            title={bookmarkedMessages.has(index) ? 'Remove bookmark' : 'Bookmark message'}
+                        >
+                            <Star size={12} fill={bookmarkedMessages.has(index) ? 'currentColor' : 'none'} />
+                        </button>
+                        <MessageActionsMenu
+                            messageContent={msg.content || ''}
+                            messageIndex={index}
+                            messageRole={msg.role}
+                            onCopy={() => {
+                                navigator.clipboard.writeText(msg.content || '');
+                                toast.success('Copied to clipboard');
+                            }}
+                            onDelete={() => deleteMessage(index)}
+                            onEdit={msg.role === 'user' ? () => handleEditMessage(index) : undefined}
+                            onRegenerate={msg.role === 'assistant' && !msg.isLoading ? () => handleRegenerateResponse(index) : undefined}
+                            onBranch={() => handleBranchConversation(index)}
+                        />
+                    </div>
+                    {msg.role === 'assistant' ? (
+                        <div>
+                            {msg.isLoading ? (
+                                <div className="flex flex-col gap-2">
+                                    {msg.tool_calls && msg.tool_calls.length > 0 && (
+                                        <div className="mb-2 space-y-2 animate-in slide-in-from-top-1 fade-in duration-300">
+                                            {msg.tool_calls.map((tc: any, idx: number) => (
+                                                <div key={tc.id || idx} className="p-2 bg-slate-900/80 border border-slate-700/50 rounded-lg text-xs font-mono shadow-sm">
+                                                    <div className="flex items-center gap-2 mb-1 text-primary">
+                                                        <Wrench size={12} />
+                                                        <span className="font-bold">{tc.function.name}</span>
+                                                    </div>
+                                                    <div className="bg-slate-950 p-2 rounded text-slate-400 overflow-x-auto whitespace-pre-wrap break-all">
+                                                        {tc.function.arguments}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {msg.content && <MessageContent
+                                        content={msg.content}
+                                        isUser={false}
+                                        mcpAvailable={mcpAvailable}
+                                        onInsertToFile={handleInsertToFile}
+                                        isStreaming={true}
+                                        isLazyLoaded={!loadedMessageIndices.has(index)}
+                                        onLoadContent={() => loadMessageRange(index, index, history)}
+                                        messageIndex={index}
+                                    />}
+                                    <div className="flex items-center gap-2 text-slate-400 italic text-sm animate-pulse">
+                                        <Brain size={16} className="text-primary" /> Thinking...
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    {/* Normal View */}
+                                    {(!showInspector || !hasLogprobs) && (
+                                        <>
+                                            {msg.tool_calls && msg.tool_calls.length > 0 && (
+                                                <div className="mb-2 space-y-2">
+                                                    {msg.tool_calls.map((tc: any, idx: number) => (
+                                                        <div key={tc.id || idx} className="p-2 bg-slate-900/80 border border-slate-700/50 rounded-lg text-xs font-mono shadow-sm">
+                                                            <div className="flex items-center gap-2 mb-1 text-primary">
+                                                                <Wrench size={12} />
+                                                                <span className="font-bold">{tc.function.name}</span>
+                                                            </div>
+                                                            <div className="bg-slate-950 p-2 rounded text-slate-400 overflow-x-auto whitespace-pre-wrap break-all">
+                                                                {tc.function.arguments}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            <MessageContent
+                                                content={msg.content || ""}
+                                                isUser={false}
+                                                mcpAvailable={mcpAvailable}
+                                                onInsertToFile={handleInsertToFile}
+                                                isLazyLoaded={!loadedMessageIndices.has(index)}
+                                                onLoadContent={() => loadMessageRange(index, index, history)}
+                                                messageIndex={index}
+                                            />
+                                        </>
+                                    )}
+
+                                    {/* Inspector View */}
+                                    {showInspector && hasLogprobs && (
+                                        <div className="leading-relaxed font-mono text-[15px] animate-in fade-in duration-300">
+                                            {currentLogprobs.map((lp: any, i: number) => {
+                                                if (!lp || typeof lp !== 'object') return null;
+                                                const entropy = calculateEntropy(lp.top_logprobs);
+                                                const isSelected = selectedToken?.logprob === lp;
+                                                const redIntensity = Math.min(255, entropy * 100);
+                                                const bgAlpha = entropy > 0.5 ? 0.3 : 0.05;
+
+                                                const style = {
+                                                    backgroundColor: isSelected ? 'rgba(251, 191, 36, 0.9)' : `rgba(${redIntensity}, 50, 50, ${bgAlpha})`,
+                                                    color: isSelected ? '#000' : 'inherit',
+                                                    borderBottom: entropy > 1.0 ? '1px dotted #ef4444' : 'none',
+                                                };
+
+                                                return (
+                                                    <span key={i} onClick={() => { setSelectedToken({ logprob: lp, messageIndex: index, tokenIndex: i }); setActiveTab('inspector'); }}
+                                                        title={`Token: "${lp.token}"\nLogprob: ${lp.logprob}`}
+                                                        className={`cursor-pointer rounded-[2px] px-[1px] transition-colors ${isSelected ? 'font-bold ring-2 ring-yellow-400 z-10 relative' : 'hover:bg-slate-700'}`} style={style}>{lp.token}</span>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                            {/* Comparison View Toggle (only for first message in Battle Mode pair) */}
+                            {isBattleModePair && !msg.isLoading && !history[index + 1]?.isLoading && (
+                                <div className="mt-2 mb-2">
+                                    <button
+                                        onClick={() => setComparisonIndex(isShowingComparison ? null : index)}
+                                        className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg transition-colors bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 hover:border-primary/50 text-slate-300 hover:text-primary"
+                                    >
+                                        <Code2 size={14} />
+                                        {isShowingComparison ? 'Hide Comparison' : 'Show Comparison Grid'}
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Comparison Grid View */}
+                            {isShowingComparison && isBattleModePair && !msg.isLoading && !history[index + 1]?.isLoading && (
+                                <div className="mt-4 mb-4">
+                                    {(() => {
+                                        const msgB = history[index + 1];
+                                        // Extract model names from content
+                                        const modelAMatch = msg.content?.match(/\*\*Model A:\s*(.+?)\*\*/);
+                                        const modelBMatch = msgB.content?.match(/\*\*Model B:\s*(.+?)\*\*/);
+                                        const modelAName = modelAMatch?.[1] || availableModels.find((m: any) => m.id === currentModel)?.name || 'Model A';
+                                        const modelBName = modelBMatch?.[1] || availableModels.find((m: any) => m.id === secondaryModel)?.name || 'Model B';
+
+                                        return (
+                                            <ComparisonGrid
+                                                messageA={msg}
+                                                messageB={msgB}
+                                                modelAName={modelAName}
+                                                modelBName={modelBName}
+                                                onClose={() => setComparisonIndex(null)}
+                                                mcpAvailable={mcpAvailable}
+                                                onInsertToFile={handleInsertToFile}
+                                            />
+                                        );
+                                    })()}
+                                </div>
+                            )}
+
+                            {/* Rating and Generation Time */}
+                            <div className="mt-2 flex items-center justify-between gap-2">
+                                {/* Rating Buttons */}
+                                {!msg.isLoading && (
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            onClick={() => handleRateMessage(index, 'up')}
+                                            className={`p-1 rounded transition-colors ${messageRatings[index] === 'up'
+                                                ? 'text-green-500 bg-green-500/20'
+                                                : 'text-slate-500 hover:text-green-400 hover:bg-slate-800'
+                                                }`}
+                                            title="Good response"
+                                        >
+                                            <ThumbsUp size={12} fill={messageRatings[index] === 'up' ? 'currentColor' : 'none'} />
+                                        </button>
+                                        <button
+                                            onClick={() => handleRateMessage(index, 'down')}
+                                            className={`p-1 rounded transition-colors ${messageRatings[index] === 'down'
+                                                ? 'text-red-500 bg-red-500/20'
+                                                : 'text-slate-500 hover:text-red-400 hover:bg-slate-800'
+                                                }`}
+                                            title="Poor response"
+                                        >
+                                            <ThumbsDown size={12} fill={messageRatings[index] === 'down' ? 'currentColor' : 'none'} />
+                                        </button>
+                                    </div>
+                                )}
+                                {/* Generation Time */}
+                                {msg.generationTime && (
+                                    <div className="flex items-center gap-1 text-[10px] text-slate-500 font-mono">
+                                        <Clock size={10} />
+                                        {(msg.generationTime / 1000).toFixed(2)}s
+                                    </div>
+                                )}
+                            </div>
+                            {/* Quick Reply Templates */}
+                            {!msg.isLoading && isLastMessage && msg.content && (
+                                <QuickReplyTemplates
+                                    lastAssistantMessage={msg.content}
+                                    onSelectTemplate={(template: string) => {
+                                        setInput(template);
+                                        if (textareaRef.current) {
+                                            textareaRef.current.focus();
+                                        }
+                                    }}
+                                />
+                            )}
+                        </div>
+                    ) : (
+                        <>
+                            {editingMessageIndex === index ? (
+                                <div className="flex flex-col gap-2">
+                                    <textarea
+                                        value={editedMessageContent}
+                                        onChange={(e) => setEditedMessageContent(e.target.value)}
+                                        className="w-full min-h-[100px] p-2 bg-slate-900/50 border border-primary/30 rounded-lg text-white resize-y focus:outline-none focus:border-primary/60"
+                                        autoFocus
+                                    />
+                                    <div className="flex gap-2 justify-end">
+                                        <button
+                                            onClick={handleCancelEdit}
+                                            className="px-3 py-1 text-sm bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={() => handleSaveEdit(index)}
+                                            className="px-3 py-1 text-sm bg-primary hover:bg-primary/80 rounded-lg transition-colors"
+                                        >
+                                            Save & Resend
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <MessageContent
+                                        content={msg.content}
+                                        isUser={true}
+                                        mcpAvailable={mcpAvailable}
+                                        onInsertToFile={handleInsertToFile}
+                                        isLazyLoaded={!loadedMessageIndices.has(index)}
+                                        onLoadContent={() => loadMessageRange(index, index, history)}
+                                        messageIndex={index}
+                                    />
+                                    {/* Display attached images */}
+                                    {msg.images && msg.images.length > 0 && (
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                            {msg.images.map((img: any, imgIdx: number) => (
+                                                <a
+                                                    key={imgIdx}
+                                                    href={img.thumbnailUrl}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="block"
+                                                >
+                                                    <img
+                                                        src={img.thumbnailUrl}
+                                                        alt={img.name}
+                                                        className="max-w-[200px] max-h-[150px] object-cover rounded-lg border border-slate-600 hover:border-primary/50 transition-colors cursor-pointer"
+                                                    />
+                                                </a>
+                                            ))}
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </>
+                    )}
+                </div>
+                {showMissingLogprobsWarning && (
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="mt-2 p-3 bg-amber-900/20 text-amber-200 rounded-lg text-sm border border-amber-900/50 flex flex-col gap-2 max-w-[85%]"
+                    >
+                        <div className="flex items-center gap-2 font-bold"><AlertTriangle size={14} /> Token Data Missing</div>
+                        <p className="opacity-80">The LM Studio server refused to send token data. (Note: Remote models like OpenRouter may not support logprobs yet)</p>
+                    </motion.div>
+                )}
+                {msg.role === 'assistant' && msg.choices && Array.isArray(msg.choices) && msg.choices.length > 1 && (
+                    <div className="mt-2 flex gap-2 overflow-x-auto max-w-full pb-1">
+                        {msg.choices.map((c: any, cIdx: number) => (
+                            <button key={cIdx} onClick={() => selectChoice(index, cIdx)} className={`px-2 py-1 text-xs border rounded-md transition-colors whitespace-nowrap ${(msg.selectedChoiceIndex || 0) === cIdx ? 'bg-slate-700 text-white border-slate-600' : 'bg-transparent text-slate-500 border-slate-800 hover:border-slate-600 hover:text-slate-300'}`}>Option {cIdx + 1}</button>
+                        ))}
+                    </div>
+                )}
+            </motion.div>
+        );
+    }, [
+        searchResults,
+        currentSearchIndex,
+        history,
+        comparisonIndex,
+        bookmarkedMessages,
+        deleteMessage,
+        handleEditMessage,
+        handleRegenerateResponse,
+        handleBranchConversation,
+        mcpAvailable,
+        handleInsertToFile,
+        selectedToken,
+        setSelectedToken,
+        setActiveTab,
+        setComparisonIndex,
+        availableModels,
+        currentModel,
+        secondaryModel,
+        handleRateMessage,
+        messageRatings,
+        showInspector,
+        textareaRef,
+        setInput,
+        editingMessageIndex,
+        editedMessageContent,
+        setEditedMessageContent,
+        handleCancelEdit,
+        handleSaveEdit,
+        selectChoice,
+        toggleBookmark,
+    ]);
 
     return (
         <div className="flex h-full flex-row relative bg-background text-text font-body overflow-hidden min-w-0 max-w-full">
@@ -1159,49 +1655,118 @@ const Chat: React.FC = () => {
                             transition={{ duration: 0.2 }}
                             className="border-b border-slate-800 bg-slate-900/50 overflow-hidden min-w-0"
                         >
-                            <div className="px-6 py-3 flex items-center gap-3 min-w-0 overflow-hidden">
-                                <div className="flex-1 relative">
-                                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                                    <input
-                                        type="text"
-                                        value={searchQuery}
-                                        onChange={(e) => setSearchQuery(e.target.value)}
-                                        placeholder="Search in this conversation..."
-                                        className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-lg pl-10 pr-4 py-2 focus:ring-2 focus:ring-primary/50 focus:border-primary/50 outline-none"
-                                        autoFocus
-                                    />
-                                </div>
-                                {searchResults.length > 0 && (
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-sm text-slate-400">
-                                            {currentSearchIndex + 1} / {searchResults.length}
-                                        </span>
-                                        <button
-                                            onClick={() => setCurrentSearchIndex(prev => (prev > 0 ? prev - 1 : searchResults.length - 1))}
-                                            className="p-1.5 hover:bg-slate-700 rounded transition-colors"
-                                            title="Previous result"
-                                        >
-                                            <ChevronUp size={16} className="text-slate-400" />
-                                        </button>
-                                        <button
-                                            onClick={() => setCurrentSearchIndex(prev => (prev < searchResults.length - 1 ? prev + 1 : 0))}
-                                            className="p-1.5 hover:bg-slate-700 rounded transition-colors"
-                                            title="Next result"
-                                        >
-                                            <ChevronDown size={16} className="text-slate-400" />
-                                        </button>
+                            <div className="relative">
+                                <div className="px-6 py-3 flex items-center gap-3 min-w-0 overflow-hidden">
+                                    <div className="flex-1 relative">
+                                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                                        <input
+                                            type="text"
+                                            value={searchQuery}
+                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                            placeholder="Search in this conversation..."
+                                            className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-lg pl-10 pr-4 py-2 focus:ring-2 focus:ring-primary/50 focus:border-primary/50 outline-none"
+                                            autoFocus
+                                        />
                                     </div>
-                                )}
-                                <button
-                                    onClick={() => {
-                                        setShowSearch(false);
-                                        setSearchQuery('');
-                                    }}
-                                    className="p-1.5 hover:bg-slate-700 rounded transition-colors"
-                                    title="Close search"
-                                >
-                                    <X size={16} className="text-slate-400" />
-                                </button>
+                                    {searchResults.length > 0 && (
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => setShowSearchResultsList(!showSearchResultsList)}
+                                                className="px-2 py-1.5 hover:bg-slate-700 rounded transition-colors text-sm text-slate-400 hover:text-white flex items-center gap-1"
+                                                title="Show all results"
+                                            >
+                                                <span>{currentSearchIndex + 1} / {searchResults.length}</span>
+                                                {showSearchResultsList ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                            </button>
+                                            <button
+                                                onClick={() => setCurrentSearchIndex(prev => (prev > 0 ? prev - 1 : searchResults.length - 1))}
+                                                className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                                                title="Previous result"
+                                            >
+                                                <ChevronUp size={16} className="text-slate-400" />
+                                            </button>
+                                            <button
+                                                onClick={() => setCurrentSearchIndex(prev => (prev < searchResults.length - 1 ? prev + 1 : 0))}
+                                                className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                                                title="Next result"
+                                            >
+                                                <ChevronDown size={16} className="text-slate-400" />
+                                            </button>
+                                        </div>
+                                    )}
+                                    <button
+                                        onClick={() => {
+                                            setShowSearch(false);
+                                            setSearchQuery('');
+                                            setShowSearchResultsList(false);
+                                        }}
+                                        className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                                        title="Close search"
+                                    >
+                                        <X size={16} className="text-slate-400" />
+                                    </button>
+                                </div>
+
+                                {/* Virtualized search results list */}
+                                <AnimatePresence>
+                                    {showSearchResultsList && searchResults.length > 0 && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                            className="border-t border-slate-800 bg-slate-900 overflow-hidden"
+                                        >
+                                            <div className="max-h-80 overflow-y-auto">
+                                                <Virtuoso
+                                                    style={{ height: Math.min(searchResults.length * 60, 320) }}
+                                                    totalCount={searchResults.length}
+                                                    itemContent={(index) => {
+                                                        const messageIndex = searchResults[index];
+                                                        const message = history[messageIndex];
+                                                        const isActive = index === currentSearchIndex;
+                                                        const preview = message.content ?
+                                                            message.content.substring(0, 100) + (message.content.length > 100 ? '...' : '') :
+                                                            '';
+
+                                                        return (
+                                                            <button
+                                                                onClick={() => navigateToSearchResult(index)}
+                                                                className={`w-full text-left px-6 py-3 hover:bg-slate-800 transition-colors border-b border-slate-800/50 ${
+                                                                    isActive ? 'bg-primary/10 border-l-2 border-l-primary' : ''
+                                                                }`}
+                                                            >
+                                                                <div className="flex items-start gap-3">
+                                                                    <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-xs text-slate-400">
+                                                                        {index + 1}
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <div className="flex items-center gap-2 mb-1">
+                                                                            <span className={`text-xs font-semibold ${
+                                                                                message.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
+                                                                            }`}>
+                                                                                {message.role === 'user' ? 'You' : 'Assistant'}
+                                                                            </span>
+                                                                            <span className="text-xs text-slate-500">
+                                                                                Message #{messageIndex + 1}
+                                                                            </span>
+                                                                        </div>
+                                                                        <p className="text-sm text-slate-300 truncate">
+                                                                            {preview}
+                                                                        </p>
+                                                                    </div>
+                                                                    {isActive && (
+                                                                        <Check size={16} className="text-primary flex-shrink-0 mt-1" />
+                                                                    )}
+                                                                </div>
+                                                            </button>
+                                                        );
+                                                    }}
+                                                />
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
                             </div>
                         </motion.div>
                     )}
@@ -1268,317 +1833,22 @@ const Chat: React.FC = () => {
                                 // Otherwise maintain stickiness if already at bottom
                                 return isAtBottom ? 'auto' : false;
                             }}
-                            overscan={1000} // Increase overscan for smoother scrolling
-                            increaseViewportBy={500} // Render more items outside viewport
-                            atBottomThreshold={100} // Stick to bottom easier
+                            overscan={{
+                                main: 300,
+                                reverse: 300
+                            }}
+                            increaseViewportBy={{
+                                top: 200,
+                                bottom: 200
+                            }}
+                            defaultItemHeight={150}
+                            atBottomThreshold={100}
+                            alignToBottom
                             className="custom-scrollbar px-6"
                             totalCount={history.length}
                             initialTopMostItemIndex={history.length - 1}
                             computeItemKey={(index, item) => `${index}-${item.role}`}
-                            itemContent={(index, msg) => {
-                                const isSearchResult = searchResults.includes(index);
-                                const isCurrentSearchResult = searchResults[currentSearchIndex] === index;
-                                const isLastMessage = index === history.length - 1;
-                                const activeChoice = msg.choices?.[msg.selectedChoiceIndex || 0];
-                                const currentLogprobs = activeChoice?.logprobs?.content || [];
-                                const hasLogprobs = Array.isArray(currentLogprobs) && currentLogprobs.length > 0;
-                                const showMissingLogprobsWarning = msg.role === 'assistant' && !hasLogprobs && isLastMessage;
-
-                                // Check if this is a Battle Mode pair
-                                const isBattleModePair = msg.role === 'assistant' &&
-                                    index < history.length - 1 &&
-                                    history[index + 1]?.role === 'assistant' &&
-                                    msg.content?.includes('Model A:') &&
-                                    history[index + 1].content?.includes('Model B:');
-
-                                const isShowingComparison = comparisonIndex === index;
-
-                                // Hide second message in Battle Mode pair when comparison is shown
-                                const isSecondInBattlePair = msg.role === 'assistant' &&
-                                    index > 0 &&
-                                    history[index - 1]?.role === 'assistant' &&
-                                    history[index - 1].content?.includes('Model A:') &&
-                                    msg.content?.includes('Model B:') &&
-                                    comparisonIndex === index - 1;
-
-                                if (isSecondInBattlePair) {
-                                    return null; // Hide second message when comparison is shown
-                                }
-
-                                return (
-                                    <motion.div
-                                        initial={{ opacity: 0, y: 10 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ duration: 0.3 }}
-                                        className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} group py-3 min-w-0 w-full overflow-hidden`}
-                                    >
-                                        <div className={`relative p-4 rounded-2xl max-w-[85%] min-w-0 shadow-md transition-all break-words overflow-hidden ${isCurrentSearchResult
-                                            ? 'ring-2 ring-yellow-500 ring-offset-2 ring-offset-background'
-                                            : isSearchResult
-                                                ? 'ring-1 ring-yellow-500/50'
-                                                : ''
-                                            } ${msg.role === 'user' ? 'bg-primary/20 text-white rounded-tr-sm border border-primary/20' : 'bg-slate-800/80 text-slate-200 rounded-tl-sm border border-slate-700/50 backdrop-blur-sm'}`}
-                                        style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-                                            {/* Message actions */}
-                                            <div className="absolute -top-2 -right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                                                <button
-                                                    onClick={() => toggleBookmark(index)}
-                                                    className={`w-6 h-6 rounded-full text-white flex items-center justify-center shadow-lg cursor-pointer transition-all ${bookmarkedMessages.has(index)
-                                                        ? 'bg-yellow-500 hover:bg-yellow-600'
-                                                        : 'bg-slate-700 hover:bg-slate-600'
-                                                        }`}
-                                                    title={bookmarkedMessages.has(index) ? 'Remove bookmark' : 'Bookmark message'}
-                                                >
-                                                    <Star size={12} fill={bookmarkedMessages.has(index) ? 'currentColor' : 'none'} />
-                                                </button>
-                                                <MessageActionsMenu
-                                                    messageContent={msg.content || ''}
-                                                    messageIndex={index}
-                                                    messageRole={msg.role}
-                                                    onCopy={() => {
-                                                        navigator.clipboard.writeText(msg.content || '');
-                                                        toast.success('Copied to clipboard');
-                                                    }}
-                                                    onDelete={() => deleteMessage(index)}
-                                                    onEdit={msg.role === 'user' ? () => handleEditMessage(index) : undefined}
-                                                    onRegenerate={msg.role === 'assistant' && !msg.isLoading ? () => handleRegenerateResponse(index) : undefined}
-                                                    onBranch={() => handleBranchConversation(index)}
-                                                />
-                                            </div>
-                                            {msg.role === 'assistant' ? (
-                                                <div>
-                                                    {msg.isLoading ? (
-                                                        <div className="flex flex-col gap-2">
-                                                            {msg.tool_calls && msg.tool_calls.length > 0 && (
-                                                                <div className="mb-2 space-y-2 animate-in slide-in-from-top-1 fade-in duration-300">
-                                                                    {msg.tool_calls.map((tc, idx) => (
-                                                                        <div key={tc.id || idx} className="p-2 bg-slate-900/80 border border-slate-700/50 rounded-lg text-xs font-mono shadow-sm">
-                                                                            <div className="flex items-center gap-2 mb-1 text-primary">
-                                                                                <Wrench size={12} />
-                                                                                <span className="font-bold">{tc.function.name}</span>
-                                                                            </div>
-                                                                            <div className="bg-slate-950 p-2 rounded text-slate-400 overflow-x-auto whitespace-pre-wrap break-all">
-                                                                                {tc.function.arguments}
-                                                                            </div>
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                            {msg.content && <MessageContent content={msg.content} isUser={false} mcpAvailable={mcpAvailable} onInsertToFile={handleInsertToFile} isStreaming={true} />}
-                                                            <div className="flex items-center gap-2 text-slate-400 italic text-sm animate-pulse">
-                                                                <Brain size={16} className="text-primary" /> Thinking...
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        <>
-                                                            {/* Normal View */}
-                                                            {(!showInspector || !hasLogprobs) && (
-                                                                <>
-                                                                    {msg.tool_calls && msg.tool_calls.length > 0 && (
-                                                                        <div className="mb-2 space-y-2">
-                                                                            {msg.tool_calls.map((tc, idx) => (
-                                                                                <div key={tc.id || idx} className="p-2 bg-slate-900/80 border border-slate-700/50 rounded-lg text-xs font-mono shadow-sm">
-                                                                                    <div className="flex items-center gap-2 mb-1 text-primary">
-                                                                                        <Wrench size={12} />
-                                                                                        <span className="font-bold">{tc.function.name}</span>
-                                                                                    </div>
-                                                                                    <div className="bg-slate-950 p-2 rounded text-slate-400 overflow-x-auto whitespace-pre-wrap break-all">
-                                                                                        {tc.function.arguments}
-                                                                                    </div>
-                                                                                </div>
-                                                                            ))}
-                                                                        </div>
-                                                                    )}
-                                                                    <MessageContent content={msg.content || ""} isUser={false} mcpAvailable={mcpAvailable} onInsertToFile={handleInsertToFile} />
-                                                                </>
-                                                            )}
-
-                                                            {/* Inspector View */}
-                                                            {showInspector && hasLogprobs && (
-                                                                <div className="leading-relaxed font-mono text-[15px] animate-in fade-in duration-300">
-                                                                    {currentLogprobs.map((lp, i) => {
-                                                                        if (!lp || typeof lp !== 'object') return null;
-                                                                        const entropy = calculateEntropy(lp.top_logprobs);
-                                                                        const isSelected = selectedToken?.logprob === lp;
-                                                                        const redIntensity = Math.min(255, entropy * 100);
-                                                                        const bgAlpha = entropy > 0.5 ? 0.3 : 0.05;
-
-                                                                        const style = {
-                                                                            backgroundColor: isSelected ? 'rgba(251, 191, 36, 0.9)' : `rgba(${redIntensity}, 50, 50, ${bgAlpha})`,
-                                                                            color: isSelected ? '#000' : 'inherit',
-                                                                            borderBottom: entropy > 1.0 ? '1px dotted #ef4444' : 'none',
-                                                                        };
-
-                                                                        return (
-                                                                            <span key={i} onClick={() => { setSelectedToken({ logprob: lp, messageIndex: index, tokenIndex: i }); setActiveTab('inspector'); }}
-                                                                                title={`Token: "${lp.token}"\nLogprob: ${lp.logprob}`}
-                                                                                className={`cursor-pointer rounded-[2px] px-[1px] transition-colors ${isSelected ? 'font-bold ring-2 ring-yellow-400 z-10 relative' : 'hover:bg-slate-700'}`} style={style}>{lp.token}</span>
-                                                                        );
-                                                                    })}
-                                                                </div>
-                                                            )}
-                                                        </>
-                                                    )}
-                                                    {/* Comparison View Toggle (only for first message in Battle Mode pair) */}
-                                                    {isBattleModePair && !msg.isLoading && !history[index + 1]?.isLoading && (
-                                                        <div className="mt-2 mb-2">
-                                                            <button
-                                                                onClick={() => setComparisonIndex(isShowingComparison ? null : index)}
-                                                                className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg transition-colors bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 hover:border-primary/50 text-slate-300 hover:text-primary"
-                                                            >
-                                                                <Code2 size={14} />
-                                                                {isShowingComparison ? 'Hide Comparison' : 'Show Comparison Grid'}
-                                                            </button>
-                                                        </div>
-                                                    )}
-
-                                                    {/* Comparison Grid View */}
-                                                    {isShowingComparison && isBattleModePair && !msg.isLoading && !history[index + 1]?.isLoading && (
-                                                        <div className="mt-4 mb-4">
-                                                            {(() => {
-                                                                const msgB = history[index + 1];
-                                                                // Extract model names from content
-                                                                const modelAMatch = msg.content?.match(/\*\*Model A:\s*(.+?)\*\*/);
-                                                                const modelBMatch = msgB.content?.match(/\*\*Model B:\s*(.+?)\*\*/);
-                                                                const modelAName = modelAMatch?.[1] || availableModels.find(m => m.id === currentModel)?.name || 'Model A';
-                                                                const modelBName = modelBMatch?.[1] || availableModels.find(m => m.id === secondaryModel)?.name || 'Model B';
-
-                                                                return (
-                                                                    <ComparisonGrid
-                                                                        messageA={msg}
-                                                                        messageB={msgB}
-                                                                        modelAName={modelAName}
-                                                                        modelBName={modelBName}
-                                                                        onClose={() => setComparisonIndex(null)}
-                                                                        mcpAvailable={mcpAvailable}
-                                                                        onInsertToFile={handleInsertToFile}
-                                                                    />
-                                                                );
-                                                            })()}
-                                                        </div>
-                                                    )}
-
-                                                    {/* Rating and Generation Time */}
-                                                    <div className="mt-2 flex items-center justify-between gap-2">
-                                                        {/* Rating Buttons */}
-                                                        {!msg.isLoading && (
-                                                            <div className="flex items-center gap-1">
-                                                                <button
-                                                                    onClick={() => handleRateMessage(index, 'up')}
-                                                                    className={`p-1 rounded transition-colors ${messageRatings[index] === 'up'
-                                                                        ? 'text-green-500 bg-green-500/20'
-                                                                        : 'text-slate-500 hover:text-green-400 hover:bg-slate-800'
-                                                                        }`}
-                                                                    title="Good response"
-                                                                >
-                                                                    <ThumbsUp size={12} fill={messageRatings[index] === 'up' ? 'currentColor' : 'none'} />
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => handleRateMessage(index, 'down')}
-                                                                    className={`p-1 rounded transition-colors ${messageRatings[index] === 'down'
-                                                                        ? 'text-red-500 bg-red-500/20'
-                                                                        : 'text-slate-500 hover:text-red-400 hover:bg-slate-800'
-                                                                        }`}
-                                                                    title="Poor response"
-                                                                >
-                                                                    <ThumbsDown size={12} fill={messageRatings[index] === 'down' ? 'currentColor' : 'none'} />
-                                                                </button>
-                                                            </div>
-                                                        )}
-                                                        {/* Generation Time */}
-                                                        {msg.generationTime && (
-                                                            <div className="flex items-center gap-1 text-[10px] text-slate-500 font-mono">
-                                                                <Clock size={10} />
-                                                                {(msg.generationTime / 1000).toFixed(2)}s
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                    {/* Quick Reply Templates */}
-                                                    {!msg.isLoading && isLastMessage && msg.content && (
-                                                        <QuickReplyTemplates
-                                                            lastAssistantMessage={msg.content}
-                                                            onSelectTemplate={(template) => {
-                                                                setInput(template);
-                                                                if (textareaRef.current) {
-                                                                    textareaRef.current.focus();
-                                                                }
-                                                            }}
-                                                        />
-                                                    )}
-                                                </div>
-                                            ) : (
-                                                <>
-                                                    {editingMessageIndex === index ? (
-                                                        <div className="flex flex-col gap-2">
-                                                            <textarea
-                                                                value={editedMessageContent}
-                                                                onChange={(e) => setEditedMessageContent(e.target.value)}
-                                                                className="w-full min-h-[100px] p-2 bg-slate-900/50 border border-primary/30 rounded-lg text-white resize-y focus:outline-none focus:border-primary/60"
-                                                                autoFocus
-                                                            />
-                                                            <div className="flex gap-2 justify-end">
-                                                                <button
-                                                                    onClick={handleCancelEdit}
-                                                                    className="px-3 py-1 text-sm bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
-                                                                >
-                                                                    Cancel
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => handleSaveEdit(index)}
-                                                                    className="px-3 py-1 text-sm bg-primary hover:bg-primary/80 rounded-lg transition-colors"
-                                                                >
-                                                                    Save & Resend
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        <>
-                                                            <MessageContent content={msg.content} isUser={true} mcpAvailable={mcpAvailable} onInsertToFile={handleInsertToFile} />
-                                                            {/* Display attached images */}
-                                                            {msg.images && msg.images.length > 0 && (
-                                                                <div className="mt-2 flex flex-wrap gap-2">
-                                                                    {msg.images.map((img, imgIdx) => (
-                                                                        <a
-                                                                            key={imgIdx}
-                                                                            href={img.thumbnailUrl}
-                                                                            target="_blank"
-                                                                            rel="noopener noreferrer"
-                                                                            className="block"
-                                                                        >
-                                                                            <img
-                                                                                src={img.thumbnailUrl}
-                                                                                alt={img.name}
-                                                                                className="max-w-[200px] max-h-[150px] object-cover rounded-lg border border-slate-600 hover:border-primary/50 transition-colors cursor-pointer"
-                                                                            />
-                                                                        </a>
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                        </>
-                                                    )}
-                                                </>
-                                            )}
-                                        </div>
-                                        {showMissingLogprobsWarning && (
-                                            <motion.div
-                                                initial={{ opacity: 0, scale: 0.95 }}
-                                                animate={{ opacity: 1, scale: 1 }}
-                                                className="mt-2 p-3 bg-amber-900/20 text-amber-200 rounded-lg text-sm border border-amber-900/50 flex flex-col gap-2 max-w-[85%]"
-                                            >
-                                                <div className="flex items-center gap-2 font-bold"><AlertTriangle size={14} /> Token Data Missing</div>
-                                                <p className="opacity-80">The LM Studio server refused to send token data. (Note: Remote models like OpenRouter may not support logprobs yet)</p>
-                                            </motion.div>
-                                        )}
-                                        {msg.role === 'assistant' && msg.choices && Array.isArray(msg.choices) && msg.choices.length > 1 && (
-                                            <div className="mt-2 flex gap-2 overflow-x-auto max-w-full pb-1">
-                                                {msg.choices.map((c, cIdx) => (
-                                                    <button key={cIdx} onClick={() => selectChoice(index, cIdx)} className={`px-2 py-1 text-xs border rounded-md transition-colors whitespace-nowrap ${(msg.selectedChoiceIndex || 0) === cIdx ? 'bg-slate-700 text-white border-slate-600' : 'bg-transparent text-slate-500 border-slate-800 hover:border-slate-600 hover:text-slate-300'}`}>Option {cIdx + 1}</button>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </motion.div>
-                                );
-                            }}
+                            itemContent={renderItemContent}
                             components={{
                                 Footer: () => <div className="h-48" />
                             }}
@@ -2983,6 +3253,9 @@ const Chat: React.FC = () => {
                 isOpen={showFederatedLearning}
                 onClose={() => setShowFederatedLearning(false)}
             />
+
+            {/* Performance Monitor Overlay */}
+            <PerformanceMonitorOverlay messageCount={history.length} />
         </div>
     );
 };

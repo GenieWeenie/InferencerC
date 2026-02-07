@@ -13,6 +13,72 @@ const ACTIVE_SESSION_KEY = 'app_active_session_id';
 const ENCRYPTED_SESSIONS_KEY = 'app_encrypted_sessions'; // Store encrypted session data separately
 const SESSION_PASSWORDS_KEY = 'app_session_passwords'; // Store password hashes (for verification only)
 const SESSION_DATA_PREFIX = 'app_session_';
+const MESSAGE_CONTENT_PREFIX = 'app_message_content_'; // Store large message content separately
+const CONTENT_CHUNK_THRESHOLD = 1024; // 1KB threshold for chunking
+
+/**
+ * Calculate message size in bytes
+ */
+const getMessageSize = (message: ChatMessage): number => {
+  try {
+    const contentStr = typeof message.content === 'string'
+      ? message.content
+      : JSON.stringify(message.content);
+    return new Blob([contentStr]).size;
+  } catch (e) {
+    return 0;
+  }
+};
+
+/**
+ * Check if message content should be stored separately
+ */
+const shouldChunkMessage = (message: ChatMessage): boolean => {
+  return getMessageSize(message) > CONTENT_CHUNK_THRESHOLD;
+};
+
+/**
+ * Store message content separately
+ */
+const storeMessageContent = (sessionId: string, messageIndex: number, content: string | any): void => {
+  const key = `${MESSAGE_CONTENT_PREFIX}${sessionId}_${messageIndex}`;
+  const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+  localStorage.setItem(key, contentStr);
+};
+
+/**
+ * Load message content from separate storage
+ */
+const loadMessageContent = (sessionId: string, messageIndex: number): string | any | null => {
+  const key = `${MESSAGE_CONTENT_PREFIX}${sessionId}_${messageIndex}`;
+  const content = localStorage.getItem(key);
+  if (!content) return null;
+
+  // Try to parse as JSON (for multimodal content), fallback to string
+  try {
+    return JSON.parse(content);
+  } catch (e) {
+    return content;
+  }
+};
+
+/**
+ * Delete all message content chunks for a session
+ */
+const deleteMessageContents = (sessionId: string): void => {
+  const keysToDelete: string[] = [];
+
+  // Find all keys matching this session's message content
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith(`${MESSAGE_CONTENT_PREFIX}${sessionId}_`)) {
+      keysToDelete.push(key);
+    }
+  }
+
+  // Delete found keys
+  keysToDelete.forEach(key => localStorage.removeItem(key));
+};
 
 // Migration helper (monolithic -> split)
 const migrateStorage = () => {
@@ -49,8 +115,45 @@ const migrateStorage = () => {
   }
 };
 
-// Run migration on load
+// Migration helper (chunking large messages)
+const migrateToChunkedStorage = () => {
+  try {
+    const metadataSessions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+
+    metadataSessions.forEach((meta: ChatSession) => {
+      const sessionKey = `${SESSION_DATA_PREFIX}${meta.id}`;
+      const rawSession = localStorage.getItem(sessionKey);
+
+      if (!rawSession) return;
+
+      const session: ChatSession = JSON.parse(rawSession);
+      let needsMigration = false;
+
+      // Check if any messages need chunking
+      session.messages.forEach((msg, index) => {
+        const chatMsg = msg as any;
+        // Skip if already chunked
+        if (chatMsg._contentChunked) return;
+
+        // Check if message should be chunked
+        if (shouldChunkMessage(chatMsg as ChatMessage)) {
+          needsMigration = true;
+        }
+      });
+
+      // Re-save session if migration needed (saveSession will handle chunking)
+      if (needsMigration) {
+        HistoryService.saveSession(session);
+      }
+    });
+  } catch (e) {
+    console.error("Chunking migration failed", e);
+  }
+};
+
+// Run migrations on load
 migrateStorage();
+migrateToChunkedStorage();
 
 export const HistoryService = {
   /**
@@ -96,7 +199,31 @@ export const HistoryService = {
         };
       }
 
-      return session;
+      // Load chunked message content
+      const messagesWithContent = session.messages.map((msg, index) => {
+        const chatMsg = msg as any;
+
+        // Check if message has chunked content
+        if (chatMsg._contentChunked) {
+          // Load content from separate storage
+          const content = loadMessageContent(id, index);
+          if (content !== null) {
+            // Remove the chunked marker and restore content
+            const { _contentChunked, ...msgWithoutMarker } = chatMsg;
+            return {
+              ...msgWithoutMarker,
+              content
+            } as ChatMessage;
+          }
+        }
+
+        return chatMsg as ChatMessage;
+      });
+
+      return {
+        ...session,
+        messages: messagesWithContent
+      };
     } catch (e) {
       console.error(`Failed to get session ${id}`, e);
       return undefined;
@@ -198,16 +325,39 @@ export const HistoryService = {
    * Save session state (updates both split storage and metadata list)
    */
   saveSession: (session: ChatSession) => {
+    // Process messages for chunking (store large content separately)
+    const processedMessages = session.messages.map((msg, index) => {
+      const chatMsg = msg as ChatMessage;
+
+      // Check if message should be chunked
+      if (shouldChunkMessage(chatMsg)) {
+        // Store content separately
+        storeMessageContent(session.id, index, chatMsg.content);
+
+        // Return message with marker indicating content is chunked
+        return {
+          ...chatMsg,
+          content: '', // Clear content to save space
+          _contentChunked: true // Marker for lazy loading
+        } as any;
+      }
+
+      return chatMsg;
+    });
+
+    // Create session with processed messages
+    const processedSession = { ...session, messages: processedMessages };
+
     // 1. Save full session to specific key
     const uniqueKey = `${SESSION_DATA_PREFIX}${session.id}`;
-    localStorage.setItem(uniqueKey, JSON.stringify(session));
+    localStorage.setItem(uniqueKey, JSON.stringify(processedSession));
 
     // 2. Update metadata in main list
     const sessions = HistoryService.getAllSessions();
     const idx = sessions.findIndex(s => s.id === session.id);
 
     // Create metadata object (copy session but remove heavy messages)
-    const metadata = { ...session, messages: [] };
+    const metadata = { ...processedSession, messages: [] };
 
     // Update or Insert
     if (idx >= 0) {
@@ -216,19 +366,20 @@ export const HistoryService = {
       sessions.unshift({ ...metadata, lastModified: Date.now() });
     }
 
-    // Auto-generate title logic (using full session data)
+    // Auto-generate title logic (using original session data)
     const currentSessionMetadata = idx >= 0 ? sessions[idx] : sessions[0];
     if (currentSessionMetadata.title === 'New Chat' && session.messages.length > 0) {
       const firstUserMsg = session.messages.find(m => m.role === 'user');
       if (firstUserMsg) {
-        currentSessionMetadata.title = firstUserMsg.content.substring(0, 30) + (firstUserMsg.content.length > 30 ? '...' : '');
+        const content = typeof firstUserMsg.content === 'string' ? firstUserMsg.content : '';
+        currentSessionMetadata.title = content.substring(0, 30) + (content.length > 30 ? '...' : '');
       }
     }
 
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
 
-      // Index the full session content
+      // Index the full session content (use original session with full content)
       SearchIndexService.indexSession(session);
     } catch (e) {
       console.error("Failed to save session index", e);
@@ -254,7 +405,10 @@ export const HistoryService = {
       localStorage.setItem(SESSION_PASSWORDS_KEY, JSON.stringify(passwordHashes));
     }
 
-    // 5. Remove from search index
+    // 5. Remove chunked message content
+    deleteMessageContents(id);
+
+    // 6. Remove from search index
     SearchIndexService.removeSession(id);
   },
 
