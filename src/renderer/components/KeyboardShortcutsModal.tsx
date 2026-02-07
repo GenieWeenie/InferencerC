@@ -19,6 +19,7 @@ const shortcuts: Shortcut[] = [
     { keys: ['Ctrl', 'N'], description: 'Create new chat', category: 'Navigation' },
     { keys: ['Ctrl', '/'], description: 'Toggle history sidebar', category: 'Navigation' },
     { keys: ['Ctrl', '.'], description: 'Toggle sidebar', category: 'Navigation' },
+    { keys: ['Ctrl', 'Shift', 'N'], description: 'Toggle collapsed sections navigator', category: 'Navigation' },
 
     // Actions
     { keys: ['Ctrl', 'K'], description: 'Quick model switcher', category: 'Actions' },

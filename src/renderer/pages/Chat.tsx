@@ -955,7 +955,7 @@ const Chat: React.FC = () => {
                         <>
                             <button
                                 onClick={() => setShowExportDialog(true)}
-                                title="Export Chat (Ctrl+Shift+E)"
+                                title="Export Chat"
                                 className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
                             >
                                 <Download size={14} /> <span>Export</span>
