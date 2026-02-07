@@ -33,9 +33,11 @@ import { RealTimeCollaborationPanel } from '../components/RealTimeCollaborationP
 import { BlockchainPanel } from '../components/BlockchainPanel';
 import { AIAgentsPanel } from '../components/AIAgentsPanel';
 import { FederatedLearningPanel } from '../components/FederatedLearningPanel';
+import RecoveryDialog from '../components/RecoveryDialog';
 import { responsiveDesignService } from '../services/responsiveDesign';
 import { onboardingService } from '../services/onboarding';
 import { multiModalAIService } from '../services/multiModalAI';
+import { crashRecoveryService } from '../services/crashRecovery';
 const PromptManager = React.lazy(() => import('../components/PromptManager'));
 import SidebarHistory from '../components/SidebarHistory';
 import { useChat } from '../hooks/useChat';
@@ -59,6 +61,7 @@ import { TemplateService, ConversationTemplate } from '../services/templates';
 import { PromptVariableService } from '../services/promptVariables';
 import VariableInsertMenu from '../components/VariableInsertMenu';
 import { AVAILABLE_TOOLS } from '../lib/tools';
+import { RecoveryState } from '../../shared/types';
 
 const Chat: React.FC = () => {
     // API logs state (defined before useChat so it can be passed as callback)
@@ -197,6 +200,10 @@ const Chat: React.FC = () => {
     // Variable insert menu state
     const [showVariableMenu, setShowVariableMenu] = React.useState(false);
 
+    // Recovery dialog state
+    const [showRecoveryDialog, setShowRecoveryDialog] = React.useState(false);
+    const [recoveryState, setRecoveryState] = React.useState<RecoveryState | null>(null);
+
     // Initialize conversation tree (always initialize, will sync when enabled)
     const treeHook = useConversationTree();
 
@@ -220,6 +227,14 @@ const Chat: React.FC = () => {
         }
     }, []);
 
+    // Check for crash recovery state on mount
+    React.useEffect(() => {
+        const savedRecoveryState = crashRecoveryService.getRecoveryState();
+        if (savedRecoveryState) {
+            setRecoveryState(savedRecoveryState);
+            setShowRecoveryDialog(true);
+        }
+    }, []);
 
     // Sync tree with history when branching is enabled or when history changes
     React.useEffect(() => {
@@ -525,6 +540,31 @@ const Chat: React.FC = () => {
         } catch (err) {
             toast.error('Failed to branch conversation');
         }
+    };
+
+    // Recovery handlers
+    const handleRestoreSession = () => {
+        if (!recoveryState) return;
+
+        // Load the recovered session
+        loadSession(recoveryState.sessionId);
+
+        // Restore draft message if it exists
+        if (recoveryState.draftMessage) {
+            setInput(recoveryState.draftMessage);
+        }
+
+        // Clear recovery state
+        crashRecoveryService.clearRecoveryState();
+
+        toast.success('Session restored successfully');
+    };
+
+    const handleDismissRecovery = () => {
+        // Clear recovery state
+        crashRecoveryService.clearRecoveryState();
+
+        toast.info('Starting fresh session');
     };
 
     const handleInsertToFile = React.useCallback(async (code: string, language: string) => {
@@ -2982,6 +3022,15 @@ const Chat: React.FC = () => {
             <FederatedLearningPanel
                 isOpen={showFederatedLearning}
                 onClose={() => setShowFederatedLearning(false)}
+            />
+
+            {/* Recovery Dialog */}
+            <RecoveryDialog
+                isOpen={showRecoveryDialog}
+                onClose={() => setShowRecoveryDialog(false)}
+                onRestore={handleRestoreSession}
+                onDismiss={handleDismissRecovery}
+                recoveryState={recoveryState}
             />
         </div>
     );

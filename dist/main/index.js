@@ -61,6 +61,43 @@ electron_1.ipcMain.handle('check-for-updates', async () => {
 electron_1.ipcMain.handle('quit-and-install', () => {
     electron_updater_1.autoUpdater.quitAndInstall();
 });
+// Recovery State IPC Handlers
+const RECOVERY_STATE_PATH = path_1.default.join(electron_1.app.getPath('userData'), 'recovery-state.json');
+electron_1.ipcMain.handle('save-recovery-state', async (event, state) => {
+    try {
+        fs_1.default.writeFileSync(RECOVERY_STATE_PATH, JSON.stringify(state));
+        return { success: true };
+    }
+    catch (error) {
+        console.error('Failed to save recovery state:', error);
+        return { success: false, error: error.message };
+    }
+});
+electron_1.ipcMain.handle('get-recovery-state', async () => {
+    try {
+        if (fs_1.default.existsSync(RECOVERY_STATE_PATH)) {
+            const data = fs_1.default.readFileSync(RECOVERY_STATE_PATH, 'utf-8');
+            return { success: true, state: JSON.parse(data) };
+        }
+        return { success: true, state: null };
+    }
+    catch (error) {
+        console.error('Failed to load recovery state:', error);
+        return { success: false, error: error.message, state: null };
+    }
+});
+electron_1.ipcMain.handle('clear-recovery-state', async () => {
+    try {
+        if (fs_1.default.existsSync(RECOVERY_STATE_PATH)) {
+            fs_1.default.unlinkSync(RECOVERY_STATE_PATH);
+        }
+        return { success: true };
+    }
+    catch (error) {
+        console.error('Failed to clear recovery state:', error);
+        return { success: false, error: error.message };
+    }
+});
 const WINDOW_STATE_PATH = path_1.default.join(electron_1.app.getPath('userData'), 'window-state.json');
 function saveWindowState(win) {
     try {

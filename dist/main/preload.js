@@ -28,5 +28,9 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     },
     // Git Integration
     gitCommit: (options) => electron_1.ipcRenderer.invoke('git-commit', options),
+    // Recovery APIs
+    saveRecoveryState: (state) => electron_1.ipcRenderer.invoke('save-recovery-state', state),
+    getRecoveryState: () => electron_1.ipcRenderer.invoke('get-recovery-state'),
+    clearRecoveryState: () => electron_1.ipcRenderer.invoke('clear-recovery-state'),
 });
 //# sourceMappingURL=preload.js.map
