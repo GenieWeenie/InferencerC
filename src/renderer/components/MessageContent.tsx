@@ -97,6 +97,10 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
     const messageCollapseKey = 'message';
     const isMessageCollapsed = isCollapsed(messageCollapseKey);
 
+    // Refs for focus management
+    const messageToggleRef = React.useRef<HTMLButtonElement>(null);
+    const codeBlockToggleRefs = React.useRef<Map<string, HTMLButtonElement>>(new Map());
+
     const handleCopy = (code: string) => {
         navigator.clipboard.writeText(code);
         setCopiedCode(code);
@@ -252,15 +256,19 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
             {isLongMessage && (
                 <div className="flex items-center justify-end mb-2 -mt-2">
                     <button
+                        ref={messageToggleRef}
                         onClick={() => toggleCollapse(messageCollapseKey)}
-                        className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-300 transition-colors py-1 px-2 rounded hover:bg-slate-800/50 border border-slate-700/50 hover:border-slate-600"
+                        className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-300 transition-colors py-1 px-2 rounded hover:bg-slate-800/50 border border-slate-700/50 hover:border-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
+                        aria-label={isMessageCollapsed ? `Expand message (${wordCount} words)` : `Collapse message (${wordCount} words)`}
+                        aria-expanded={!isMessageCollapsed}
+                        aria-controls="message-content"
                         title={isMessageCollapsed ? "Expand message" : "Collapse message"}
                     >
-                        <span className="font-mono">{wordCount} words</span>
+                        <span className="font-mono" aria-hidden="true">{wordCount} words</span>
                         {isMessageCollapsed ? (
-                            <ChevronDown size={14} />
+                            <ChevronDown size={14} aria-hidden="true" />
                         ) : (
-                            <ChevronUp size={14} />
+                            <ChevronUp size={14} aria-hidden="true" />
                         )}
                     </button>
                 </div>
@@ -268,19 +276,20 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
 
             {thoughtProcess && (
                 <details className="mb-4 group bg-slate-900/50 border border-slate-700/50 rounded-lg overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300" open={cleanContent === ""}>
-                    <summary className="px-4 py-2 cursor-pointer bg-slate-900 hover:bg-slate-800 transition-colors flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider select-none">
-                        <span className="opacity-70 group-open:rotate-90 transition-transform">▶</span>
+                    <summary className="px-4 py-2 cursor-pointer bg-slate-900 hover:bg-slate-800 transition-colors flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider select-none focus:outline-none focus:ring-2 focus:ring-primary/50" aria-label="Thought Process">
+                        <span className="opacity-70 group-open:rotate-90 transition-transform duration-200" aria-hidden="true">▶</span>
                         Thought Process
                     </summary>
-                    <div className="p-4 bg-slate-950/30 text-slate-400 font-mono text-xs whitespace-pre-wrap leading-relaxed border-t border-slate-800/50 border-dashed max-h-[400px] overflow-y-auto custom-scrollbar">
+                    <div className="p-4 bg-slate-950/30 text-slate-400 font-mono text-xs whitespace-pre-wrap leading-relaxed border-t border-slate-800/50 border-dashed max-h-[400px] overflow-y-auto custom-scrollbar" role="region" aria-label="Thought process content">
                         {thoughtProcess}
                     </div>
                 </details>
             )}
-            <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkMath]}
-                rehypePlugins={[rehypeKatex]}
-                components={{
+            <div id="message-content" role="region" aria-label="Message content">
+                <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[rehypeKatex]}
+                    components={{
                     code({ node, inline, className, children, ...props }: any) {
                         const match = /language-(\w+)/.exec(className || '');
                         const codeString = String(children).replace(/\n$/, '');
@@ -307,7 +316,8 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                         <select
                                             value={language}
                                             onChange={(e) => handleLanguageChange(e.target.value)}
-                                            className="text-xs font-mono text-slate-300 font-bold ml-2 uppercase tracking-wider bg-slate-800/50 border border-slate-600/50 rounded px-2 py-0.5 hover:bg-slate-700/50 focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer appearance-none"
+                                            className="text-xs font-mono text-slate-300 font-bold ml-2 uppercase tracking-wider bg-slate-800/50 border border-slate-600/50 rounded px-2 py-0.5 hover:bg-slate-700/50 focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer appearance-none"
+                                            aria-label="Select programming language"
                                             onClick={(e) => e.stopPropagation()}
                                         >
                                             {COMMON_LANGUAGES.map(lang => (
@@ -317,14 +327,24 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                             ))}
                                         </select>
                                         <button
+                                            ref={(el) => {
+                                                if (el) {
+                                                    codeBlockToggleRefs.current.set(codeHash, el);
+                                                } else {
+                                                    codeBlockToggleRefs.current.delete(codeHash);
+                                                }
+                                            }}
                                             onClick={() => toggleCollapse(codeHash)}
-                                            className="p-1 hover:bg-slate-700/50 rounded transition-colors"
+                                            className="p-1 hover:bg-slate-700/50 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                            aria-label={isCollapsed(codeHash) ? `Expand ${language} code block` : `Collapse ${language} code block`}
+                                            aria-expanded={!isCollapsed(codeHash)}
+                                            aria-controls={`code-block-${codeHash}`}
                                             title={isCollapsed(codeHash) ? "Expand code block" : "Collapse code block"}
                                         >
                                             {isCollapsed(codeHash) ? (
-                                                <ChevronDown size={16} className="text-slate-400" />
+                                                <ChevronDown size={16} className="text-slate-400" aria-hidden="true" />
                                             ) : (
-                                                <ChevronUp size={16} className="text-slate-400" />
+                                                <ChevronUp size={16} className="text-slate-400" aria-hidden="true" />
                                             )}
                                         </button>
                                     </div>
@@ -332,19 +352,21 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                         {isPreviewable && (
                                             <button
                                                 onClick={() => setPreviewCode({ code: codeString, language })}
-                                                className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-emerald-500/30 hover:border-emerald-500/50"
+                                                className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-emerald-500/30 hover:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                                aria-label={`Preview ${language} code`}
                                             >
-                                                <Play size={12} fill="currentColor" />
+                                                <Play size={12} fill="currentColor" aria-hidden="true" />
                                                 PREVIEW
                                             </button>
                                         )}
                                         {mcpAvailable && !isUser && (
                                             <button
                                                 onClick={() => setShowFilePathInput(codeString)}
-                                                className="flex items-center gap-1.5 text-[10px] font-bold text-blue-400 hover:text-blue-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-blue-500/30 hover:border-blue-500/50"
+                                                className="flex items-center gap-1.5 text-[10px] font-bold text-blue-400 hover:text-blue-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-blue-500/30 hover:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                                aria-label="Insert code to file"
                                                 title="Insert to file (requires MCP)"
                                             >
-                                                <FileText size={12} />
+                                                <FileText size={12} aria-hidden="true" />
                                                 INSERT
                                             </button>
                                         )}
@@ -352,13 +374,14 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                             <button
                                                 onClick={() => handleExecuteCode(codeString, language, codeHash)}
                                                 disabled={executingCode === codeHash}
-                                                className="flex items-center gap-1.5 text-[10px] font-bold text-orange-400 hover:text-orange-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-orange-500/30 hover:border-orange-500/50 disabled:opacity-50"
+                                                className="flex items-center gap-1.5 text-[10px] font-bold text-orange-400 hover:text-orange-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-orange-500/30 hover:border-orange-500/50 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-orange-500/50 disabled:cursor-not-allowed"
+                                                aria-label={executingCode === codeHash ? `Executing ${language} code` : `Execute ${language} code`}
                                                 title="Execute code (sandboxed)"
                                             >
                                                 {executingCode === codeHash ? (
-                                                    <span className="animate-spin">⏳</span>
+                                                    <span className="animate-spin" aria-hidden="true">⏳</span>
                                                 ) : (
-                                                    <PlayCircle size={12} />
+                                                    <PlayCircle size={12} aria-hidden="true" />
                                                 )}
                                                 RUN
                                             </button>
@@ -387,26 +410,29 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                                         toast.error(result.error || 'Failed to create gist');
                                                     }
                                                 }}
-                                                className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-emerald-500/30 hover:border-emerald-500/50"
+                                                className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-emerald-500/30 hover:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                                aria-label="Create GitHub Gist"
                                                 title="Create GitHub Gist"
                                             >
-                                                <Github size={12} />
+                                                <Github size={12} aria-hidden="true" />
                                                 GIST
                                             </button>
                                         )}
                                         <button
                                             onClick={() => handleSaveFile(codeString, language)}
-                                            className="flex items-center gap-1.5 text-[10px] font-bold text-purple-400 hover:text-purple-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-purple-500/30 hover:border-purple-500/50"
+                                            className="flex items-center gap-1.5 text-[10px] font-bold text-purple-400 hover:text-purple-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-purple-500/30 hover:border-purple-500/50 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                                            aria-label={`Save ${language} code as file`}
                                             title="Save as file"
                                         >
-                                            <Save size={12} />
+                                            <Save size={12} aria-hidden="true" />
                                             SAVE
                                         </button>
                                         <button
                                             onClick={() => handleCopy(codeString)}
-                                            className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 hover:text-white transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-transparent hover:border-slate-600"
+                                            className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 hover:text-white transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-transparent hover:border-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-500/50"
+                                            aria-label={copiedCode === codeString ? 'Code copied' : 'Copy code to clipboard'}
                                         >
-                                            {copiedCode === codeString ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                                            {copiedCode === codeString ? <Check size={12} className="text-emerald-400" aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
                                             {copiedCode === codeString ? 'COPIED' : 'COPY'}
                                         </button>
                                     </div>
@@ -414,11 +440,19 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                 <AnimatePresence initial={false}>
                                     {!isCollapsed(codeHash) && (
                                         <motion.div
+                                            id={`code-block-${codeHash}`}
                                             initial={{ height: 0, opacity: 0 }}
                                             animate={{ height: "auto", opacity: 1 }}
                                             exit={{ height: 0, opacity: 0 }}
-                                            transition={{ duration: 0.3, ease: "easeInOut" }}
-                                            style={{ overflow: "hidden" }}
+                                            transition={{
+                                                duration: 0.25,
+                                                ease: [0.4, 0, 0.2, 1],
+                                                opacity: { duration: 0.2 }
+                                            }}
+                                            style={{
+                                                overflow: "hidden",
+                                                willChange: "height, opacity"
+                                            }}
                                         >
                                             <div className="relative">
                                                 <SyntaxHighlighter
@@ -448,9 +482,10 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                                                 delete newResults[codeHash];
                                                                 setExecutionResults(newResults);
                                                             }}
-                                                            className="ml-auto p-1 hover:bg-slate-700 rounded transition-colors"
+                                                            className="ml-auto p-1 hover:bg-slate-700 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-slate-500/50"
+                                                            aria-label="Close execution results"
                                                         >
-                                                            <X size={12} className="text-slate-500" />
+                                                            <X size={12} className="text-slate-500" aria-hidden="true" />
                                                         </button>
                                                     </div>
                                                     <pre className="text-xs font-mono text-slate-300 whitespace-pre-wrap bg-slate-900/50 p-2 rounded border border-slate-700/50 max-h-48 overflow-y-auto custom-scrollbar">
@@ -459,14 +494,19 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                                 </div>
                                             )}
                                             {showFilePathInput === codeString && (
-                                                <div className="px-4 py-3 bg-[#2d2d2d] border-t border-slate-700">
+                                                <div className="px-4 py-3 bg-[#2d2d2d] border-t border-slate-700" role="form" aria-label="File insertion form">
                                                     <div className="flex items-center gap-2">
+                                                        <label htmlFor={`file-path-${codeHash}`} className="sr-only">
+                                                            File path for code insertion
+                                                        </label>
                                                         <input
+                                                            id={`file-path-${codeHash}`}
                                                             type="text"
                                                             value={filePath}
                                                             onChange={(e) => setFilePath(e.target.value)}
                                                             placeholder="Enter file path (e.g., ./src/utils/helper.js)"
                                                             className="flex-1 bg-slate-800 border border-slate-600 text-white text-sm rounded px-3 py-1.5 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
+                                                            aria-label="File path"
                                                             autoFocus
                                                             onKeyDown={(e) => {
                                                                 if (e.key === 'Enter') {
@@ -479,7 +519,8 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                                         />
                                                         <button
                                                             onClick={() => handleInsertToFile(codeString, language)}
-                                                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded font-medium transition-colors"
+                                                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                                            aria-label="Insert code to file"
                                                         >
                                                             Insert
                                                         </button>
@@ -488,9 +529,10 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                                                 setShowFilePathInput(null);
                                                                 setFilePath('');
                                                             }}
-                                                            className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                                                            className="p-1.5 hover:bg-slate-700 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-slate-500/50"
+                                                            aria-label="Cancel file insertion"
                                                         >
-                                                            <X size={16} className="text-slate-400" />
+                                                            <X size={16} className="text-slate-400" aria-hidden="true" />
                                                         </button>
                                                     </div>
                                                 </div>
@@ -535,19 +577,23 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                     hr: () => <hr className="my-8 border-slate-800" />,
                 }}
             >
-                {contentToRender}
-            </ReactMarkdown>
+                    {contentToRender}
+                </ReactMarkdown>
+            </div>
 
             {/* Expand button at end of collapsed summary */}
             {isLongMessage && isMessageCollapsed && (
                 <div className="mt-3 flex justify-start">
                     <button
                         onClick={() => toggleCollapse(messageCollapseKey)}
-                        className="inline-flex items-center gap-2 text-sm text-primary hover:text-primary-300 transition-colors py-2 px-3 rounded-lg hover:bg-slate-800/50 border border-slate-700/50 hover:border-primary/50 font-medium"
+                        className="inline-flex items-center gap-2 text-sm text-primary hover:text-primary-300 transition-colors py-2 px-3 rounded-lg hover:bg-slate-800/50 border border-slate-700/50 hover:border-primary/50 font-medium focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        aria-label="Expand full message"
+                        aria-expanded="false"
+                        aria-controls="message-content"
                         title="Expand full message"
                     >
                         <span>Read more...</span>
-                        <ChevronDown size={16} />
+                        <ChevronDown size={16} aria-hidden="true" />
                     </button>
                 </div>
             )}
