@@ -1308,6 +1308,10 @@ const Settings: React.FC = () => {
                 isOpen={showAnalytics}
                 onClose={() => setShowAnalytics(false)}
             />
+            <PluginManager
+                isOpen={showPluginManager}
+                onClose={() => setShowPluginManager(false)}
+            />
         </div>
     );
 };
@@ -1678,7 +1682,6 @@ const IntegrationsTab: React.FC = () => {
                     </button>
                 </div>
             </div>
-            <PluginManager isOpen={showPluginManager} onClose={() => setShowPluginManager(false)} />
         </div>
     );
 };

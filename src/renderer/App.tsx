@@ -8,8 +8,44 @@ import ShortcutEditor from './components/ShortcutEditor';
 import { MessageSquare, FolderOpen, Settings as SettingsIcon, Hexagon, Zap, LayoutGrid, Loader2, Menu, X } from 'lucide-react';
 
 // Lazy load heavy pages
-const Models = React.lazy(() => import('./pages/Models'));
-const Settings = React.lazy(() => import('./pages/Settings'));
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  importFn: () => Promise<{ default: T }>,
+  key: string
+) {
+  return React.lazy(async () => {
+    const storageKey = `lazy-retry:${key}`;
+    const hasWindow = typeof window !== 'undefined';
+    const sessionStore = hasWindow ? window.sessionStorage : null;
+
+    const importWithBackoff = async () => {
+      try {
+        return await importFn();
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        return importFn();
+      }
+    };
+
+    try {
+      const mod = await importWithBackoff();
+      sessionStore?.removeItem(storageKey);
+      return mod;
+    } catch (error) {
+      const alreadyReloaded = sessionStore?.getItem(storageKey) === '1';
+      if (hasWindow && !alreadyReloaded) {
+        sessionStore?.setItem(storageKey, '1');
+        window.location.reload();
+        // Keep this lazy promise pending while the page reloads.
+        await new Promise<never>(() => {});
+      }
+      sessionStore?.removeItem(storageKey);
+      throw error;
+    }
+  });
+}
+
+const Models = lazyWithRetry(() => import('./pages/Models'), 'models');
+const Settings = lazyWithRetry(() => import('./pages/Settings'), 'settings');
 import { motion, AnimatePresence } from 'framer-motion';
 import { PerformanceMonitor } from './components/PerformanceMonitor'; // Import PerformanceMonitor
 import { useCommandPalette } from './hooks/useCommandPalette';

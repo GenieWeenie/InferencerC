@@ -345,12 +345,164 @@ function createWindow() {
   }
 
   const devUrl = 'http://localhost:5173';
+  const maxDevLoadAttempts = 8;
+  let devLoadAttempts = 0;
+  let devReloadTimer: NodeJS.Timeout | null = null;
 
+  const clearDevReloadTimer = () => {
+    if (devReloadTimer) {
+      clearTimeout(devReloadTimer);
+      devReloadTimer = null;
+    }
+  };
+
+  const showLoadFailureScreen = (details: string) => {
+    const escapedDetails = details
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>InferencerC - Load Error</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+      }
+      .card {
+        max-width: 640px;
+        margin: 24px;
+        padding: 24px;
+        border-radius: 12px;
+        border: 1px solid #334155;
+        background: rgba(15, 23, 42, 0.85);
+      }
+      h1 {
+        margin-top: 0;
+        margin-bottom: 8px;
+        font-size: 20px;
+      }
+      p {
+        margin: 8px 0;
+        line-height: 1.5;
+      }
+      code {
+        display: block;
+        margin-top: 12px;
+        padding: 12px;
+        border-radius: 8px;
+        background: #020617;
+        color: #f8fafc;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      button {
+        margin-top: 16px;
+        border: 0;
+        border-radius: 8px;
+        padding: 10px 14px;
+        cursor: pointer;
+        background: #38bdf8;
+        color: #082f49;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>InferencerC failed to load</h1>
+      <p>The renderer did not start correctly. This replaces the blank white screen with a readable error.</p>
+      <p>Make sure the dev server is running on <strong>${devUrl}</strong>, then retry.</p>
+      <code>${escapedDetails}</code>
+      <button onclick="window.location.href='${devUrl}'">Retry Loading</button>
+    </div>
+  </body>
+</html>`;
+    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => {});
+  };
+
+  const scheduleDevReload = (reason: string) => {
+    if (app.isPackaged || win.isDestroyed()) {
+      return;
+    }
+    if (devLoadAttempts >= maxDevLoadAttempts) {
+      showLoadFailureScreen(
+        `Gave up after ${maxDevLoadAttempts} attempts.\nLast reason: ${reason}`
+      );
+      return;
+    }
+    if (devReloadTimer) {
+      return;
+    }
+    const backoffMs = Math.min(500 * Math.pow(2, Math.max(devLoadAttempts - 1, 0)), 4000);
+    console.warn(
+      `[main] Renderer load failed (${reason}). Retrying in ${backoffMs}ms ` +
+      `(attempt ${devLoadAttempts + 1}/${maxDevLoadAttempts})`
+    );
+    devReloadTimer = setTimeout(() => {
+      devReloadTimer = null;
+      loadRenderer();
+    }, backoffMs);
+  };
+
+  const loadRenderer = () => {
+    if (win.isDestroyed()) {
+      return;
+    }
+    if (!app.isPackaged) {
+      devLoadAttempts += 1;
+      win.loadURL(devUrl).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        scheduleDevReload(`loadURL error: ${message}`);
+      });
+      return;
+    }
+
+    win.loadFile(path.join(__dirname, '../../renderer/index.html')).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      showLoadFailureScreen(`Failed to load packaged renderer: ${message}`);
+    });
+  };
+
+  win.webContents.on('did-finish-load', () => {
+    clearDevReloadTimer();
+    devLoadAttempts = 0;
+  });
+
+  win.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+      if (!isMainFrame) {
+        return;
+      }
+      const reason = `code=${errorCode}, message=${errorDescription}`;
+      if (app.isPackaged) {
+        showLoadFailureScreen(`Renderer failed to load: ${reason}`);
+      } else {
+        scheduleDevReload(reason);
+      }
+    }
+  );
+
+  win.webContents.on('render-process-gone', (_event, details) => {
+    const reason = `reason=${details.reason}, exitCode=${details.exitCode}`;
+    if (app.isPackaged) {
+      showLoadFailureScreen(`Renderer process exited: ${reason}`);
+    } else {
+      scheduleDevReload(reason);
+    }
+  });
+
+  loadRenderer();
   if (!app.isPackaged) {
-    win.loadURL(devUrl);
     win.webContents.openDevTools();
-  } else {
-    win.loadFile(path.join(__dirname, '../../renderer/index.html'));
   }
 
   // Window state change tracking
