@@ -11,3 +11,5 @@ output/
 .playwright-cli/
 dev-server.log
 test_output.txt
+.DS_Store
+**/.DS_Store

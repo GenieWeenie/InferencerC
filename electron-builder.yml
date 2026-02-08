@@ -5,9 +5,13 @@ copyright: Copyright © 2025
 directories:
   buildResources: build
   output: dist
+afterPack: scripts/release/afterPack.js
 
 files:
-  - dist/**/*
+  - dist/main/**/*
+  - dist/renderer/**/*
+  - dist/server/**/*
+  - dist/shared/**/*
   - package.json
   - node_modules/**/*
 
@@ -30,9 +34,9 @@ nsis:
   uninstallerIcon: build/icon.ico
   installerHeaderIcon: build/icon.ico
   deleteAppDataOnUninstall: false
-  # Portable mode support
-  portable:
-    artifactName: "${productName}-${version}-portable.${ext}"
+
+portable:
+  artifactName: "${productName}-${version}-portable.${ext}"
 
 mac:
   target:

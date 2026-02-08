@@ -14,11 +14,11 @@
     "release:mac:signed": "npm run build && electron-builder --mac --publish always",
     "build:linux": "npm run build && electron-builder --linux",
     "build:portable": "npm run build && electron-builder --win portable",
-    "clean:workspace": "bash ./scripts/clean_workspace.sh",
+    "clean:workspace": "bash ./scripts/dev/clean_workspace.sh",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "qa:smoke:ui": "bash ./scripts/ui_smoke_qa.sh"
+    "qa:smoke:ui": "bash ./scripts/qa/ui_smoke_qa.sh"
   },
   "keywords": [],
   "author": "",

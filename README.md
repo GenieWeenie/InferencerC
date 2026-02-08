@@ -237,14 +237,18 @@ Feature 15 documentation is available in two places:
 
 - In-app: click `Docs` in the Chat header to open the Developer Documentation Hub (includes an API playground launcher)
 - Markdown guides:
-  - `docs/API_REFERENCE.md`
-  - `docs/INTEGRATION_GUIDES.md`
-  - `docs/PLUGIN_DEVELOPMENT_TUTORIAL.md`
-  - `docs/TROUBLESHOOTING.md`
+  - `docs/reference/API_REFERENCE.md`
+  - `docs/guides/INTEGRATION_GUIDES.md`
+  - `docs/guides/PLUGIN_DEVELOPMENT_TUTORIAL.md`
+  - `docs/guides/TROUBLESHOOTING.md`
 
 Sample plugin package:
 
 - `examples/plugins/sample-hello-plugin`
+
+Release checklist and signed macOS setup:
+
+- `RELEASING.md`
 
 ---
 
