@@ -3,8 +3,6 @@ import { Toaster } from 'sonner';
 import Chat from './pages/Chat';
 import StatusBar from './components/StatusBar';
 import TitleBar from './components/TitleBar';
-import CommandPalette from './components/CommandPalette';
-import ShortcutEditor from './components/ShortcutEditor';
 import { MessageSquare, FolderOpen, Settings as SettingsIcon, Hexagon, Zap, LayoutGrid, Loader2, Menu, X } from 'lucide-react';
 
 // Lazy load heavy pages
@@ -46,13 +44,24 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
 
 const Models = lazyWithRetry(() => import('./pages/Models'), 'models');
 const Settings = lazyWithRetry(() => import('./pages/Settings'), 'settings');
+const CommandPalette = lazyWithRetry(() => import('./components/CommandPalette'), 'command-palette');
+const ShortcutEditor = lazyWithRetry(() => import('./components/ShortcutEditor'), 'shortcut-editor');
+const PerformanceMonitor = lazyWithRetry(
+  () => import('./components/PerformanceMonitor').then((mod) => ({ default: mod.PerformanceMonitor })),
+  'performance-monitor'
+);
+const FeatureDiscoveryManager = lazyWithRetry(
+  () => import('./components/FeatureDiscovery').then((mod) => ({ default: mod.FeatureDiscoveryManager })),
+  'feature-discovery'
+);
+const ContextualHelpManager = lazyWithRetry(
+  () => import('./components/ContextualHelpTooltip').then((mod) => ({ default: mod.ContextualHelpManager })),
+  'contextual-help'
+);
 import { motion, AnimatePresence } from 'framer-motion';
-import { PerformanceMonitor } from './components/PerformanceMonitor'; // Import PerformanceMonitor
 import { useCommandPalette } from './hooks/useCommandPalette';
 import { useShortcutEditor } from './hooks/useKeyboardShortcuts';
 import { useCommandRegistry } from './hooks/useCommandRegistry';
-import { FeatureDiscoveryManager } from './components/FeatureDiscovery';
-import { ContextualHelpManager } from './components/ContextualHelpTooltip';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'chat' | 'models' | 'settings'>('chat');
@@ -263,22 +272,38 @@ const App: React.FC = () => {
       </div>
 
       {/* Feature Discovery */}
-      <FeatureDiscoveryManager />
+      <Suspense fallback={null}>
+        <FeatureDiscoveryManager />
+      </Suspense>
 
       {/* Contextual Help */}
-      <ContextualHelpManager />
+      <Suspense fallback={null}>
+        <ContextualHelpManager />
+      </Suspense>
 
       {/* FOOTER STATS BAR */}
       <StatusBar />
 
       {/* PERFORMANCE MONITOR */}
-      {showPerformance && <PerformanceMonitor />}
+      {showPerformance && (
+        <Suspense fallback={null}>
+          <PerformanceMonitor />
+        </Suspense>
+      )}
 
       {/* COMMAND PALETTE */}
-      <CommandPalette isOpen={isOpen} onClose={close} />
+      {isOpen && (
+        <Suspense fallback={null}>
+          <CommandPalette isOpen={isOpen} onClose={close} />
+        </Suspense>
+      )}
 
       {/* SHORTCUT EDITOR */}
-      <ShortcutEditor isOpen={isShortcutEditorOpen} onClose={closeShortcutEditor} />
+      {isShortcutEditorOpen && (
+        <Suspense fallback={null}>
+          <ShortcutEditor isOpen={isShortcutEditorOpen} onClose={closeShortcutEditor} />
+        </Suspense>
+      )}
 
       <Toaster richColors position="top-center" theme="dark" />
     </div>

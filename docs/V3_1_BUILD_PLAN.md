@@ -57,12 +57,16 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Startup diagnostics badge with actionable fix links
 3. **Slice C:**
    - QA smoke test script + release gate
+4. **Slice D (v3.1.2):**
+   - Lazy-load secondary UI panels to reduce startup bundle pressure
+   - Keep lazy import retry/reload guard for page-level failures
 
 ## Current Progress
 
 1. `Slice A` implemented.
 2. `Slice B` implemented.
 3. `Slice C` implemented.
+4. `Slice D` in progress.
 
 ## Release Checklist for v3.1.x
 
