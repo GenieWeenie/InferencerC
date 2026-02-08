@@ -18,7 +18,6 @@ import { calculateEntropy, compressImage } from '../lib/chatUtils';
 import { useMCP } from '../hooks/useMCP';
 import { analyticsService } from '../services/analytics';
 import { projectContextService, ProjectContext } from '../services/projectContext';
-import { githubService } from '../services/github';
 import { HistoryService } from '../services/history';
 import { autoCategorizationService } from '../services/autoCategorization';
 import { autoTaggingService } from '../services/autoTagging';
@@ -324,6 +323,7 @@ const Chat: React.FC = () => {
     const [showGithubInput, setShowGithubInput] = React.useState(false);
     const [githubUrl, setGithubUrl] = React.useState('');
     const [isFetchingGithub, setIsFetchingGithub] = React.useState(false);
+    const [githubConfigured, setGithubConfigured] = React.useState(false);
 
     // Conversation branching state
     const [showTreeView, setShowTreeView] = React.useState(false);
@@ -817,12 +817,46 @@ const Chat: React.FC = () => {
         };
     }, [history.length]); // Re-run when history length changes to log message count
 
+    const refreshGithubConfigured = React.useCallback(async () => {
+        try {
+            const { githubService } = await import('../services/github');
+            setGithubConfigured(githubService.isConfigured());
+        } catch {
+            setGithubConfigured(false);
+        }
+    }, []);
+
+    React.useEffect(() => {
+        refreshGithubConfigured();
+
+        const handleCredentialsUpdated = () => {
+            refreshGithubConfigured();
+        };
+        const handleFocus = () => {
+            refreshGithubConfigured();
+        };
+
+        window.addEventListener('credentials-updated', handleCredentialsUpdated as EventListener);
+        window.addEventListener('focus', handleFocus);
+        return () => {
+            window.removeEventListener('credentials-updated', handleCredentialsUpdated as EventListener);
+            window.removeEventListener('focus', handleFocus);
+        };
+    }, [refreshGithubConfigured]);
+
+    React.useEffect(() => {
+        if (showGithubInput) {
+            refreshGithubConfigured();
+        }
+    }, [showGithubInput, refreshGithubConfigured]);
+
     // GitHub file fetching
     const executeGithubFetch = async () => {
         if (!githubUrl.trim()) return;
 
         setIsFetchingGithub(true);
         try {
+            const { githubService } = await import('../services/github');
             const parsed = githubService.parseGitHubUrl(githubUrl.trim());
             if (!parsed) {
                 toast.error('Invalid GitHub URL. Use format: owner/repo/path or full GitHub URL');
@@ -841,6 +875,7 @@ const Chat: React.FC = () => {
                 setHistory(prev => [...prev, { role: 'user', content }]);
                 toast.success("GitHub file added to conversation context.");
                 setGithubUrl('');
+                refreshGithubConfigured();
             } else {
                 toast.error(result.error || 'Failed to fetch file');
             }
@@ -3615,7 +3650,7 @@ const Chat: React.FC = () => {
                                     />
                                     <button
                                         onClick={executeGithubFetch}
-                                        disabled={isFetchingGithub || !githubUrl || !githubService.isConfigured()}
+                                        disabled={isFetchingGithub || !githubUrl || !githubConfigured}
                                         className="px-4 py-3 bg-primary hover:bg-primary-600 text-white font-bold rounded-lg text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                                     >
                                         {isFetchingGithub ? <span className="animate-spin inline-block mr-1">⌛</span> : "Fetch"}
@@ -3623,7 +3658,7 @@ const Chat: React.FC = () => {
                                 </div>
                                 <p className="text-[10px] text-slate-500 mt-2 ml-1 flex items-center gap-1">
                                     <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block"></span>
-                                    {githubService.isConfigured()
+                                    {githubConfigured
                                         ? "Fetches file contents from GitHub repositories. Format: owner/repo/path/to/file"
                                         : "Configure GitHub API key in Settings → API Keys to use this feature."
                                     }
@@ -3743,7 +3778,7 @@ const Chat: React.FC = () => {
                             </button>
 
                             {/* Toggle 2c: GitHub */}
-                            {githubService.isConfigured() && (
+                            {githubConfigured && (
                                 <button
                                     onClick={() => setShowGithubInput(!showGithubInput)}
                                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${showGithubInput
