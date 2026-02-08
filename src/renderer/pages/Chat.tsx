@@ -115,6 +115,7 @@ const FederatedLearningPanel = React.lazy(() =>
 
 const RECOVERY_CLEAN_EXIT_KEY = 'app_recovery_clean_exit';
 const CHAT_PERF_HISTORY_KEY = 'chat_message_perf_benchmarks_v1';
+const CHAT_DEV_MONITORS_ENABLED_KEY = 'chat_dev_monitors_enabled_v1';
 
 type ChatPerfMode = 'single' | 'battle';
 
@@ -311,6 +312,9 @@ const Chat: React.FC = () => {
         const stored = localStorage.getItem('chat_show_bottom_controls');
         return stored !== '0';
     });
+    const [devMonitorsEnabled, setDevMonitorsEnabled] = React.useState<boolean>(() => {
+        return localStorage.getItem(CHAT_DEV_MONITORS_ENABLED_KEY) === '1';
+    });
     const [diagnosticsPanelPosition, setDiagnosticsPanelPosition] = React.useState<{ left: number; top: number }>({ left: 12, top: 12 });
     const [messageRatings, setMessageRatings] = React.useState<Record<number, 'up' | 'down'>>({});
     const [jsonMode, setJsonMode] = React.useState(false);
@@ -505,6 +509,14 @@ const Chat: React.FC = () => {
             setShowVariableMenu(false);
         }
     }, [showBottomControls]);
+
+    React.useEffect(() => {
+        try {
+            localStorage.setItem(CHAT_DEV_MONITORS_ENABLED_KEY, devMonitorsEnabled ? '1' : '0');
+        } catch {
+            // Ignore storage failures for dev monitor preferences.
+        }
+    }, [devMonitorsEnabled]);
 
     React.useEffect(() => {
         const shouldLoadVirtuoso =
@@ -716,6 +728,8 @@ const Chat: React.FC = () => {
 
     // FPS monitoring for Virtuoso scroll performance
     React.useEffect(() => {
+        if (!devMonitorsEnabled) return;
+
         let isScrolling = false;
         let scrollTimeout: NodeJS.Timeout;
 
@@ -771,10 +785,12 @@ const Chat: React.FC = () => {
                 cancelAnimationFrame(fpsAnimationFrameId.current);
             }
         };
-    }, []);
+    }, [devMonitorsEnabled, VirtuosoComponent, history.length]);
 
     // Memory usage monitoring for long conversations
     React.useEffect(() => {
+        if (!devMonitorsEnabled) return;
+
         const monitorMemory = () => {
             // Check if performance.memory API is available (Chrome/Chromium)
             if ((performance as any).memory) {
@@ -815,7 +831,7 @@ const Chat: React.FC = () => {
                 clearInterval(memoryMonitorInterval.current);
             }
         };
-    }, [history.length]); // Re-run when history length changes to log message count
+    }, [devMonitorsEnabled, history.length]); // Re-run when history length changes to log message count
 
     const refreshGithubConfigured = React.useCallback(async () => {
         try {
@@ -2921,6 +2937,25 @@ const Chat: React.FC = () => {
                                     ) : (
                                         <p className="mt-1.5 text-[11px] text-slate-500">Send one prompt to record benchmark metrics.</p>
                                     )}
+                                </div>
+
+                                <div className="mt-3 rounded-md border border-slate-800 bg-slate-950/50 px-2.5 py-2">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Dev Monitors</p>
+                                            <p className="text-[10px] text-slate-500 mt-1">Console FPS and memory polling for deep diagnostics.</p>
+                                        </div>
+                                        <button
+                                            onClick={() => setDevMonitorsEnabled(prev => !prev)}
+                                            className={`px-2.5 py-1 rounded text-[10px] font-semibold border transition-colors ${
+                                                devMonitorsEnabled
+                                                    ? 'bg-emerald-900/30 text-emerald-300 border-emerald-700/70'
+                                                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                                            }`}
+                                        >
+                                            {devMonitorsEnabled ? 'Enabled' : 'Disabled'}
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div className="mt-3 space-y-2">
