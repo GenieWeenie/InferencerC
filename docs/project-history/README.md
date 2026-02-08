@@ -6,8 +6,6 @@ This folder contains implementation plans, rollout summaries, and verification n
 
 - `IMPLEMENTATION_PLAN.md`
 - `IMPLEMENTATION_PLAN_V2.md`
-- `IMPLEMENTATION_PLAN_V3.md`
-- `IMPLEMENTATION_PLAN_V4.md`
 
 ## Feature and integration summaries
 

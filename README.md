@@ -429,90 +429,16 @@ src/
 
 ## 🗺️ Roadmap
 
-- **[IMPLEMENTATION_PLAN_V3.md](./docs/project-history/IMPLEMENTATION_PLAN_V3.md)** — Completed features (v3.0)
-- **[IMPLEMENTATION_PLAN_V4.md](./docs/project-history/IMPLEMENTATION_PLAN_V4.md)** — Next level roadmap (v4.0+)
+Public roadmap details are intentionally kept brief in this repository.
+
+- Short-term focus: stability, performance, and quality improvements
+- Mid-term focus: workflow and collaboration polish
+- Release-level details: see GitHub Releases
 
 ### Version History
 
-#### v4.0.18 (Current) - Developer Tools
-- ✅ **API Playground** — Interactive API testing interface
-- ✅ **Request Builder** — Visual interface for building API requests
-- ✅ **Response Inspector** — Deep inspection of API responses
-- ✅ **Mock Server** — Built-in mock server for testing
-- ✅ **API Documentation Generator** — Auto-generate API docs from conversations
-- ✅ **Code Generation** — Generate code from natural language descriptions
-- ✅ **Test Case Generation** — Generate test cases from code descriptions
-
-#### v4.0.17 - Phase 4 Complete (Intelligence & Automation)
-- ✅ **Sentiment Analysis** — Track sentiment across conversations
-- ✅ **Topic Modeling** — Identify and extract topics from conversations
-- ✅ **Scheduled Conversations** — Schedule conversations to run at specific times
-- ✅ **Auto-Responses** — Set up automatic responses for common queries
-- ✅ **Trigger Actions** — Trigger actions based on conversation outcomes
-- ✅ **Macro Recording** — Record and replay complex interaction sequences
-
-#### v4.0.16 - Intelligence & Automation (Part 1)
-- ✅ **Smart Suggestions** — AI-powered follow-up question suggestions
-- ✅ **Auto-Categorization** — Automatic conversation categorization by topic
-- ✅ **Conversation Recommendations** — Suggest relevant past conversations
-- ✅ **Auto-Tagging** — Automatically tag conversations based on content
-- ✅ **Workflows** — Create automated workflows for conversation handling
-
-#### v4.0.15 - Export & Integration
-- ✅ **Slack Integration** — Send conversations to Slack channels
-- ✅ **Discord Integration** — Share conversations in Discord
-- ✅ **Email Export** — Email conversations directly from the app
-- ✅ **Calendar Integration** — Schedule conversation reminders
-- ✅ **REST API Access** — Configuration for programmatic access
-
-#### v4.0.14 - Prompt Optimization
-- ✅ **Prompt Optimization** — AI-powered prompt analysis and optimization suggestions
-
-#### v4.0.13 - A/B Testing
-- ✅ **A/B Testing** — Test different prompts and compare results side-by-side
-
-#### v4.0.12 - Conversation Analytics
-- ✅ **Conversation Analytics** — Comprehensive analytics dashboard
-
-#### v4.0.11 - Advanced AI & Performance
-- ✅ **Command Palette** — VSCode-style command palette with 30+ commands (`Ctrl+P`)
-- ✅ **Conversation Branching** — Git-like branching for conversations (`Ctrl+T`)
-- ✅ **Export Formats** — PDF, DOCX, HTML, Markdown, JSON export (`Ctrl+Shift+E`)
-- ✅ **Smart Search** — Semantic search across all conversations (`Ctrl+Shift+F`)
-- ✅ **Auto-Summarization** — AI-powered conversation summaries
-- ✅ **Conversation Templates** — 6 built-in + custom templates
-- ✅ **Prompt Variables** — 20+ variables (`{{date}}`, `{{clipboard}}`, etc.)
-- ✅ **Prompt Chaining** — Chain multiple prompts with variable passing (`Ctrl+Shift+C`)
-- ✅ **Prompt Versioning** — Track versions with metrics, LCS-based diff comparison
-- ✅ **Conversation Merging** — 4 merge strategies (append, interleave, cherry-pick, squash)
-- ✅ **Key Point Extraction** — TF-IDF topics, action items, decisions, insights
-- ✅ **Background Processing** — Web Workers for encryption, search, and export operations
-
-### Completed in v3.1 (Performance & AI)
-
-- ✅ **Performance Dashboard** — Real-time FPS, Memory, and API Latency monitoring
-- ✅ **Image Optimization** — Auto-compression to WebP and clipboard paste support
-- ✅ **Smart Model Routing** — Intent detection to route queries to Coding/Creative/Math models
-- ✅ **Tool Use Support** — Function calling interface and visual tool call rendering
-- ✅ **Reasoning Mode** — Dedicated support for thinking models (e.g. DeepSeek R1)
-- ✅ **Battle Mode** — Integrated multi-model comparison logic
-- ✅ **Structured Output** — JSON Mode enforcement for consistent API responses
-- ✅ **Streaming Tokens & Editing** — Visual typewriting effect and precision token editing via Inspector
-
-### Completed in v3.0
-
-- ✅ **Comparison Grid View** — Side-by-side diff view for Battle Mode
-- ✅ **Date Range Filtering** — Advanced history filtering with date pickers
-- ✅ **Save Artifacts** — One-click code saving with proper file extensions
-- ✅ **Project Context Mode** — Include entire project folders as context
-- ✅ **File Watcher** — Auto-update context when files change
-- ✅ **Code Execution** — Run Python/JS code blocks directly (sandboxed)
-- ✅ **Theme System** — 5 built-in themes with CSS variable-based theming
-- ✅ **Preferences** — Comprehensive customization options
-- ✅ **External Integrations** — GitHub, Notion, Obsidian, Webhooks
-- ✅ **Security & Privacy** — Encryption, Privacy Mode, Secure Wipe
-- ✅ **Auto-Updater** — Automatic update checking and installation
-- ✅ **Installer & Portable Mode** — Production-ready build configuration
+Detailed version history has been moved out of the public README to keep this page concise.
+Use Git tags and GitHub Releases for version-by-version details.
 
 ---
 
