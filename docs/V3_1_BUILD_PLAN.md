@@ -58,6 +58,12 @@ Make InferencerC a serious daily-driver competitor by focusing on:
 3. **Slice C:**
    - QA smoke test script + release gate
 
+## Current Progress
+
+1. `Slice A` implemented.
+2. `Slice B` implemented.
+3. `Slice C` is next.
+
 ## Release Checklist for v3.1.x
 
 1. Feature branch + PR

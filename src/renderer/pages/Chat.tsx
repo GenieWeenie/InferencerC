@@ -211,6 +211,7 @@ const Chat: React.FC = () => {
 
     const [bookmarkedMessages, setBookmarkedMessages] = React.useState<Set<number>>(new Set());
     const [showRequestLog, setShowRequestLog] = React.useState(false);
+    const [showDiagnosticsPanel, setShowDiagnosticsPanel] = React.useState(false);
     const [messageRatings, setMessageRatings] = React.useState<Record<number, 'up' | 'down'>>({});
     const [jsonMode, setJsonMode] = React.useState(false);
     const [showAnalytics, setShowAnalytics] = React.useState(false);
@@ -282,6 +283,7 @@ const Chat: React.FC = () => {
     const [showVariableMenu, setShowVariableMenu] = React.useState(false);
     const messageListRef = React.useRef<HTMLDivElement | null>(null);
     const longPressMenuRef = React.useRef<HTMLDivElement | null>(null);
+    const diagnosticsPanelRef = React.useRef<HTMLDivElement | null>(null);
 
     const [conversationFontSize, setConversationFontSize] = React.useState<number>(() => {
         const stored = Number(localStorage.getItem('chat_font_size'));
@@ -359,6 +361,30 @@ const Chat: React.FC = () => {
             setShowHistory(false);
         }
     }, [isCompactViewport, setShowHistory, showHistory]);
+
+    React.useEffect(() => {
+        if (!showDiagnosticsPanel) return;
+
+        const handlePointerDown = (event: MouseEvent) => {
+            const target = event.target as Node | null;
+            if (diagnosticsPanelRef.current && target && !diagnosticsPanelRef.current.contains(target)) {
+                setShowDiagnosticsPanel(false);
+            }
+        };
+
+        const handleEscape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setShowDiagnosticsPanel(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('keydown', handleEscape);
+        return () => {
+            document.removeEventListener('mousedown', handlePointerDown);
+            document.removeEventListener('keydown', handleEscape);
+        };
+    }, [showDiagnosticsPanel]);
 
     // Context management state persistence (per session)
     React.useEffect(() => {
@@ -622,6 +648,25 @@ const Chat: React.FC = () => {
         () => availableModels.find(m => m.id === currentModel),
         [availableModels, currentModel]
     );
+    const navigateToTab = React.useCallback((tab: 'chat' | 'models' | 'settings') => {
+        window.dispatchEvent(new CustomEvent('app:navigate-tab', { detail: { tab } }));
+    }, []);
+    const requestConnectionRefresh = React.useCallback(() => {
+        window.dispatchEvent(new CustomEvent('chat-refresh-connections'));
+        toast.info('Refreshing provider connection checks...');
+    }, []);
+    const selectFirstModel = React.useCallback(() => {
+        if (!availableModels.length) {
+            toast.error('No models available to select yet.');
+            return;
+        }
+        setCurrentModel(availableModels[0].id);
+        toast.success(`Selected model: ${availableModels[0].name}`);
+    }, [availableModels, setCurrentModel]);
+    const insertStarterPrompt = React.useCallback(() => {
+        setInput('Help me validate my setup and run a quick first task.');
+        toast.success('Starter prompt inserted.');
+    }, [setInput]);
     const providerReady = connectionStatus.local === 'online' || connectionStatus.remote === 'online';
     const modelReady = Boolean(currentModel);
     const promptReady = input.trim().length > 0;
@@ -654,6 +699,34 @@ const Chat: React.FC = () => {
         },
     ]), [providerReady, connectionStatus.local, connectionStatus.remote, modelReady, currentModelObj, currentModel, promptReady]);
     const readinessCompletedCount = readinessSteps.filter(step => step.complete).length;
+    const diagnosticsStatus = React.useMemo(() => {
+        if (!providerReady) {
+            return {
+                label: 'Provider Issue',
+                detail: 'No online provider detected.',
+                className: 'text-red-300 border-red-700/70 bg-red-900/20',
+            };
+        }
+        if (!modelReady) {
+            return {
+                label: 'Model Needed',
+                detail: 'Provider is online, but no model is selected.',
+                className: 'text-amber-300 border-amber-700/70 bg-amber-900/20',
+            };
+        }
+        if (history.length === 0 && !promptReady) {
+            return {
+                label: 'Ready for Prompt',
+                detail: 'Setup is healthy. Draft your first prompt.',
+                className: 'text-cyan-300 border-cyan-700/70 bg-cyan-900/20',
+            };
+        }
+        return {
+            label: 'Healthy',
+            detail: 'Provider and model checks look good.',
+            className: 'text-emerald-300 border-emerald-700/70 bg-emerald-900/20',
+        };
+    }, [providerReady, modelReady, history.length, promptReady]);
     const contextWindowTokens = currentModelObj?.contextLength || 32768;
     const excludedContextKey = React.useMemo(
         () => Array.from(excludedContextIndices).sort((a, b) => a - b).join(','),
@@ -2329,6 +2402,102 @@ const Chat: React.FC = () => {
                             <Search size={14} />
                         </button>
                     )}
+                    <div ref={diagnosticsPanelRef} className="relative flex-shrink-0">
+                        <button
+                            onClick={() => setShowDiagnosticsPanel(prev => !prev)}
+                            title="Startup diagnostics and quick fixes"
+                            className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors border text-xs ${diagnosticsStatus.className}`}
+                        >
+                            {!providerReady || !modelReady ? <AlertTriangle size={12} /> : <Check size={12} />}
+                            <span>{diagnosticsStatus.label}</span>
+                        </button>
+                        {showDiagnosticsPanel && (
+                            <div className="absolute right-0 top-full mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-3 z-30">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <p className="text-xs font-semibold text-slate-200">Startup Diagnostics</p>
+                                        <p className="text-[11px] text-slate-400 mt-1">{diagnosticsStatus.detail}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setShowDiagnosticsPanel(false)}
+                                        className="text-slate-500 hover:text-slate-200 transition-colors"
+                                        aria-label="Close diagnostics panel"
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                </div>
+
+                                <div className="mt-3 space-y-2">
+                                    {!providerReady && (
+                                        <>
+                                            <button
+                                                onClick={requestConnectionRefresh}
+                                                className="w-full px-2.5 py-2 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs text-left"
+                                            >
+                                                Retry Connection Check
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    setShowDiagnosticsPanel(false);
+                                                    navigateToTab('settings');
+                                                }}
+                                                className="w-full px-2.5 py-2 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs text-left"
+                                            >
+                                                Open Settings (API Keys)
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    setShowDiagnosticsPanel(false);
+                                                    navigateToTab('models');
+                                                }}
+                                                className="w-full px-2.5 py-2 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs text-left"
+                                            >
+                                                Open Models Tab
+                                            </button>
+                                        </>
+                                    )}
+
+                                    {providerReady && !modelReady && (
+                                        <>
+                                            <button
+                                                onClick={selectFirstModel}
+                                                className="w-full px-2.5 py-2 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs text-left"
+                                            >
+                                                Auto-Select First Available Model
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    setShowDiagnosticsPanel(false);
+                                                    navigateToTab('models');
+                                                }}
+                                                className="w-full px-2.5 py-2 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs text-left"
+                                            >
+                                                Open Models Tab
+                                            </button>
+                                        </>
+                                    )}
+
+                                    {providerReady && modelReady && history.length === 0 && !promptReady && (
+                                        <button
+                                            onClick={() => {
+                                                insertStarterPrompt();
+                                                setShowDiagnosticsPanel(false);
+                                            }}
+                                            className="w-full px-2.5 py-2 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs text-left"
+                                        >
+                                            Insert Starter Prompt
+                                        </button>
+                                    )}
+
+                                    {providerReady && modelReady && (history.length > 0 || promptReady) && (
+                                        <div className="px-2 py-2 rounded-md bg-emerald-900/20 border border-emerald-800/50 text-[11px] text-emerald-300">
+                                            No startup blockers detected.
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
 
                     {/* Connection Status Indicator */}
                     <div className="flex items-center gap-2 pl-2 border-l border-slate-800 h-6 self-center flex-shrink-0">

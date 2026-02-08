@@ -82,6 +82,19 @@ const App: React.FC = () => {
     setMobileNavOpen(false);
   }, [activeTab]);
 
+  useEffect(() => {
+    const handleNavigateTab = (event: Event) => {
+      const customEvent = event as CustomEvent<{ tab?: 'chat' | 'models' | 'settings' }>;
+      const tab = customEvent.detail?.tab;
+      if (tab === 'chat' || tab === 'models' || tab === 'settings') {
+        setActiveTab(tab);
+      }
+    };
+
+    window.addEventListener('app:navigate-tab', handleNavigateTab as EventListener);
+    return () => window.removeEventListener('app:navigate-tab', handleNavigateTab as EventListener);
+  }, []);
+
   // Register commands
   useCommandRegistry({
     setActiveTab,

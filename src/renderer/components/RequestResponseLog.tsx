@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ApiActivityLogEntry } from '../services/activityLog';
+import { toast } from 'sonner';
 
 export type LogEntry = ApiActivityLogEntry;
 
@@ -15,6 +16,7 @@ interface RequestResponseLogProps {
 const RequestResponseLog: React.FC<RequestResponseLogProps> = ({ isOpen, onClose, logs, onClear }) => {
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    const [copiedAll, setCopiedAll] = useState(false);
 
     const handleCopy = (content: string, id: string) => {
         navigator.clipboard.writeText(content);
@@ -27,6 +29,30 @@ const RequestResponseLog: React.FC<RequestResponseLogProps> = ({ isOpen, onClose
             return JSON.stringify(obj, null, 2);
         } catch {
             return String(obj);
+        }
+    };
+
+    const handleExport = () => {
+        const payload = JSON.stringify(logs, null, 2);
+        const blob = new Blob([payload], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        anchor.href = url;
+        anchor.download = `inferencerc-api-activity-${timestamp}.json`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+    };
+
+    const handleCopyAll = async () => {
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(logs, null, 2));
+            setCopiedAll(true);
+            setTimeout(() => setCopiedAll(false), 1800);
+        } catch {
+            toast.error('Unable to copy activity log.');
         }
     };
 
@@ -60,6 +86,21 @@ const RequestResponseLog: React.FC<RequestResponseLogProps> = ({ isOpen, onClose
                                 </span>
                             </div>
                             <div className="flex items-center gap-2">
+                                <button
+                                    onClick={handleCopyAll}
+                                    className="px-3 py-1.5 text-xs bg-slate-700/70 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors border border-slate-600 flex items-center gap-1"
+                                    title="Copy all logs as JSON"
+                                >
+                                    {copiedAll ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                                    {copiedAll ? 'Copied' : 'Copy JSON'}
+                                </button>
+                                <button
+                                    onClick={handleExport}
+                                    className="px-3 py-1.5 text-xs bg-slate-700/70 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors border border-slate-600"
+                                    title="Download logs as JSON file"
+                                >
+                                    Export JSON
+                                </button>
                                 <button
                                     onClick={onClear}
                                     className="px-3 py-1.5 text-xs bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors border border-red-500/30"

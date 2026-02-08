@@ -217,9 +217,13 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         const handleWorkspaceChange = () => {
             fetchModels();
         };
+        const handleConnectionRefresh = () => {
+            fetchModels();
+        };
 
         if (typeof window !== 'undefined') {
             window.addEventListener('team-workspace-changed', handleWorkspaceChange);
+            window.addEventListener('chat-refresh-connections', handleConnectionRefresh as EventListener);
         }
 
         setSavedSessions(HistoryService.getAllSessions());
@@ -235,6 +239,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             clearInterval(interval);
             if (typeof window !== 'undefined') {
                 window.removeEventListener('team-workspace-changed', handleWorkspaceChange);
+                window.removeEventListener('chat-refresh-connections', handleConnectionRefresh as EventListener);
             }
         };
     }, [openRouterApiKey]); // eslint-disable-line react-hooks/exhaustive-deps
