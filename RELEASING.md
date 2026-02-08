@@ -29,6 +29,8 @@ Required environment variables/secrets:
 
 - Main release matrix: `.github/workflows/build.yml`
   - Triggers on release tags (`v*`) or manual dispatch
+  - Enforces release gate job before packaging:
+    - `npm run qa:release:gate` (`test` + `build` + UI smoke QA)
   - Builds unsigned mac artifacts in matrix mode for reliability
 - Dedicated signed mac workflow: `.github/workflows/release-mac-signed.yml`
   - Trigger manually (`workflow_dispatch`) only
@@ -39,7 +41,7 @@ Required environment variables/secrets:
 1. Ensure all feature/fix work merged via Pull Request into `master`
 2. Pull latest `master` and verify clean git state
 3. Run validation:
-   - `npm test -- --runInBand`
+   - `npm run qa:release:gate`
    - `npm run clean:workspace`
 4. Create and push release tag:
    - `git tag vX.Y.Z`

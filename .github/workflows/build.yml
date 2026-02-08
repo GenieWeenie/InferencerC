@@ -14,7 +14,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  release_gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run release QA gate (tests + build + UI smoke)
+        run: npm run qa:release:gate
+
+      - name: Upload smoke QA artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-qa-artifacts
+          path: |
+            output/playwright/smoke/**
+          if-no-files-found: warn
+
   release:
+    needs: release_gate
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -32,9 +62,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Run tests
-        run: npm test -- --runInBand
 
       - name: Build Windows release
         if: matrix.os == 'windows-latest'

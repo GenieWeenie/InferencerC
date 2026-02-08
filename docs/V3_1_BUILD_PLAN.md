@@ -62,7 +62,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
 
 1. `Slice A` implemented.
 2. `Slice B` implemented.
-3. `Slice C` is next.
+3. `Slice C` implemented.
 
 ## Release Checklist for v3.1.x
 
