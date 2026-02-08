@@ -69,6 +69,14 @@ const App: React.FC = () => {
   const { isOpen: isShortcutEditorOpen, toggle: toggleShortcutEditor, close: closeShortcutEditor } = useShortcutEditor();
 
   const [showPerformance, setShowPerformance] = useState(false);
+  const [mountNonCriticalManagers, setMountNonCriticalManagers] = useState(false);
+  const [isContextualHelpEnabled] = useState(() => {
+    try {
+      return localStorage.getItem('help_disabled') !== 'true';
+    } catch {
+      return true;
+    }
+  });
   const [viewportWidth, setViewportWidth] = useState<number>(() =>
     typeof window !== 'undefined' ? window.innerWidth : 1280
   );
@@ -102,6 +110,31 @@ const App: React.FC = () => {
 
     window.addEventListener('app:navigate-tab', handleNavigateTab as EventListener);
     return () => window.removeEventListener('app:navigate-tab', handleNavigateTab as EventListener);
+  }, []);
+
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let idleId: number | null = null;
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+
+    const activateManagers = () => setMountNonCriticalManagers(true);
+    if (idleWindow.requestIdleCallback) {
+      idleId = idleWindow.requestIdleCallback(activateManagers, { timeout: 1500 });
+    } else {
+      timeoutId = setTimeout(activateManagers, 350);
+    }
+
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      if (idleId !== null && idleWindow.cancelIdleCallback) {
+        idleWindow.cancelIdleCallback(idleId);
+      }
+    };
   }, []);
 
   // Register commands
@@ -272,14 +305,18 @@ const App: React.FC = () => {
       </div>
 
       {/* Feature Discovery */}
-      <Suspense fallback={null}>
-        <FeatureDiscoveryManager />
-      </Suspense>
+      {mountNonCriticalManagers && (
+        <Suspense fallback={null}>
+          <FeatureDiscoveryManager />
+        </Suspense>
+      )}
 
       {/* Contextual Help */}
-      <Suspense fallback={null}>
-        <ContextualHelpManager />
-      </Suspense>
+      {mountNonCriticalManagers && isContextualHelpEnabled && (
+        <Suspense fallback={null}>
+          <ContextualHelpManager />
+        </Suspense>
+      )}
 
       {/* FOOTER STATS BAR */}
       <StatusBar />

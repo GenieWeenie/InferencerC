@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { LogEntry } from '../components/RequestResponseLog';
 import { responsiveDesignService } from '../services/responsiveDesign';
-import { onboardingService } from '../services/onboarding';
+import type { Tutorial } from '../services/onboarding';
 import { multiModalAIService } from '../services/multiModalAI';
 import { PerformanceMonitorOverlay } from '../components/PerformanceMonitorOverlay';
 import { crashRecoveryService } from '../services/crashRecovery';
@@ -116,6 +116,14 @@ const FederatedLearningPanel = React.lazy(() =>
 const RECOVERY_CLEAN_EXIT_KEY = 'app_recovery_clean_exit';
 const CHAT_PERF_HISTORY_KEY = 'chat_message_perf_benchmarks_v1';
 const CHAT_DEV_MONITORS_ENABLED_KEY = 'chat_dev_monitors_enabled_v1';
+const ONBOARDING_COMPLETED_KEY = 'onboarding_completed';
+
+type OnboardingServiceModule = typeof import('../services/onboarding');
+
+const loadOnboardingService = async () => {
+    const onboardingModule: OnboardingServiceModule = await import('../services/onboarding');
+    return onboardingModule.onboardingService;
+};
 
 type ChatPerfMode = 'single' | 'battle';
 
@@ -362,7 +370,7 @@ const Chat: React.FC = () => {
     const [responsiveConfig, setResponsiveConfig] = React.useState(responsiveDesignService.getConfig());
     const isCompactViewport = responsiveConfig.isMobile || responsiveConfig.isTablet;
     const [showTutorial, setShowTutorial] = React.useState(false);
-    const [currentTutorial, setCurrentTutorial] = React.useState<ReturnType<typeof onboardingService.getTutorials>[0] | null>(null);
+    const [currentTutorial, setCurrentTutorial] = React.useState<Tutorial | null>(null);
     const [showBCI, setShowBCI] = React.useState(false);
     const [showMultiModal, setShowMultiModal] = React.useState(false);
     const [showCollaboration, setShowCollaboration] = React.useState(false);
@@ -640,14 +648,33 @@ const Chat: React.FC = () => {
 
     // Check for onboarding on mount
     React.useEffect(() => {
-        if (!onboardingService.hasCompletedOnboarding()) {
-            const tutorials = onboardingService.getTutorials();
-            const welcomeTutorial = tutorials.find(t => t.id === 'welcome');
-            if (welcomeTutorial && !welcomeTutorial.completed) {
-                setCurrentTutorial(welcomeTutorial);
-                setShowTutorial(true);
+        let cancelled = false;
+        const checkOnboarding = async () => {
+            try {
+                if (localStorage.getItem(ONBOARDING_COMPLETED_KEY) === 'true') {
+                    return;
+                }
+
+                const onboardingService = await loadOnboardingService();
+                if (cancelled || onboardingService.hasCompletedOnboarding()) {
+                    return;
+                }
+
+                const tutorials = onboardingService.getTutorials();
+                const welcomeTutorial = tutorials.find(t => t.id === 'welcome');
+                if (!cancelled && welcomeTutorial && !welcomeTutorial.completed) {
+                    setCurrentTutorial(welcomeTutorial);
+                    setShowTutorial(true);
+                }
+            } catch {
+                // Ignore onboarding initialization failures to avoid blocking chat startup.
             }
-        }
+        };
+
+        void checkOnboarding();
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     const markRecoveryExitClean = React.useCallback(() => {
@@ -4735,7 +4762,11 @@ const Chat: React.FC = () => {
                         onComplete={() => {
                             setShowTutorial(false);
                             setCurrentTutorial(null);
-                            onboardingService.completeOnboarding();
+                            void loadOnboardingService()
+                                .then((onboardingService) => onboardingService.completeOnboarding())
+                                .catch(() => {
+                                    // Ignore onboarding persistence failures.
+                                });
                         }}
                         onSkip={() => {
                             setShowTutorial(false);
