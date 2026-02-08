@@ -3,11 +3,7 @@ import { Virtuoso } from 'react-virtuoso';
 import { Send, Clock, Plus, Trash2, X, Globe, Settings, Activity, AlertTriangle, ChevronRight, ChevronLeft, Check, AlertCircle, Brain, Users, ImageIcon, Plug, Wrench, Copy, Eraser, Download, Edit2, Search, ChevronUp, ChevronDown, Star, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, GitBranch, Network, HelpCircle, Maximize2, Minimize2, RefreshCw, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
-import MessageContent from '../components/MessageContent';
-import MessageActionsMenu from '../components/MessageActionsMenu';
-import QuickReplyTemplates from '../components/QuickReplyTemplates';
 import type { LogEntry } from '../components/RequestResponseLog';
-import ComparisonGrid from '../components/ComparisonGrid';
 import { responsiveDesignService } from '../services/responsiveDesign';
 import { onboardingService } from '../services/onboarding';
 import { multiModalAIService } from '../services/multiModalAI';
@@ -42,6 +38,10 @@ import { AVAILABLE_TOOLS } from '../lib/tools';
 import { RecoveryState } from '../../shared/types';
 import SkeletonLoader from '../components/SkeletonLoader';
 
+const MessageContent = React.lazy(() => import('../components/MessageContent'));
+const MessageActionsMenu = React.lazy(() => import('../components/MessageActionsMenu'));
+const QuickReplyTemplates = React.lazy(() => import('../components/QuickReplyTemplates'));
+const ComparisonGrid = React.lazy(() => import('../components/ComparisonGrid'));
 const KeyboardShortcutsModal = React.lazy(() => import('../components/KeyboardShortcutsModal'));
 const RequestResponseLog = React.lazy(() => import('../components/RequestResponseLog'));
 const AnalyticsDashboard = React.lazy(() => import('../components/AnalyticsDashboard'));
@@ -1694,19 +1694,21 @@ const Chat: React.FC = () => {
                         >
                             <Star size={12} fill={bookmarkedMessages.has(index) ? 'currentColor' : 'none'} />
                         </button>
-                        <MessageActionsMenu
-                            messageContent={msg.content || ''}
-                            messageIndex={index}
-                            messageRole={msg.role}
-                            onCopy={() => {
-                                navigator.clipboard.writeText(msg.content || '');
-                                toast.success('Copied to clipboard');
-                            }}
-                            onDelete={() => deleteMessage(index)}
-                            onEdit={msg.role === 'user' ? () => handleEditMessage(index) : undefined}
-                            onRegenerate={msg.role === 'assistant' && !msg.isLoading ? () => handleRegenerateResponse(index) : undefined}
-                            onBranch={() => handleBranchConversation(index)}
-                        />
+                        <React.Suspense fallback={null}>
+                            <MessageActionsMenu
+                                messageContent={msg.content || ''}
+                                messageIndex={index}
+                                messageRole={msg.role}
+                                onCopy={() => {
+                                    navigator.clipboard.writeText(msg.content || '');
+                                    toast.success('Copied to clipboard');
+                                }}
+                                onDelete={() => deleteMessage(index)}
+                                onEdit={msg.role === 'user' ? () => handleEditMessage(index) : undefined}
+                                onRegenerate={msg.role === 'assistant' && !msg.isLoading ? () => handleRegenerateResponse(index) : undefined}
+                                onBranch={() => handleBranchConversation(index)}
+                            />
+                        </React.Suspense>
                     </div>
                     {msg.role === 'assistant' ? (
                         <div>
@@ -1727,16 +1729,20 @@ const Chat: React.FC = () => {
                                             ))}
                                         </div>
                                     )}
-                                    {msg.content && <MessageContent
-                                        content={msg.content}
-                                        isUser={false}
-                                        mcpAvailable={mcpAvailable}
-                                        onInsertToFile={handleInsertToFile}
-                                        isStreaming={true}
-                                        isLazyLoaded={!loadedMessageIndices.has(index)}
-                                        onLoadContent={() => loadMessageRange(index, index, history)}
-                                        messageIndex={index}
-                                    />}
+                                    {msg.content && (
+                                        <React.Suspense fallback={<div className="text-xs text-slate-500">Rendering response...</div>}>
+                                            <MessageContent
+                                                content={msg.content}
+                                                isUser={false}
+                                                mcpAvailable={mcpAvailable}
+                                                onInsertToFile={handleInsertToFile}
+                                                isStreaming={true}
+                                                isLazyLoaded={!loadedMessageIndices.has(index)}
+                                                onLoadContent={() => loadMessageRange(index, index, history)}
+                                                messageIndex={index}
+                                            />
+                                        </React.Suspense>
+                                    )}
                                     <div className="flex items-center gap-2 text-slate-400 italic text-sm animate-pulse">
                                         <Brain size={16} className="text-primary" /> Thinking...
                                     </div>
@@ -1761,15 +1767,17 @@ const Chat: React.FC = () => {
                                                     ))}
                                                 </div>
                                             )}
-                                            <MessageContent
-                                                content={msg.content || ""}
-                                                isUser={false}
-                                                mcpAvailable={mcpAvailable}
-                                                onInsertToFile={handleInsertToFile}
-                                                isLazyLoaded={!loadedMessageIndices.has(index)}
-                                                onLoadContent={() => loadMessageRange(index, index, history)}
-                                                messageIndex={index}
-                                            />
+                                            <React.Suspense fallback={<div className="text-xs text-slate-500">Rendering response...</div>}>
+                                                <MessageContent
+                                                    content={msg.content || ""}
+                                                    isUser={false}
+                                                    mcpAvailable={mcpAvailable}
+                                                    onInsertToFile={handleInsertToFile}
+                                                    isLazyLoaded={!loadedMessageIndices.has(index)}
+                                                    onLoadContent={() => loadMessageRange(index, index, history)}
+                                                    messageIndex={index}
+                                                />
+                                            </React.Suspense>
                                         </>
                                     )}
 
@@ -1824,15 +1832,17 @@ const Chat: React.FC = () => {
                                         const modelBName = modelBMatch?.[1] || availableModels.find((m: any) => m.id === secondaryModel)?.name || 'Model B';
 
                                         return (
-                                            <ComparisonGrid
-                                                messageA={msg}
-                                                messageB={msgB}
-                                                modelAName={modelAName}
-                                                modelBName={modelBName}
-                                                onClose={() => setComparisonIndex(null)}
-                                                mcpAvailable={mcpAvailable}
-                                                onInsertToFile={handleInsertToFile}
-                                            />
+                                            <React.Suspense fallback={<div className="text-xs text-slate-500">Loading comparison...</div>}>
+                                                <ComparisonGrid
+                                                    messageA={msg}
+                                                    messageB={msgB}
+                                                    modelAName={modelAName}
+                                                    modelBName={modelBName}
+                                                    onClose={() => setComparisonIndex(null)}
+                                                    mcpAvailable={mcpAvailable}
+                                                    onInsertToFile={handleInsertToFile}
+                                                />
+                                            </React.Suspense>
                                         );
                                     })()}
                                 </div>
@@ -1875,15 +1885,17 @@ const Chat: React.FC = () => {
                             </div>
                             {/* Quick Reply Templates */}
                             {!msg.isLoading && isLastMessage && msg.content && (
-                                <QuickReplyTemplates
-                                    lastAssistantMessage={msg.content}
-                                    onSelectTemplate={(template: string) => {
-                                        setInput(template);
-                                        if (textareaRef.current) {
-                                            textareaRef.current.focus();
-                                        }
-                                    }}
-                                />
+                                <React.Suspense fallback={null}>
+                                    <QuickReplyTemplates
+                                        lastAssistantMessage={msg.content}
+                                        onSelectTemplate={(template: string) => {
+                                            setInput(template);
+                                            if (textareaRef.current) {
+                                                textareaRef.current.focus();
+                                            }
+                                        }}
+                                    />
+                                </React.Suspense>
                             )}
                         </div>
                     ) : (
@@ -1913,15 +1925,17 @@ const Chat: React.FC = () => {
                                 </div>
                             ) : (
                                 <>
-                                    <MessageContent
-                                        content={msg.content}
-                                        isUser={true}
-                                        mcpAvailable={mcpAvailable}
-                                        onInsertToFile={handleInsertToFile}
-                                        isLazyLoaded={!loadedMessageIndices.has(index)}
-                                        onLoadContent={() => loadMessageRange(index, index, history)}
-                                        messageIndex={index}
-                                    />
+                                    <React.Suspense fallback={<div className="text-xs text-slate-500">Rendering message...</div>}>
+                                        <MessageContent
+                                            content={msg.content}
+                                            isUser={true}
+                                            mcpAvailable={mcpAvailable}
+                                            onInsertToFile={handleInsertToFile}
+                                            isLazyLoaded={!loadedMessageIndices.has(index)}
+                                            onLoadContent={() => loadMessageRange(index, index, history)}
+                                            messageIndex={index}
+                                        />
+                                    </React.Suspense>
                                     {/* Display attached images */}
                                     {msg.images && msg.images.length > 0 && (
                                         <div className="mt-2 flex flex-wrap gap-2">
