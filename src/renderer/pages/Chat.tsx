@@ -977,6 +977,39 @@ const Chat: React.FC = () => {
         if (value === undefined) return '...';
         return `${Math.round(value)}ms`;
     }, []);
+    const computePerfStat = React.useCallback((values: number[], kind: 'avg' | 'p95'): number | null => {
+        if (values.length === 0) return null;
+        if (kind === 'avg') {
+            return values.reduce((sum, value) => sum + value, 0) / values.length;
+        }
+        const sorted = [...values].sort((a, b) => a - b);
+        const index = Math.max(0, Math.min(sorted.length - 1, Math.ceil(0.95 * sorted.length) - 1));
+        return sorted[index];
+    }, []);
+    const perfSummary = React.useMemo(() => {
+        const renderValues = recentPerfBenchmarks.map(sample => sample.inputToRenderMs);
+        const firstTokenValues = recentPerfBenchmarks
+            .map(sample => sample.inputToFirstTokenMs)
+            .filter((value): value is number => value !== null);
+        return {
+            sampleCount: recentPerfBenchmarks.length,
+            firstTokenSampleCount: firstTokenValues.length,
+            renderAvg: computePerfStat(renderValues, 'avg'),
+            renderP95: computePerfStat(renderValues, 'p95'),
+            firstTokenAvg: computePerfStat(firstTokenValues, 'avg'),
+            firstTokenP95: computePerfStat(firstTokenValues, 'p95'),
+        };
+    }, [recentPerfBenchmarks, computePerfStat]);
+    const clearPerfHistory = React.useCallback(() => {
+        pendingPerfBenchmarkRef.current = null;
+        setActivePerfBenchmark(null);
+        setRecentPerfBenchmarks([]);
+        try {
+            localStorage.removeItem(CHAT_PERF_HISTORY_KEY);
+        } catch {
+            // Ignore storage failures for perf diagnostics.
+        }
+    }, []);
 
     const contextWindowTokens = currentModelObj?.contextLength || 32768;
     const excludedContextKey = React.useMemo(
@@ -2704,9 +2737,19 @@ const Chat: React.FC = () => {
                                 <div className="mt-3 rounded-md border border-slate-800 bg-slate-950/50 px-2.5 py-2">
                                     <div className="flex items-center justify-between">
                                         <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Dev Perf (Last Send)</p>
-                                        {activePerfBenchmark && (
-                                            <span className="text-[10px] text-cyan-300 animate-pulse">Measuring...</span>
-                                        )}
+                                        <div className="flex items-center gap-2">
+                                            {activePerfBenchmark && (
+                                                <span className="text-[10px] text-cyan-300 animate-pulse">Measuring...</span>
+                                            )}
+                                            {recentPerfBenchmarks.length > 0 && (
+                                                <button
+                                                    onClick={clearPerfHistory}
+                                                    className="text-[10px] text-slate-400 hover:text-slate-200 transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                     {latestPerfBenchmark ? (
                                         <div className="mt-1.5 space-y-1">
@@ -2719,6 +2762,22 @@ const Chat: React.FC = () => {
                                             <p className="text-[10px] text-slate-500">
                                                 {latestPerfBenchmark.mode === 'battle' ? 'Battle mode' : 'Single mode'} • {latestPerfBenchmark.inputChars} chars
                                             </p>
+                                            <div className="mt-2 rounded border border-slate-800/80 bg-slate-900/60 px-2 py-1.5">
+                                                <p className="text-[10px] uppercase tracking-wider text-slate-500">
+                                                    Last {perfSummary.sampleCount} Sends
+                                                </p>
+                                                <p className="mt-1 text-[11px] text-slate-300">
+                                                    Render Avg / P95: <span className="font-semibold text-cyan-300">{formatPerfMs(perfSummary.renderAvg)}</span> / <span className="font-semibold text-cyan-300">{formatPerfMs(perfSummary.renderP95)}</span>
+                                                </p>
+                                                <p className="text-[11px] text-slate-300">
+                                                    First Token Avg / P95: <span className="font-semibold text-emerald-300">{formatPerfMs(perfSummary.firstTokenAvg)}</span> / <span className="font-semibold text-emerald-300">{formatPerfMs(perfSummary.firstTokenP95)}</span>
+                                                </p>
+                                                {perfSummary.firstTokenSampleCount !== perfSummary.sampleCount && (
+                                                    <p className="text-[10px] text-slate-500">
+                                                        First-token stats based on {perfSummary.firstTokenSampleCount} completed samples.
+                                                    </p>
+                                                )}
+                                            </div>
                                         </div>
                                     ) : (
                                         <p className="mt-1.5 text-[11px] text-slate-500">Send one prompt to record benchmark metrics.</p>
