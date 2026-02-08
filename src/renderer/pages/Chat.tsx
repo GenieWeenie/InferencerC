@@ -5,39 +5,9 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import MessageContent from '../components/MessageContent';
 import MessageActionsMenu from '../components/MessageActionsMenu';
-import KeyboardShortcutsModal from '../components/KeyboardShortcutsModal';
 import QuickReplyTemplates from '../components/QuickReplyTemplates';
-import RequestResponseLog, { LogEntry } from '../components/RequestResponseLog';
-import AnalyticsDashboard from '../components/AnalyticsDashboard';
+import type { LogEntry } from '../components/RequestResponseLog';
 import ComparisonGrid from '../components/ComparisonGrid';
-import BranchNavigator from '../components/BranchNavigator';
-import ConversationTreeView from '../components/ConversationTreeView';
-import ExportDialog from '../components/ExportDialog';
-import GlobalSearchDialog from '../components/GlobalSearchDialog';
-import ConversationSummaryPanel from '../components/ConversationSummaryPanel';
-import TemplateLibraryDialog from '../components/TemplateLibraryDialog';
-import { ABTestingPanel } from '../components/ABTestingPanel';
-import { PromptOptimizationPanel } from '../components/PromptOptimizationPanel';
-import { CalendarScheduleDialog } from '../components/CalendarScheduleDialog';
-import { SmartSuggestionsPanel } from '../components/SmartSuggestionsPanel';
-import { ConversationRecommendationsPanel } from '../components/ConversationRecommendationsPanel';
-import { WorkflowsManager } from '../components/WorkflowsManager';
-import { APIPlayground } from '../components/APIPlayground';
-import { DeveloperDocumentationPanel } from '../components/DeveloperDocumentationPanel';
-import { PluginManager } from '../components/PluginManager';
-import { CodeIntegrationPanel } from '../components/CodeIntegrationPanel';
-import { WorkspaceViewsPanel } from '../components/WorkspaceViewsPanel';
-import { InteractiveTutorial } from '../components/InteractiveTutorial';
-import { BCIPanel } from '../components/BCIPanel';
-import { MultiModalAIPanel } from '../components/MultiModalAIPanel';
-import { RealTimeCollaborationPanel } from '../components/RealTimeCollaborationPanel';
-import { CloudSyncPanel } from '../components/CloudSyncPanel';
-import { TeamWorkspacesPanel } from '../components/TeamWorkspacesPanel';
-import { EnterpriseCompliancePanel } from '../components/EnterpriseCompliancePanel';
-import { BlockchainPanel } from '../components/BlockchainPanel';
-import { AIAgentsPanel } from '../components/AIAgentsPanel';
-import { FederatedLearningPanel } from '../components/FederatedLearningPanel';
-import { DocumentChatPanel } from '../components/DocumentChatPanel';
 import { responsiveDesignService } from '../services/responsiveDesign';
 import { onboardingService } from '../services/onboarding';
 import { multiModalAIService } from '../services/multiModalAI';
@@ -45,8 +15,6 @@ import { PerformanceMonitorOverlay } from '../components/PerformanceMonitorOverl
 import { crashRecoveryService } from '../services/crashRecovery';
 import { cloudSyncService, CloudSyncStatus } from '../services/cloudSync';
 const PromptManager = React.lazy(() => import('../components/PromptManager'));
-import SidebarHistory from '../components/SidebarHistory';
-import RecoveryDialog from '../components/RecoveryDialog';
 import { useChat } from '../hooks/useChat';
 import { usePrompts, PromptSnippet } from '../hooks/usePrompts';
 import { useConversationTree } from '../hooks/useConversationTree';
@@ -70,10 +38,87 @@ import { activityLogService } from '../services/activityLog';
 import { TemplateService, ConversationTemplate } from '../services/templates';
 import { PromptVariableService } from '../services/promptVariables';
 import { ContextManagementService } from '../services/contextManagement';
-import VariableInsertMenu from '../components/VariableInsertMenu';
 import { AVAILABLE_TOOLS } from '../lib/tools';
 import { RecoveryState } from '../../shared/types';
 import SkeletonLoader from '../components/SkeletonLoader';
+
+const KeyboardShortcutsModal = React.lazy(() => import('../components/KeyboardShortcutsModal'));
+const RequestResponseLog = React.lazy(() => import('../components/RequestResponseLog'));
+const AnalyticsDashboard = React.lazy(() => import('../components/AnalyticsDashboard'));
+const SidebarHistory = React.lazy(() => import('../components/SidebarHistory'));
+const ConversationTreeView = React.lazy(() => import('../components/ConversationTreeView'));
+const ExportDialog = React.lazy(() => import('../components/ExportDialog'));
+const GlobalSearchDialog = React.lazy(() => import('../components/GlobalSearchDialog'));
+const ConversationSummaryPanel = React.lazy(() => import('../components/ConversationSummaryPanel'));
+const TemplateLibraryDialog = React.lazy(() => import('../components/TemplateLibraryDialog'));
+const RecoveryDialog = React.lazy(() => import('../components/RecoveryDialog'));
+const VariableInsertMenu = React.lazy(() => import('../components/VariableInsertMenu'));
+const DocumentChatPanel = React.lazy(() =>
+    import('../components/DocumentChatPanel').then((mod) => ({ default: mod.DocumentChatPanel }))
+);
+const ABTestingPanel = React.lazy(() =>
+    import('../components/ABTestingPanel').then((mod) => ({ default: mod.ABTestingPanel }))
+);
+const PromptOptimizationPanel = React.lazy(() =>
+    import('../components/PromptOptimizationPanel').then((mod) => ({ default: mod.PromptOptimizationPanel }))
+);
+const CalendarScheduleDialog = React.lazy(() =>
+    import('../components/CalendarScheduleDialog').then((mod) => ({ default: mod.CalendarScheduleDialog }))
+);
+const SmartSuggestionsPanel = React.lazy(() =>
+    import('../components/SmartSuggestionsPanel').then((mod) => ({ default: mod.SmartSuggestionsPanel }))
+);
+const ConversationRecommendationsPanel = React.lazy(() =>
+    import('../components/ConversationRecommendationsPanel').then((mod) => ({ default: mod.ConversationRecommendationsPanel }))
+);
+const WorkflowsManager = React.lazy(() =>
+    import('../components/WorkflowsManager').then((mod) => ({ default: mod.WorkflowsManager }))
+);
+const APIPlayground = React.lazy(() =>
+    import('../components/APIPlayground').then((mod) => ({ default: mod.APIPlayground }))
+);
+const DeveloperDocumentationPanel = React.lazy(() =>
+    import('../components/DeveloperDocumentationPanel').then((mod) => ({ default: mod.DeveloperDocumentationPanel }))
+);
+const PluginManager = React.lazy(() =>
+    import('../components/PluginManager').then((mod) => ({ default: mod.PluginManager }))
+);
+const CodeIntegrationPanel = React.lazy(() =>
+    import('../components/CodeIntegrationPanel').then((mod) => ({ default: mod.CodeIntegrationPanel }))
+);
+const WorkspaceViewsPanel = React.lazy(() =>
+    import('../components/WorkspaceViewsPanel').then((mod) => ({ default: mod.WorkspaceViewsPanel }))
+);
+const InteractiveTutorial = React.lazy(() =>
+    import('../components/InteractiveTutorial').then((mod) => ({ default: mod.InteractiveTutorial }))
+);
+const BCIPanel = React.lazy(() =>
+    import('../components/BCIPanel').then((mod) => ({ default: mod.BCIPanel }))
+);
+const MultiModalAIPanel = React.lazy(() =>
+    import('../components/MultiModalAIPanel').then((mod) => ({ default: mod.MultiModalAIPanel }))
+);
+const RealTimeCollaborationPanel = React.lazy(() =>
+    import('../components/RealTimeCollaborationPanel').then((mod) => ({ default: mod.RealTimeCollaborationPanel }))
+);
+const CloudSyncPanel = React.lazy(() =>
+    import('../components/CloudSyncPanel').then((mod) => ({ default: mod.CloudSyncPanel }))
+);
+const TeamWorkspacesPanel = React.lazy(() =>
+    import('../components/TeamWorkspacesPanel').then((mod) => ({ default: mod.TeamWorkspacesPanel }))
+);
+const EnterpriseCompliancePanel = React.lazy(() =>
+    import('../components/EnterpriseCompliancePanel').then((mod) => ({ default: mod.EnterpriseCompliancePanel }))
+);
+const BlockchainPanel = React.lazy(() =>
+    import('../components/BlockchainPanel').then((mod) => ({ default: mod.BlockchainPanel }))
+);
+const AIAgentsPanel = React.lazy(() =>
+    import('../components/AIAgentsPanel').then((mod) => ({ default: mod.AIAgentsPanel }))
+);
+const FederatedLearningPanel = React.lazy(() =>
+    import('../components/FederatedLearningPanel').then((mod) => ({ default: mod.FederatedLearningPanel }))
+);
 
 const RECOVERY_CLEAN_EXIT_KEY = 'app_recovery_clean_exit';
 
@@ -1967,15 +2012,17 @@ const Chat: React.FC = () => {
                         <span className="flex items-center gap-2"><Clock size={16} /> Recent Chats</span>
                         <button onClick={() => setShowHistory(false)} className="touch-target hover:text-white text-slate-400 transition-colors"><X size={18} /></button>
                     </div>
-                    <SidebarHistory
-                        sessions={savedSessions}
-                        currentSessionId={sessionId}
-                        onLoadSession={handleLoadSession}
-                        onDeleteSession={deleteSession}
-                        onRenameSession={renameSession}
-                        onTogglePinSession={togglePinSession}
-                        isLoading={isLoadingSessions}
-                    />
+                    <React.Suspense fallback={<div className="p-4 text-xs text-slate-500">Loading chat history...</div>}>
+                        <SidebarHistory
+                            sessions={savedSessions}
+                            currentSessionId={sessionId}
+                            onLoadSession={handleLoadSession}
+                            onDeleteSession={deleteSession}
+                            onRenameSession={renameSession}
+                            onTogglePinSession={togglePinSession}
+                            isLoading={isLoadingSessions}
+                        />
+                    </React.Suspense>
                 </div>
             )}
 
@@ -2644,11 +2691,13 @@ const Chat: React.FC = () => {
                 {/* AI Summary Panel */}
                 {history.length >= 5 && (
                     <div className="px-6 py-2">
-                        <ConversationSummaryPanel
-                            sessionId={sessionId}
-                            messages={history}
-                            modelId={currentModel}
-                        />
+                        <React.Suspense fallback={<div className="text-xs text-slate-500">Loading summary...</div>}>
+                            <ConversationSummaryPanel
+                                sessionId={sessionId}
+                                messages={history}
+                                modelId={currentModel}
+                            />
+                        </React.Suspense>
                     </div>
                 )}
 
@@ -2931,17 +2980,19 @@ const Chat: React.FC = () => {
                         {/* Smart Suggestions Panel */}
                         {showSuggestions && history.length > 0 && (
                             <div className="px-4">
-                                <SmartSuggestionsPanel
-                                    conversationHistory={history}
-                                    lastMessage={history[history.length - 1]?.content}
-                                    onSelectSuggestion={(suggestion) => {
-                                        setInput(suggestion);
-                                        setShowSuggestions(false);
-                                        textareaRef.current?.focus();
-                                    }}
-                                    isOpen={showSuggestions}
-                                    onClose={() => setShowSuggestions(false)}
-                                />
+                                <React.Suspense fallback={<div className="text-xs text-slate-500 px-2 py-1">Loading suggestions...</div>}>
+                                    <SmartSuggestionsPanel
+                                        conversationHistory={history}
+                                        lastMessage={history[history.length - 1]?.content}
+                                        onSelectSuggestion={(suggestion) => {
+                                            setInput(suggestion);
+                                            setShowSuggestions(false);
+                                            textareaRef.current?.focus();
+                                        }}
+                                        isOpen={showSuggestions}
+                                        onClose={() => setShowSuggestions(false)}
+                                    />
+                                </React.Suspense>
                             </div>
                         )}
 
@@ -3448,21 +3499,25 @@ const Chat: React.FC = () => {
                             )}
 
                             {/* Variable Insert Menu */}
-                            <VariableInsertMenu
-                                isOpen={showVariableMenu}
-                                onClose={() => setShowVariableMenu(false)}
-                                onInsert={(variable) => {
-                                    setInput(prev => prev + variable);
-                                    setShowVariableMenu(false);
-                                }}
-                                context={{
-                                    modelId: currentModel,
-                                    modelName: availableModels.find(m => m.id === currentModel)?.name || currentModel,
-                                    sessionId: sessionId,
-                                    sessionTitle: savedSessions.find(s => s.id === sessionId)?.title || 'New Chat',
-                                    messageCount: history.length
-                                }}
-                            />
+                            {showVariableMenu && (
+                                <React.Suspense fallback={null}>
+                                    <VariableInsertMenu
+                                        isOpen={showVariableMenu}
+                                        onClose={() => setShowVariableMenu(false)}
+                                        onInsert={(variable) => {
+                                            setInput(prev => prev + variable);
+                                            setShowVariableMenu(false);
+                                        }}
+                                        context={{
+                                            modelId: currentModel,
+                                            modelName: availableModels.find(m => m.id === currentModel)?.name || currentModel,
+                                            sessionId: sessionId,
+                                            sessionTitle: savedSessions.find(s => s.id === sessionId)?.title || 'New Chat',
+                                            messageCount: history.length
+                                        }}
+                                    />
+                                </React.Suspense>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -3787,7 +3842,9 @@ const Chat: React.FC = () => {
                 )}
 
                 {activeTab === 'documents' && (
-                    <DocumentChatPanel />
+                    <React.Suspense fallback={<div className="p-6 text-slate-500 animate-pulse">Loading Documents...</div>}>
+                        <DocumentChatPanel />
+                    </React.Suspense>
                 )}
 
                 {activeTab === 'inspector' && (
@@ -3862,347 +3919,455 @@ const Chat: React.FC = () => {
             {/* Sidebar Toggle Button (when closed) */}
 
             {/* Keyboard Shortcuts Modal */}
-            <KeyboardShortcutsModal
-                isOpen={showShortcutsModal}
-                onClose={() => setShowShortcutsModal(false)}
-            />
+            {showShortcutsModal && (
+                <React.Suspense fallback={null}>
+                    <KeyboardShortcutsModal
+                        isOpen={showShortcutsModal}
+                        onClose={() => setShowShortcutsModal(false)}
+                    />
+                </React.Suspense>
+            )}
 
             {/* Request/Response Log */}
-            <RequestResponseLog
-                isOpen={showRequestLog}
-                onClose={() => setShowRequestLog(false)}
-                logs={apiLogs}
-                onClear={() => {
-                    activityLogService.clear();
-                    setApiLogs([]);
-                }}
-            />
+            {showRequestLog && (
+                <React.Suspense fallback={null}>
+                    <RequestResponseLog
+                        isOpen={showRequestLog}
+                        onClose={() => setShowRequestLog(false)}
+                        logs={apiLogs}
+                        onClear={() => {
+                            activityLogService.clear();
+                            setApiLogs([]);
+                        }}
+                    />
+                </React.Suspense>
+            )}
 
             {/* Analytics Dashboard */}
-            <AnalyticsDashboard
-                isOpen={showAnalytics}
-                onClose={() => setShowAnalytics(false)}
-                usageHistory={usageStats}
-            />
+            {showAnalytics && (
+                <React.Suspense fallback={null}>
+                    <AnalyticsDashboard
+                        isOpen={showAnalytics}
+                        onClose={() => setShowAnalytics(false)}
+                        usageHistory={usageStats}
+                    />
+                </React.Suspense>
+            )}
 
             {/* Conversation Tree View */}
-            {branchingEnabled && (
-                <ConversationTreeView
-                    isOpen={showTreeView}
-                    onClose={() => setShowTreeView(false)}
-                    treeManager={treeHook.treeManager}
-                    currentPath={treeHook.currentPath}
-                    onNavigateToNode={(nodeId) => {
-                        // Close tree view
-                        // Note: We don't navigate here to prevent truncating the conversation
-                        // Navigation is only useful when switching between actual branches,
-                        // which is handled by Alt+Left/Right keyboard shortcuts
-                        setShowTreeView(false);
-                    }}
-                />
+            {branchingEnabled && showTreeView && (
+                <React.Suspense fallback={null}>
+                    <ConversationTreeView
+                        isOpen={showTreeView}
+                        onClose={() => setShowTreeView(false)}
+                        treeManager={treeHook.treeManager}
+                        currentPath={treeHook.currentPath}
+                        onNavigateToNode={(nodeId) => {
+                            // Close tree view
+                            // Note: We don't navigate here to prevent truncating the conversation
+                            // Navigation is only useful when switching between actual branches,
+                            // which is handled by Alt+Left/Right keyboard shortcuts
+                            setShowTreeView(false);
+                        }}
+                    />
+                </React.Suspense>
             )}
 
             {/* Export Dialog */}
-            <ExportDialog
-                isOpen={showExportDialog}
-                onClose={() => setShowExportDialog(false)}
-                messages={history}
-                sessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Conversation'}
-            />
-
-            {/* Global Search Dialog */}
-            <GlobalSearchDialog
-                isOpen={showGlobalSearch}
-                onClose={() => setShowGlobalSearch(false)}
-                currentSessionId={sessionId}
-                currentSessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Current Conversation'}
-                onNavigateToMessage={(targetSessionId, messageIndex) => {
-                    // If different session, load it first
-                    if (targetSessionId !== sessionId) {
-                        handleLoadSession(targetSessionId);
-                    }
-                    // Scroll to the message after a short delay to allow session loading
-                    setTimeout(() => {
-                        if (virtuosoRef.current && messageIndex >= 0) {
-                            virtuosoRef.current.scrollToIndex({
-                                index: messageIndex,
-                                align: 'center',
-                                behavior: 'smooth'
-                            });
-                            toast.success(`Jumped to message #${messageIndex + 1}`);
-                        }
-                    }, 300);
-                }}
-            />
-
-            {/* Template Library Dialog */}
-            <TemplateLibraryDialog
-                isOpen={showTemplateLibrary}
-                onClose={() => setShowTemplateLibrary(false)}
-                onUseTemplate={(template: ConversationTemplate) => {
-                    // Create new session with template
-                    createNewSession();
-
-                    // Apply template settings
-                    if (template.systemPrompt) {
-                        setSystemPrompt(template.systemPrompt);
-                    }
-                    if (template.settings) {
-                        if (template.settings.temperature !== undefined) setTemperature(template.settings.temperature);
-                        if (template.settings.topP !== undefined) setTopP(template.settings.topP);
-                        if (template.settings.maxTokens !== undefined) setMaxTokens(template.settings.maxTokens);
-                        if (template.settings.expertMode !== undefined) setExpertMode(template.settings.expertMode);
-                        if (template.settings.thinkingEnabled !== undefined) setThinkingEnabled(template.settings.thinkingEnabled);
-                    }
-
-                    // Apply initial messages
-                    if (template.initialMessages.length > 0) {
-                        setHistory(template.initialMessages.map(m => ({
-                            ...m,
-                            isLoading: false
-                        })));
-                    }
-                }}
-                currentMessages={history}
-                currentSystemPrompt={systemPrompt}
-                currentSettings={{
-                    temperature,
-                    topP,
-                    maxTokens,
-                    expertMode,
-                    thinkingEnabled
-                }}
-            />
-
-            {/* A/B Testing Panel */}
-            <ABTestingPanel
-                isOpen={showABTesting}
-                onClose={() => setShowABTesting(false)}
-                onExecutePrompt={async (prompt, systemPrompt, modelId, temperature, topP, maxTokens) => {
-                    return executeChatCompletion({
-                        prompt,
-                        systemPrompt,
-                        modelId,
-                        temperature,
-                        topP,
-                        maxTokens,
-                    });
-                }}
-                currentInput={input}
-                currentContext={history}
-            />
-
-            {/* Prompt Optimization Panel */}
-            <PromptOptimizationPanel
-                isOpen={showPromptOptimization}
-                onClose={() => setShowPromptOptimization(false)}
-                initialPrompt={input}
-                initialSystemPrompt={systemPrompt}
-                onApplyOptimized={(optimizedPrompt, optimizedSystemPrompt) => {
-                    setInput(optimizedPrompt);
-                    if (optimizedSystemPrompt) {
-                        setSystemPrompt(optimizedSystemPrompt);
-                    }
-                }}
-            />
-
-            {/* Calendar Schedule Dialog */}
-            <CalendarScheduleDialog
-                isOpen={showCalendarSchedule}
-                onClose={() => setShowCalendarSchedule(false)}
-                conversationTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Conversation'}
-                conversationSummary={history.length > 0 ? `Review conversation with ${history.length} messages` : undefined}
-            />
-
-            {/* Conversation Recommendations Panel */}
-            <ConversationRecommendationsPanel
-                isOpen={showRecommendations}
-                onClose={() => setShowRecommendations(false)}
-                currentSessionId={sessionId}
-                currentMessage={input}
-                conversationHistory={history}
-                onSelectConversation={(sessionId) => {
-                    handleLoadSession(sessionId);
-                    setShowRecommendations(false);
-                }}
-            />
-
-            {/* Workflows Manager */}
-            <WorkflowsManager
-                isOpen={showWorkflows}
-                onClose={() => setShowWorkflows(false)}
-            />
-
-            {/* API Playground */}
-            <APIPlayground
-                isOpen={showAPIPlayground}
-                onClose={() => setShowAPIPlayground(false)}
-            />
-
-            {/* Developer Documentation */}
-            <DeveloperDocumentationPanel
-                isOpen={showDeveloperDocs}
-                onClose={() => setShowDeveloperDocs(false)}
-                onOpenAPIPlayground={() => {
-                    setShowDeveloperDocs(false);
-                    setShowAPIPlayground(true);
-                }}
-            />
-
-            {/* Plugin Manager */}
-            <PluginManager
-                isOpen={showPluginManager}
-                onClose={() => setShowPluginManager(false)}
-            />
-
-            {/* Code Integration Panel */}
-            <CodeIntegrationPanel
-                isOpen={showCodeIntegration}
-                onClose={() => {
-                    setShowCodeIntegration(false);
-                    setSelectedCode(null);
-                }}
-                code={selectedCode?.code}
-                language={selectedCode?.language || 'javascript'}
-                conversationHistory={history}
-                onExecutePrompt={async (prompt, systemPrompt) => {
-                    const result = await executeChatCompletion({
-                        prompt,
-                        systemPrompt,
-                    });
-                    return { content: result.content };
-                }}
-            />
-
-            {/* Workspace Views */}
-            <WorkspaceViewsPanel
-                isOpen={showWorkspaceViews}
-                onClose={() => setShowWorkspaceViews(false)}
-                conversations={savedSessions.map(s => ({
-                    id: s.id,
-                    title: s.title,
-                    messageCount: s.messageCount || 0,
-                    lastActivity: s.lastMessageTime || s.createdAt,
-                    pinned: s.pinned,
-                    archived: false,
-                    category: undefined,
-                    tags: [],
-                    model: undefined,
-                }))}
-                onSelectConversation={(id) => {
-                    handleLoadSession(id);
-                    setShowWorkspaceViews(false);
-                }}
-            />
-
-            {/* Interactive Tutorial */}
-            {showTutorial && currentTutorial && (
-                <InteractiveTutorial
-                    tutorial={currentTutorial}
-                    onComplete={() => {
-                        setShowTutorial(false);
-                        setCurrentTutorial(null);
-                        onboardingService.completeOnboarding();
-                    }}
-                    onSkip={() => {
-                        setShowTutorial(false);
-                        setCurrentTutorial(null);
-                    }}
-                />
+            {showExportDialog && (
+                <React.Suspense fallback={null}>
+                    <ExportDialog
+                        isOpen={showExportDialog}
+                        onClose={() => setShowExportDialog(false)}
+                        messages={history}
+                        sessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Conversation'}
+                    />
+                </React.Suspense>
             )}
 
-            {/* Brain-Computer Interface */}
-            <BCIPanel
-                isOpen={showBCI}
-                onClose={() => setShowBCI(false)}
-            />
+            {/* Global Search Dialog */}
+            {showGlobalSearch && (
+                <React.Suspense fallback={null}>
+                    <GlobalSearchDialog
+                        isOpen={showGlobalSearch}
+                        onClose={() => setShowGlobalSearch(false)}
+                        currentSessionId={sessionId}
+                        currentSessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Current Conversation'}
+                        onNavigateToMessage={(targetSessionId, messageIndex) => {
+                            // If different session, load it first
+                            if (targetSessionId !== sessionId) {
+                                handleLoadSession(targetSessionId);
+                            }
+                            // Scroll to the message after a short delay to allow session loading
+                            setTimeout(() => {
+                                if (virtuosoRef.current && messageIndex >= 0) {
+                                    virtuosoRef.current.scrollToIndex({
+                                        index: messageIndex,
+                                        align: 'center',
+                                        behavior: 'smooth'
+                                    });
+                                    toast.success(`Jumped to message #${messageIndex + 1}`);
+                                }
+                            }, 300);
+                        }}
+                    />
+                </React.Suspense>
+            )}
 
-            {/* Multi-Modal AI */}
-            <MultiModalAIPanel
-                isOpen={showMultiModal}
-                onClose={() => setShowMultiModal(false)}
-                onSend={async (media, text) => {
-                    // Process multi-modal request
-                    const response = await multiModalAIService.sendMultiModalRequest(
-                        { text, media },
-                        async (prompt, systemPrompt) => {
+            {/* Template Library Dialog */}
+            {showTemplateLibrary && (
+                <React.Suspense fallback={null}>
+                    <TemplateLibraryDialog
+                        isOpen={showTemplateLibrary}
+                        onClose={() => setShowTemplateLibrary(false)}
+                        onUseTemplate={(template: ConversationTemplate) => {
+                            // Create new session with template
+                            createNewSession();
+
+                            // Apply template settings
+                            if (template.systemPrompt) {
+                                setSystemPrompt(template.systemPrompt);
+                            }
+                            if (template.settings) {
+                                if (template.settings.temperature !== undefined) setTemperature(template.settings.temperature);
+                                if (template.settings.topP !== undefined) setTopP(template.settings.topP);
+                                if (template.settings.maxTokens !== undefined) setMaxTokens(template.settings.maxTokens);
+                                if (template.settings.expertMode !== undefined) setExpertMode(template.settings.expertMode);
+                                if (template.settings.thinkingEnabled !== undefined) setThinkingEnabled(template.settings.thinkingEnabled);
+                            }
+
+                            // Apply initial messages
+                            if (template.initialMessages.length > 0) {
+                                setHistory(template.initialMessages.map(m => ({
+                                    ...m,
+                                    isLoading: false
+                                })));
+                            }
+                        }}
+                        currentMessages={history}
+                        currentSystemPrompt={systemPrompt}
+                        currentSettings={{
+                            temperature,
+                            topP,
+                            maxTokens,
+                            expertMode,
+                            thinkingEnabled
+                        }}
+                    />
+                </React.Suspense>
+            )}
+
+            {/* A/B Testing Panel */}
+            {showABTesting && (
+                <React.Suspense fallback={null}>
+                    <ABTestingPanel
+                        isOpen={showABTesting}
+                        onClose={() => setShowABTesting(false)}
+                        onExecutePrompt={async (prompt, systemPrompt, modelId, temperature, topP, maxTokens) => {
+                            return executeChatCompletion({
+                                prompt,
+                                systemPrompt,
+                                modelId,
+                                temperature,
+                                topP,
+                                maxTokens,
+                            });
+                        }}
+                        currentInput={input}
+                        currentContext={history}
+                    />
+                </React.Suspense>
+            )}
+
+            {/* Prompt Optimization Panel */}
+            {showPromptOptimization && (
+                <React.Suspense fallback={null}>
+                    <PromptOptimizationPanel
+                        isOpen={showPromptOptimization}
+                        onClose={() => setShowPromptOptimization(false)}
+                        initialPrompt={input}
+                        initialSystemPrompt={systemPrompt}
+                        onApplyOptimized={(optimizedPrompt, optimizedSystemPrompt) => {
+                            setInput(optimizedPrompt);
+                            if (optimizedSystemPrompt) {
+                                setSystemPrompt(optimizedSystemPrompt);
+                            }
+                        }}
+                    />
+                </React.Suspense>
+            )}
+
+            {/* Calendar Schedule Dialog */}
+            {showCalendarSchedule && (
+                <React.Suspense fallback={null}>
+                    <CalendarScheduleDialog
+                        isOpen={showCalendarSchedule}
+                        onClose={() => setShowCalendarSchedule(false)}
+                        conversationTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Conversation'}
+                        conversationSummary={history.length > 0 ? `Review conversation with ${history.length} messages` : undefined}
+                    />
+                </React.Suspense>
+            )}
+
+            {/* Conversation Recommendations Panel */}
+            {showRecommendations && (
+                <React.Suspense fallback={null}>
+                    <ConversationRecommendationsPanel
+                        isOpen={showRecommendations}
+                        onClose={() => setShowRecommendations(false)}
+                        currentSessionId={sessionId}
+                        currentMessage={input}
+                        conversationHistory={history}
+                        onSelectConversation={(sessionId) => {
+                            handleLoadSession(sessionId);
+                            setShowRecommendations(false);
+                        }}
+                    />
+                </React.Suspense>
+            )}
+
+            {/* Workflows Manager */}
+            {showWorkflows && (
+                <React.Suspense fallback={null}>
+                    <WorkflowsManager
+                        isOpen={showWorkflows}
+                        onClose={() => setShowWorkflows(false)}
+                    />
+                </React.Suspense>
+            )}
+
+            {/* API Playground */}
+            {showAPIPlayground && (
+                <React.Suspense fallback={null}>
+                    <APIPlayground
+                        isOpen={showAPIPlayground}
+                        onClose={() => setShowAPIPlayground(false)}
+                    />
+                </React.Suspense>
+            )}
+
+            {/* Developer Documentation */}
+            {showDeveloperDocs && (
+                <React.Suspense fallback={null}>
+                    <DeveloperDocumentationPanel
+                        isOpen={showDeveloperDocs}
+                        onClose={() => setShowDeveloperDocs(false)}
+                        onOpenAPIPlayground={() => {
+                            setShowDeveloperDocs(false);
+                            setShowAPIPlayground(true);
+                        }}
+                    />
+                </React.Suspense>
+            )}
+
+            {/* Plugin Manager */}
+            {showPluginManager && (
+                <React.Suspense fallback={null}>
+                    <PluginManager
+                        isOpen={showPluginManager}
+                        onClose={() => setShowPluginManager(false)}
+                    />
+                </React.Suspense>
+            )}
+
+            {/* Code Integration Panel */}
+            {showCodeIntegration && (
+                <React.Suspense fallback={null}>
+                    <CodeIntegrationPanel
+                        isOpen={showCodeIntegration}
+                        onClose={() => {
+                            setShowCodeIntegration(false);
+                            setSelectedCode(null);
+                        }}
+                        code={selectedCode?.code}
+                        language={selectedCode?.language || 'javascript'}
+                        conversationHistory={history}
+                        onExecutePrompt={async (prompt, systemPrompt) => {
                             const result = await executeChatCompletion({
                                 prompt,
                                 systemPrompt,
                             });
                             return { content: result.content };
-                        }
-                    );
-                    // Add response to conversation
-                    setHistory(prev => [...prev, {
-                        role: 'assistant',
-                        content: response.content,
-                        isLoading: false,
-                    }]);
-                }}
-            />
+                        }}
+                    />
+                </React.Suspense>
+            )}
+
+            {/* Workspace Views */}
+            {showWorkspaceViews && (
+                <React.Suspense fallback={null}>
+                    <WorkspaceViewsPanel
+                        isOpen={showWorkspaceViews}
+                        onClose={() => setShowWorkspaceViews(false)}
+                        conversations={savedSessions.map(s => ({
+                            id: s.id,
+                            title: s.title,
+                            messageCount: s.messageCount || 0,
+                            lastActivity: s.lastMessageTime || s.createdAt,
+                            pinned: s.pinned,
+                            archived: false,
+                            category: undefined,
+                            tags: [],
+                            model: undefined,
+                        }))}
+                        onSelectConversation={(id) => {
+                            handleLoadSession(id);
+                            setShowWorkspaceViews(false);
+                        }}
+                    />
+                </React.Suspense>
+            )}
+
+            {/* Interactive Tutorial */}
+            {showTutorial && currentTutorial && (
+                <React.Suspense fallback={null}>
+                    <InteractiveTutorial
+                        tutorial={currentTutorial}
+                        onComplete={() => {
+                            setShowTutorial(false);
+                            setCurrentTutorial(null);
+                            onboardingService.completeOnboarding();
+                        }}
+                        onSkip={() => {
+                            setShowTutorial(false);
+                            setCurrentTutorial(null);
+                        }}
+                    />
+                </React.Suspense>
+            )}
+
+            {/* Brain-Computer Interface */}
+            {showBCI && (
+                <React.Suspense fallback={null}>
+                    <BCIPanel
+                        isOpen={showBCI}
+                        onClose={() => setShowBCI(false)}
+                    />
+                </React.Suspense>
+            )}
+
+            {/* Multi-Modal AI */}
+            {showMultiModal && (
+                <React.Suspense fallback={null}>
+                    <MultiModalAIPanel
+                        isOpen={showMultiModal}
+                        onClose={() => setShowMultiModal(false)}
+                        onSend={async (media, text) => {
+                            // Process multi-modal request
+                            const response = await multiModalAIService.sendMultiModalRequest(
+                                { text, media },
+                                async (prompt, systemPrompt) => {
+                                    const result = await executeChatCompletion({
+                                        prompt,
+                                        systemPrompt,
+                                    });
+                                    return { content: result.content };
+                                }
+                            );
+                            // Add response to conversation
+                            setHistory(prev => [...prev, {
+                                role: 'assistant',
+                                content: response.content,
+                                isLoading: false,
+                            }]);
+                        }}
+                    />
+                </React.Suspense>
+            )}
 
             {/* Real-Time Collaboration */}
-            <RealTimeCollaborationPanel
-                isOpen={showCollaboration}
-                onClose={() => setShowCollaboration(false)}
-            />
+            {showCollaboration && (
+                <React.Suspense fallback={null}>
+                    <RealTimeCollaborationPanel
+                        isOpen={showCollaboration}
+                        onClose={() => setShowCollaboration(false)}
+                    />
+                </React.Suspense>
+            )}
 
-            <CloudSyncPanel
-                isOpen={showCloudSync}
-                onClose={() => setShowCloudSync(false)}
-            />
+            {showCloudSync && (
+                <React.Suspense fallback={null}>
+                    <CloudSyncPanel
+                        isOpen={showCloudSync}
+                        onClose={() => setShowCloudSync(false)}
+                    />
+                </React.Suspense>
+            )}
 
-            <TeamWorkspacesPanel
-                isOpen={showTeamWorkspaces}
-                onClose={() => setShowTeamWorkspaces(false)}
-                availableModels={availableModels}
-                conversations={savedSessions}
-            />
+            {showTeamWorkspaces && (
+                <React.Suspense fallback={null}>
+                    <TeamWorkspacesPanel
+                        isOpen={showTeamWorkspaces}
+                        onClose={() => setShowTeamWorkspaces(false)}
+                        availableModels={availableModels}
+                        conversations={savedSessions}
+                    />
+                </React.Suspense>
+            )}
 
-            <EnterpriseCompliancePanel
-                isOpen={showEnterpriseCompliance}
-                onClose={() => setShowEnterpriseCompliance(false)}
-            />
+            {showEnterpriseCompliance && (
+                <React.Suspense fallback={null}>
+                    <EnterpriseCompliancePanel
+                        isOpen={showEnterpriseCompliance}
+                        onClose={() => setShowEnterpriseCompliance(false)}
+                    />
+                </React.Suspense>
+            )}
 
             {/* Blockchain Integration */}
-            <BlockchainPanel
-                isOpen={showBlockchain}
-                onClose={() => setShowBlockchain(false)}
-                sessionId={sessionId}
-                conversationData={history}
-            />
+            {showBlockchain && (
+                <React.Suspense fallback={null}>
+                    <BlockchainPanel
+                        isOpen={showBlockchain}
+                        onClose={() => setShowBlockchain(false)}
+                        sessionId={sessionId}
+                        conversationData={history}
+                    />
+                </React.Suspense>
+            )}
 
             {/* AI Agents */}
-            <AIAgentsPanel
-                isOpen={showAIAgents}
-                onClose={() => setShowAIAgents(false)}
-                onExecutePrompt={async (prompt, systemPrompt) => {
-                    const result = await executeChatCompletion({
-                        prompt,
-                        systemPrompt,
-                    });
-                    return { content: result.content };
-                }}
-            />
+            {showAIAgents && (
+                <React.Suspense fallback={null}>
+                    <AIAgentsPanel
+                        isOpen={showAIAgents}
+                        onClose={() => setShowAIAgents(false)}
+                        onExecutePrompt={async (prompt, systemPrompt) => {
+                            const result = await executeChatCompletion({
+                                prompt,
+                                systemPrompt,
+                            });
+                            return { content: result.content };
+                        }}
+                    />
+                </React.Suspense>
+            )}
 
             {/* Federated Learning */}
-            <FederatedLearningPanel
-                isOpen={showFederatedLearning}
-                onClose={() => setShowFederatedLearning(false)}
-            />
+            {showFederatedLearning && (
+                <React.Suspense fallback={null}>
+                    <FederatedLearningPanel
+                        isOpen={showFederatedLearning}
+                        onClose={() => setShowFederatedLearning(false)}
+                    />
+                </React.Suspense>
+            )}
 
             {/* Performance Monitor Overlay */}
             <PerformanceMonitorOverlay messageCount={history.length} />
 
             {/* Recovery Dialog */}
-            <RecoveryDialog
-                isOpen={showRecoveryDialog}
-                onClose={() => setShowRecoveryDialog(false)}
-                onRestore={handleRestoreSession}
-                onDismiss={handleDismissRecovery}
-                recoveryState={recoveryState}
-            />
+            {showRecoveryDialog && (
+                <React.Suspense fallback={null}>
+                    <RecoveryDialog
+                        isOpen={showRecoveryDialog}
+                        onClose={() => setShowRecoveryDialog(false)}
+                        onRestore={handleRestoreSession}
+                        onDismiss={handleDismissRecovery}
+                        recoveryState={recoveryState}
+                    />
+                </React.Suspense>
+            )}
         </div>
     );
 };

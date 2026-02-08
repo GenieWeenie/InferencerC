@@ -67,6 +67,8 @@ Make InferencerC a serious daily-driver competitor by focusing on:
 2. `Slice B` implemented.
 3. `Slice C` implemented.
 4. `Slice D` in progress.
+   - Pass 1: secondary app-shell modules lazy-loaded in `App.tsx`.
+   - Pass 2: optional chat dialogs/panels lazy-loaded and mounted only when opened.
 
 ## Release Checklist for v3.1.x
 
