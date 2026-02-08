@@ -30,13 +30,89 @@ const COMMON_LANGUAGES = [
     'diff', 'git', 'nginx', 'apache', 'graphql', 'vue', 'svelte', 'angular'
 ];
 
+const SYNTAX_LANGUAGE_ALIASES: Record<string, string> = {
+    js: 'javascript',
+    ts: 'typescript',
+    shell: 'bash',
+    sh: 'bash',
+    zsh: 'bash',
+    ps1: 'powershell',
+    yml: 'yaml',
+    md: 'markdown',
+    py: 'python',
+    rb: 'ruby',
+    rs: 'rust',
+    kt: 'kotlin',
+    cs: 'csharp',
+    htm: 'markup',
+    html: 'markup',
+    xml: 'markup',
+    svg: 'markup',
+    dockerfile: 'docker',
+    angular: 'typescript',
+    apache: 'apacheconf',
+    json5: 'json',
+};
+
+const PRISM_LANGUAGE_LOADERS: Record<string, () => Promise<{ default: any }>> = {
+    javascript: () => import('react-syntax-highlighter/dist/esm/languages/prism/javascript'),
+    typescript: () => import('react-syntax-highlighter/dist/esm/languages/prism/typescript'),
+    jsx: () => import('react-syntax-highlighter/dist/esm/languages/prism/jsx'),
+    tsx: () => import('react-syntax-highlighter/dist/esm/languages/prism/tsx'),
+    python: () => import('react-syntax-highlighter/dist/esm/languages/prism/python'),
+    java: () => import('react-syntax-highlighter/dist/esm/languages/prism/java'),
+    c: () => import('react-syntax-highlighter/dist/esm/languages/prism/c'),
+    cpp: () => import('react-syntax-highlighter/dist/esm/languages/prism/cpp'),
+    csharp: () => import('react-syntax-highlighter/dist/esm/languages/prism/csharp'),
+    php: () => import('react-syntax-highlighter/dist/esm/languages/prism/php'),
+    ruby: () => import('react-syntax-highlighter/dist/esm/languages/prism/ruby'),
+    go: () => import('react-syntax-highlighter/dist/esm/languages/prism/go'),
+    rust: () => import('react-syntax-highlighter/dist/esm/languages/prism/rust'),
+    swift: () => import('react-syntax-highlighter/dist/esm/languages/prism/swift'),
+    kotlin: () => import('react-syntax-highlighter/dist/esm/languages/prism/kotlin'),
+    dart: () => import('react-syntax-highlighter/dist/esm/languages/prism/dart'),
+    scala: () => import('react-syntax-highlighter/dist/esm/languages/prism/scala'),
+    r: () => import('react-syntax-highlighter/dist/esm/languages/prism/r'),
+    sql: () => import('react-syntax-highlighter/dist/esm/languages/prism/sql'),
+    markup: () => import('react-syntax-highlighter/dist/esm/languages/prism/markup'),
+    css: () => import('react-syntax-highlighter/dist/esm/languages/prism/css'),
+    scss: () => import('react-syntax-highlighter/dist/esm/languages/prism/scss'),
+    sass: () => import('react-syntax-highlighter/dist/esm/languages/prism/sass'),
+    less: () => import('react-syntax-highlighter/dist/esm/languages/prism/less'),
+    json: () => import('react-syntax-highlighter/dist/esm/languages/prism/json'),
+    yaml: () => import('react-syntax-highlighter/dist/esm/languages/prism/yaml'),
+    toml: () => import('react-syntax-highlighter/dist/esm/languages/prism/toml'),
+    ini: () => import('react-syntax-highlighter/dist/esm/languages/prism/ini'),
+    markdown: () => import('react-syntax-highlighter/dist/esm/languages/prism/markdown'),
+    bash: () => import('react-syntax-highlighter/dist/esm/languages/prism/bash'),
+    powershell: () => import('react-syntax-highlighter/dist/esm/languages/prism/powershell'),
+    docker: () => import('react-syntax-highlighter/dist/esm/languages/prism/docker'),
+    makefile: () => import('react-syntax-highlighter/dist/esm/languages/prism/makefile'),
+    cmake: () => import('react-syntax-highlighter/dist/esm/languages/prism/cmake'),
+    diff: () => import('react-syntax-highlighter/dist/esm/languages/prism/diff'),
+    git: () => import('react-syntax-highlighter/dist/esm/languages/prism/git'),
+    nginx: () => import('react-syntax-highlighter/dist/esm/languages/prism/nginx'),
+    apacheconf: () => import('react-syntax-highlighter/dist/esm/languages/prism/apacheconf'),
+    graphql: () => import('react-syntax-highlighter/dist/esm/languages/prism/graphql'),
+};
+
+const normalizeSyntaxLanguage = (language: string): string | null => {
+    const normalized = language.toLowerCase().trim();
+    if (!normalized || normalized === 'text' || normalized === 'plaintext' || normalized === 'txt') {
+        return null;
+    }
+    return SYNTAX_LANGUAGE_ALIASES[normalized] || normalized;
+};
+
 interface MathPluginBundle {
     remarkMath: any;
     rehypeKatex: any;
 }
 
 interface SyntaxHighlighterBundle {
-    component: any;
+    component: React.ComponentType<any> & {
+        registerLanguage: (name: string, language: any) => void;
+    };
     style: any;
 }
 
@@ -100,6 +176,9 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
     const [executionResults, setExecutionResults] = React.useState<Record<string, { output: string; success: boolean }>>({});
     const [mathPlugins, setMathPlugins] = React.useState<MathPluginBundle | null>(null);
     const [syntaxHighlighterBundle, setSyntaxHighlighterBundle] = React.useState<SyntaxHighlighterBundle | null>(null);
+    const [loadedSyntaxLanguages, setLoadedSyntaxLanguages] = React.useState<Set<string>>(new Set());
+    const loadedSyntaxLanguagesRef = React.useRef<Set<string>>(new Set());
+    const syntaxLanguageLoadInFlightRef = React.useRef<Set<string>>(new Set());
 
     const contentWithoutThinking = React.useMemo(() => {
         if (!displayContent.trim().startsWith('<thinking>')) return displayContent;
@@ -114,6 +193,23 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
         () => /```[\s\S]*?```/.test(contentWithoutThinking),
         [contentWithoutThinking]
     );
+    const detectedCodeLanguages = React.useMemo(() => {
+        const languageSet = new Set<string>();
+        const fencePattern = /```([\w-]+)/g;
+        for (const match of contentWithoutThinking.matchAll(fencePattern)) {
+            const normalized = normalizeSyntaxLanguage(match[1] || '');
+            if (normalized) {
+                languageSet.add(normalized);
+            }
+        }
+        Object.values(codeBlockLanguages).forEach((selectedLanguage) => {
+            const normalized = normalizeSyntaxLanguage(selectedLanguage);
+            if (normalized) {
+                languageSet.add(normalized);
+            }
+        });
+        return Array.from(languageSet);
+    }, [contentWithoutThinking, codeBlockLanguages]);
 
     React.useEffect(() => {
         if (!hasMathSyntax || mathPlugins) return;
@@ -147,13 +243,13 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
 
         (async () => {
             const [syntaxHighlighterModule, syntaxThemeModule] = await Promise.all([
-                import('react-syntax-highlighter'),
+                import('react-syntax-highlighter/dist/esm/prism-light'),
                 import('react-syntax-highlighter/dist/esm/styles/prism'),
             ]);
 
             if (!cancelled) {
                 setSyntaxHighlighterBundle({
-                    component: syntaxHighlighterModule.Prism,
+                    component: syntaxHighlighterModule.default,
                     style: syntaxThemeModule.vscDarkPlus,
                 });
             }
@@ -165,6 +261,45 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
             cancelled = true;
         };
     }, [hasCodeBlocks, syntaxHighlighterBundle]);
+
+    const ensureSyntaxLanguageLoaded = React.useCallback(async (requestedLanguage: string) => {
+        if (!syntaxHighlighterBundle) return;
+        const normalized = normalizeSyntaxLanguage(requestedLanguage);
+        if (!normalized) return;
+
+        if (loadedSyntaxLanguagesRef.current.has(normalized) || syntaxLanguageLoadInFlightRef.current.has(normalized)) {
+            return;
+        }
+
+        const loader = PRISM_LANGUAGE_LOADERS[normalized];
+        if (!loader) {
+            return;
+        }
+
+        syntaxLanguageLoadInFlightRef.current.add(normalized);
+        try {
+            const module = await loader();
+            syntaxHighlighterBundle.component.registerLanguage(normalized, module.default);
+            setLoadedSyntaxLanguages((prev) => {
+                if (prev.has(normalized)) return prev;
+                const next = new Set(prev);
+                next.add(normalized);
+                loadedSyntaxLanguagesRef.current = next;
+                return next;
+            });
+        } catch (error) {
+            console.error(`Failed to load Prism language "${normalized}":`, error);
+        } finally {
+            syntaxLanguageLoadInFlightRef.current.delete(normalized);
+        }
+    }, [syntaxHighlighterBundle]);
+
+    React.useEffect(() => {
+        if (!hasCodeBlocks || !syntaxHighlighterBundle) return;
+        detectedCodeLanguages.forEach((language) => {
+            void ensureSyntaxLanguageLoaded(language);
+        });
+    }, [hasCodeBlocks, syntaxHighlighterBundle, detectedCodeLanguages, ensureSyntaxLanguageLoaded]);
 
     const remarkPlugins = React.useMemo(() => {
         const plugins: any[] = [remarkGfm];
@@ -351,7 +486,7 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                 rehypePlugins={rehypePlugins}
                 components={{
                     code({ node, inline, className, children, ...props }: any) {
-                        const match = /language-(\w+)/.exec(className || '');
+                        const match = /language-([\w-]+)/.exec(className || '');
                         const codeString = String(children).replace(/\n$/, '');
                         const isBlock = !inline && (match || codeString.includes('\n'));
                         const codeHash = codeString.substring(0, 50); // Use first 50 chars as hash
@@ -359,10 +494,17 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                         const SyntaxHighlighterComponent = syntaxHighlighterBundle?.component;
                         // Use custom language if set, otherwise use detected
                         const language = codeBlockLanguages[codeHash] || detectedLanguage;
+                        const normalizedSyntaxLanguage = normalizeSyntaxLanguage(language);
+                        const canSyntaxHighlight = Boolean(
+                            SyntaxHighlighterComponent &&
+                            normalizedSyntaxLanguage &&
+                            loadedSyntaxLanguages.has(normalizedSyntaxLanguage)
+                        );
                         const isPreviewable = PREVIEWABLE_LANGUAGES.includes(language.toLowerCase());
 
                         const handleLanguageChange = (newLang: string) => {
                             setCodeBlockLanguages(prev => ({ ...prev, [codeHash]: newLang }));
+                            void ensureSyntaxLanguageLoaded(newLang);
                         };
 
                         return isBlock ? (
@@ -471,11 +613,11 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                     </div>
                                 </div>
                                 <div className="relative">
-                                    {SyntaxHighlighterComponent ? (
+                                    {canSyntaxHighlight ? (
                                         <SyntaxHighlighterComponent
                                             {...props}
                                             style={syntaxHighlighterBundle.style}
-                                            language={language}
+                                            language={normalizedSyntaxLanguage || undefined}
                                             PreTag="div"
                                             customStyle={{ margin: 0, borderRadius: 0, padding: '1.25rem', overflowX: 'auto', background: 'transparent', fontSize: '13px', lineHeight: '1.5' }}
                                             wrapLines={true}
