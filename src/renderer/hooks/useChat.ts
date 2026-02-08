@@ -5,6 +5,8 @@ import { HistoryService } from '../services/history';
 import { simulateLogprobs, detectIntent, findBestModelForIntent } from '../lib/chatUtils';
 import { AVAILABLE_TOOLS } from '../lib/tools';
 import { crashRecoveryService } from '../services/crashRecovery';
+import { performanceService } from '../services/performance';
+import { backendHealthService } from '../services/backendHealth';
 
 export interface ApiLogCallback {
     (log: {
@@ -27,19 +29,15 @@ export interface SelectedTokenContext {
 
 type AnalyticsService = typeof import('../services/analytics')['analyticsService'];
 type WebhookService = typeof import('../services/webhooks')['webhookService'];
-type PerformanceService = typeof import('../services/performance')['performanceService'];
 type TeamWorkspacesService = typeof import('../services/teamWorkspaces')['teamWorkspacesService'];
 type EnterpriseComplianceService = typeof import('../services/enterpriseCompliance')['enterpriseComplianceService'];
 type CredentialService = typeof import('../services/credentials')['credentialService'];
-type BackendHealthService = typeof import('../services/backendHealth')['backendHealthService'];
 
 let analyticsServicePromise: Promise<AnalyticsService> | null = null;
 let webhookServicePromise: Promise<WebhookService> | null = null;
-let performanceServicePromise: Promise<PerformanceService> | null = null;
 let teamWorkspacesServicePromise: Promise<TeamWorkspacesService> | null = null;
 let enterpriseComplianceServicePromise: Promise<EnterpriseComplianceService> | null = null;
 let credentialServicePromise: Promise<CredentialService> | null = null;
-let backendHealthServicePromise: Promise<BackendHealthService> | null = null;
 
 const loadAnalyticsService = async (): Promise<AnalyticsService> => {
     if (!analyticsServicePromise) {
@@ -53,13 +51,6 @@ const loadWebhookService = async (): Promise<WebhookService> => {
         webhookServicePromise = import('../services/webhooks').then((mod) => mod.webhookService);
     }
     return webhookServicePromise;
-};
-
-const loadPerformanceService = async (): Promise<PerformanceService> => {
-    if (!performanceServicePromise) {
-        performanceServicePromise = import('../services/performance').then((mod) => mod.performanceService);
-    }
-    return performanceServicePromise;
 };
 
 const loadTeamWorkspacesService = async (): Promise<TeamWorkspacesService> => {
@@ -81,13 +72,6 @@ const loadCredentialService = async (): Promise<CredentialService> => {
         credentialServicePromise = import('../services/credentials').then((mod) => mod.credentialService);
     }
     return credentialServicePromise;
-};
-
-const loadBackendHealthService = async (): Promise<BackendHealthService> => {
-    if (!backendHealthServicePromise) {
-        backendHealthServicePromise = import('../services/backendHealth').then((mod) => mod.backendHealthService);
-    }
-    return backendHealthServicePromise;
 };
 
 export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = true) => {
@@ -142,11 +126,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     }, []);
 
     const reportPerformanceLatency = useCallback((latencyMs: number) => {
-        void loadPerformanceService()
-            .then((service) => service.reportLatency(latencyMs))
-            .catch(() => {
-                // Non-blocking diagnostics.
-            });
+        performanceService.reportLatency(latencyMs);
     }, []);
 
     const trackAnalyticsMessage = useCallback((session: string, model: string, tokenEstimate: number) => {
@@ -243,10 +223,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         let isInitialLoad = true;
 
         const fetchModels = async () => {
-            const [backendHealthService, teamWorkspacesService] = await Promise.all([
-                loadBackendHealthService(),
-                loadTeamWorkspacesService(),
-            ]);
+            const teamWorkspacesService = await loadTeamWorkspacesService();
 
             let models: Model[] = [];
             let localStatus: 'online' | 'offline' = backendHealthService.isOnline() ? 'online' : 'offline';

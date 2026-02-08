@@ -73,6 +73,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 4: jsPDF optional HTML plugin dependencies stubbed to avoid bundling heavy unused paths.
    - Pass 5: chat message rendering/actions moved to lazy chunks (loads on first real message).
    - Pass 6: split chat display helpers into `chatDisplayUtils` to keep non-renderer chat utility paths lighter.
+   - Pass 7: remove ineffective dynamic imports in `useChat` for services already loaded elsewhere.
 
 ## Release Checklist for v3.1.x
 
