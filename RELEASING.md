@@ -33,9 +33,20 @@ Required environment variables/secrets:
 - Dedicated signed mac workflow: `.github/workflows/release-mac-signed.yml`
   - Trigger manually (`workflow_dispatch`) or by tag (`v*`)
 
-## Typical release flow
+## Short Release Checklist
 
-1. Ensure tests pass: `npm test -- --runInBand`
-2. Ensure workspace is clean: `npm run clean:workspace`
-3. Create and push a version tag (for example `v3.0.1`)
-4. Confirm workflow artifacts in GitHub Releases
+1. Pull latest `master` and verify clean git state
+2. Run validation:
+   - `npm test -- --runInBand`
+   - `npm run clean:workspace`
+3. Push code changes:
+   - `git push origin master`
+4. Create and push release tag:
+   - `git tag vX.Y.Z`
+   - `git push origin vX.Y.Z`
+5. Verify GitHub Actions/release artifacts:
+   - Build workflow green
+   - Installer/DMG artifacts present
+6. If needed, rollback tag:
+   - `git push origin :refs/tags/vX.Y.Z`
+   - `git tag -d vX.Y.Z`
