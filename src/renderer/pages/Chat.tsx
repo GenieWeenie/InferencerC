@@ -13,7 +13,7 @@ import { useChat } from '../hooks/useChat';
 import { usePrompts, PromptSnippet } from '../hooks/usePrompts';
 import { useConversationTree } from '../hooks/useConversationTree';
 import { useLongPress, usePinchZoom, useSwipeNavigation } from '../hooks/useGestures';
-import { calculateEntropy, compressImage } from '../lib/chatUtils';
+import { calculateEntropy, compressImage } from '../lib/chatDisplayUtils';
 import { useMCP } from '../hooks/useMCP';
 import { readAnalyticsUsageStats, UsageStatsRecord } from '../services/analyticsStore';
 import type { ProjectContext } from '../services/projectContext';

@@ -72,6 +72,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 3: export pipeline loads PDF/DOCX libraries on demand (shrinks `ExportDialog` chunk).
    - Pass 4: jsPDF optional HTML plugin dependencies stubbed to avoid bundling heavy unused paths.
    - Pass 5: chat message rendering/actions moved to lazy chunks (loads on first real message).
+   - Pass 6: split chat display helpers into `chatDisplayUtils` to keep non-renderer chat utility paths lighter.
 
 ## Release Checklist for v3.1.x
 
