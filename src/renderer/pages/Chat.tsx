@@ -3,7 +3,7 @@ import { Send, Clock, Plus, Trash2, X, Globe, Settings, Activity, AlertTriangle,
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { LogEntry } from '../components/RequestResponseLog';
-import { responsiveDesignService } from '../services/responsiveDesign';
+import type { ResponsiveConfig } from '../services/responsiveDesign';
 import type { Tutorial } from '../services/onboarding';
 import { PerformanceMonitorOverlay } from '../components/PerformanceMonitorOverlay';
 import { crashRecoveryService } from '../services/crashRecovery';
@@ -20,7 +20,7 @@ import type { ProjectContext } from '../services/projectContext';
 import { HistoryService } from '../services/history';
 import { activityLogService } from '../services/activityLog';
 import type { ConversationTemplate } from '../services/templates';
-import { ContextManagementService } from '../services/contextManagement';
+import type { ContextTrimSuggestion, ContextUsage } from '../services/contextManagement';
 import { AVAILABLE_TOOLS } from '../lib/tools';
 import { RecoveryState } from '../../shared/types';
 import SkeletonLoader from '../components/SkeletonLoader';
@@ -121,6 +121,8 @@ type WorkflowsService = typeof import('../services/workflows')['workflowsService
 type ApiClientService = typeof import('../services/apiClient')['apiClientService'];
 type ProjectContextService = typeof import('../services/projectContext')['projectContextService'];
 type PromptVariableServiceType = typeof import('../services/promptVariables')['PromptVariableService'];
+type ResponsiveDesignServiceType = typeof import('../services/responsiveDesign')['responsiveDesignService'];
+type ContextManagementServiceType = typeof import('../services/contextManagement')['ContextManagementService'];
 
 let cloudSyncServicePromise: Promise<CloudSyncService> | null = null;
 let multiModalAIServicePromise: Promise<MultiModalAIService> | null = null;
@@ -130,6 +132,8 @@ let workflowsServicePromise: Promise<WorkflowsService> | null = null;
 let apiClientServicePromise: Promise<ApiClientService> | null = null;
 let projectContextServicePromise: Promise<ProjectContextService> | null = null;
 let promptVariableServicePromise: Promise<PromptVariableServiceType> | null = null;
+let responsiveDesignServicePromise: Promise<ResponsiveDesignServiceType> | null = null;
+let contextManagementServicePromise: Promise<ContextManagementServiceType> | null = null;
 
 const loadOnboardingService = async () => {
     const onboardingModule: OnboardingServiceModule = await import('../services/onboarding');
@@ -190,6 +194,41 @@ const loadPromptVariableService = async (): Promise<PromptVariableServiceType> =
         promptVariableServicePromise = import('../services/promptVariables').then((mod) => mod.PromptVariableService);
     }
     return promptVariableServicePromise;
+};
+
+const loadResponsiveDesignService = async (): Promise<ResponsiveDesignServiceType> => {
+    if (!responsiveDesignServicePromise) {
+        responsiveDesignServicePromise = import('../services/responsiveDesign').then((mod) => mod.responsiveDesignService);
+    }
+    return responsiveDesignServicePromise;
+};
+
+const loadContextManagementService = async (): Promise<ContextManagementServiceType> => {
+    if (!contextManagementServicePromise) {
+        contextManagementServicePromise = import('../services/contextManagement').then((mod) => mod.ContextManagementService);
+    }
+    return contextManagementServicePromise;
+};
+
+const estimateTokensFallback = (text: string): number => {
+    const normalized = text.trim();
+    if (!normalized) return 0;
+    return Math.max(1, Math.ceil(normalized.length / 4));
+};
+
+const getFallbackResponsiveConfig = (): ResponsiveConfig => {
+    const width = typeof window === 'undefined' ? 1280 : window.innerWidth;
+    const height = typeof window === 'undefined' ? 720 : window.innerHeight;
+    const breakpoint = width < 640 ? 'mobile' : width < 1024 ? 'tablet' : width < 1920 ? 'desktop' : 'wide';
+    return {
+        breakpoint,
+        isMobile: breakpoint === 'mobile',
+        isTablet: breakpoint === 'tablet',
+        isDesktop: breakpoint === 'desktop' || breakpoint === 'wide',
+        isWide: breakpoint === 'wide',
+        width,
+        height,
+    };
 };
 
 type ChatPerfMode = 'single' | 'battle';
@@ -434,7 +473,8 @@ const Chat: React.FC = () => {
     const [showCodeIntegration, setShowCodeIntegration] = React.useState(false);
     const [selectedCode, setSelectedCode] = React.useState<{ code: string; language: string } | null>(null);
     const [showWorkspaceViews, setShowWorkspaceViews] = React.useState(false);
-    const [responsiveConfig, setResponsiveConfig] = React.useState(responsiveDesignService.getConfig());
+    const [responsiveConfig, setResponsiveConfig] = React.useState<ResponsiveConfig>(() => getFallbackResponsiveConfig());
+    const [contextManagementService, setContextManagementService] = React.useState<ContextManagementServiceType | null>(null);
     const isCompactViewport = responsiveConfig.isMobile || responsiveConfig.isTablet;
     const [showTutorial, setShowTutorial] = React.useState(false);
     const [currentTutorial, setCurrentTutorial] = React.useState<Tutorial | null>(null);
@@ -489,10 +529,42 @@ const Chat: React.FC = () => {
 
     // Responsive design subscription
     React.useEffect(() => {
-        const unsubscribe = responsiveDesignService.subscribe((config) => {
-            setResponsiveConfig(config);
-        });
-        return unsubscribe;
+        let isMounted = true;
+        let unsubscribe: (() => void) | null = null;
+
+        void loadResponsiveDesignService()
+            .then((responsiveDesignService) => {
+                if (!isMounted) return;
+                setResponsiveConfig(responsiveDesignService.getConfig());
+                unsubscribe = responsiveDesignService.subscribe((config) => {
+                    setResponsiveConfig(config);
+                });
+            })
+            .catch(() => {
+                if (!isMounted) return;
+                setResponsiveConfig(getFallbackResponsiveConfig());
+            });
+
+        return () => {
+            isMounted = false;
+            unsubscribe?.();
+        };
+    }, []);
+
+    React.useEffect(() => {
+        let isMounted = true;
+        void loadContextManagementService()
+            .then((service) => {
+                if (!isMounted) return;
+                setContextManagementService(() => service);
+            })
+            .catch(() => {
+                if (!isMounted) return;
+                setContextManagementService(null);
+            });
+        return () => {
+            isMounted = false;
+        };
     }, []);
 
     React.useEffect(() => {
@@ -1268,25 +1340,51 @@ const Chat: React.FC = () => {
         [excludedContextIndices]
     );
 
-    const contextUsage = React.useMemo(() => {
-        return ContextManagementService.estimateUsage({
-            messages: history,
-            excludedIndices: excludedContextIndices,
-            systemPrompt,
-            currentInput: input,
-            reservedOutputTokens: maxTokens,
-            maxContextTokens: contextWindowTokens,
-        });
-    }, [history, excludedContextIndices, systemPrompt, input, maxTokens, contextWindowTokens, excludedContextKey]);
+    const estimateTokens = React.useCallback((text: string) => {
+        if (contextManagementService) {
+            return contextManagementService.estimateTokens(text);
+        }
+        return estimateTokensFallback(text);
+    }, [contextManagementService]);
 
-    const trimSuggestions = React.useMemo(() => {
-        return ContextManagementService.suggestMessagesToTrim({
+    const contextUsage = React.useMemo<ContextUsage>(() => {
+        if (contextManagementService) {
+            return contextManagementService.estimateUsage({
+                messages: history,
+                excludedIndices: excludedContextIndices,
+                systemPrompt,
+                currentInput: input,
+                reservedOutputTokens: maxTokens,
+                maxContextTokens: contextWindowTokens,
+            });
+        }
+
+        let inputTokens = estimateTokensFallback(systemPrompt || '') + estimateTokensFallback(input || '');
+        history.forEach((message, index) => {
+            if (excludedContextIndices.has(index)) return;
+            inputTokens += estimateTokensFallback(message.content || '') + 4;
+        });
+        const totalTokens = inputTokens + Math.max(0, maxTokens);
+        const fillRatio = contextWindowTokens > 0 ? totalTokens / contextWindowTokens : 1;
+        return {
+            inputTokens,
+            reservedOutputTokens: maxTokens,
+            totalTokens,
+            maxContextTokens: contextWindowTokens,
+            fillRatio,
+            warning: fillRatio >= 0.8,
+        };
+    }, [history, excludedContextIndices, systemPrompt, input, maxTokens, contextWindowTokens, excludedContextKey, contextManagementService]);
+
+    const trimSuggestions = React.useMemo<ContextTrimSuggestion[]>(() => {
+        if (!contextManagementService) return [];
+        return contextManagementService.suggestMessagesToTrim({
             messages: history,
             excludedIndices: excludedContextIndices,
             targetFillRatio: 0.75,
             usage: contextUsage,
         });
-    }, [history, excludedContextIndices, contextUsage, excludedContextKey]);
+    }, [history, excludedContextIndices, contextUsage, excludedContextKey, contextManagementService]);
 
     const recentContextMessages = React.useMemo(() => {
         const start = Math.max(0, history.length - 20);
@@ -1294,9 +1392,9 @@ const Chat: React.FC = () => {
             message,
             index: start + offset,
             included: !excludedContextIndices.has(start + offset),
-            estimatedTokens: ContextManagementService.estimateTokens(message.content || ''),
+            estimatedTokens: estimateTokens(message.content || ''),
         }));
-    }, [history, excludedContextIndices, excludedContextKey]);
+    }, [history, excludedContextIndices, excludedContextKey, estimateTokens]);
 
     React.useEffect(() => {
         if (contextUsage.fillRatio >= 0.8 && !contextWarningTriggered.current) {
@@ -1332,17 +1430,35 @@ const Chat: React.FC = () => {
         let effectiveExcluded = new Set(excludedContextIndices);
         let contextSummary: string | undefined;
 
-        const usageAtSend = ContextManagementService.estimateUsage({
-            messages: history,
-            excludedIndices: effectiveExcluded,
-            systemPrompt,
-            currentInput: pendingInput,
-            reservedOutputTokens: maxTokens,
-            maxContextTokens: contextWindowTokens,
-        });
+        const usageAtSend: ContextUsage = contextManagementService
+            ? contextManagementService.estimateUsage({
+                messages: history,
+                excludedIndices: effectiveExcluded,
+                systemPrompt,
+                currentInput: pendingInput,
+                reservedOutputTokens: maxTokens,
+                maxContextTokens: contextWindowTokens,
+            })
+            : (() => {
+                let inputTokens = estimateTokensFallback(systemPrompt || '') + estimateTokensFallback(pendingInput || '');
+                history.forEach((message, index) => {
+                    if (effectiveExcluded.has(index)) return;
+                    inputTokens += estimateTokensFallback(message.content || '') + 4;
+                });
+                const totalTokens = inputTokens + Math.max(0, maxTokens);
+                const fillRatio = contextWindowTokens > 0 ? totalTokens / contextWindowTokens : 1;
+                return {
+                    inputTokens,
+                    reservedOutputTokens: maxTokens,
+                    totalTokens,
+                    maxContextTokens: contextWindowTokens,
+                    fillRatio,
+                    warning: fillRatio >= 0.8,
+                };
+            })();
 
         if (autoSummarizeContext && usageAtSend.fillRatio >= 0.8) {
-            const plan = ContextManagementService.buildAutoSummaryPlan({
+            const plan = contextManagementService?.buildAutoSummaryPlan({
                 messages: history,
                 excludedIndices: effectiveExcluded,
                 keepRecentCount: 8,
@@ -1360,7 +1476,7 @@ const Chat: React.FC = () => {
             excludedMessageIndices: Array.from(effectiveExcluded),
             contextSummary,
         };
-    }, [excludedContextIndices, history, systemPrompt, maxTokens, contextWindowTokens, autoSummarizeContext]);
+    }, [excludedContextIndices, history, systemPrompt, maxTokens, contextWindowTokens, autoSummarizeContext, contextManagementService]);
 
     const enableProjectContextFeature = React.useCallback(() => {
         setProjectContextFeatureEnabled(true);
