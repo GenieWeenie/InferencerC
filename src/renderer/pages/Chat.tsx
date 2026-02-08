@@ -257,6 +257,11 @@ const Chat: React.FC = () => {
     const [bookmarkedMessages, setBookmarkedMessages] = React.useState<Set<number>>(new Set());
     const [showRequestLog, setShowRequestLog] = React.useState(false);
     const [showDiagnosticsPanel, setShowDiagnosticsPanel] = React.useState(false);
+    const [showBottomControls, setShowBottomControls] = React.useState<boolean>(() => {
+        const stored = localStorage.getItem('chat_show_bottom_controls');
+        return stored !== '0';
+    });
+    const [diagnosticsPanelPosition, setDiagnosticsPanelPosition] = React.useState<{ left: number; top: number }>({ left: 12, top: 12 });
     const [messageRatings, setMessageRatings] = React.useState<Record<number, 'up' | 'down'>>({});
     const [jsonMode, setJsonMode] = React.useState(false);
     const [showAnalytics, setShowAnalytics] = React.useState(false);
@@ -329,6 +334,8 @@ const Chat: React.FC = () => {
     const messageListRef = React.useRef<HTMLDivElement | null>(null);
     const longPressMenuRef = React.useRef<HTMLDivElement | null>(null);
     const diagnosticsPanelRef = React.useRef<HTMLDivElement | null>(null);
+    const diagnosticsButtonRef = React.useRef<HTMLButtonElement | null>(null);
+    const diagnosticsPopoverRef = React.useRef<HTMLDivElement | null>(null);
 
     const [conversationFontSize, setConversationFontSize] = React.useState<number>(() => {
         const stored = Number(localStorage.getItem('chat_font_size'));
@@ -430,6 +437,14 @@ const Chat: React.FC = () => {
             document.removeEventListener('keydown', handleEscape);
         };
     }, [showDiagnosticsPanel]);
+
+    React.useEffect(() => {
+        localStorage.setItem('chat_show_bottom_controls', showBottomControls ? '1' : '0');
+        if (!showBottomControls) {
+            setShowExpertMenu(false);
+            setShowVariableMenu(false);
+        }
+    }, [showBottomControls]);
 
     // Context management state persistence (per session)
     React.useEffect(() => {
@@ -744,6 +759,7 @@ const Chat: React.FC = () => {
         },
     ]), [providerReady, connectionStatus.local, connectionStatus.remote, modelReady, currentModelObj, currentModel, promptReady]);
     const readinessCompletedCount = readinessSteps.filter(step => step.complete).length;
+    const launchChecklistComplete = readinessCompletedCount === readinessSteps.length;
     const diagnosticsStatus = React.useMemo(() => {
         if (!providerReady) {
             return {
@@ -772,6 +788,39 @@ const Chat: React.FC = () => {
             className: 'text-emerald-300 border-emerald-700/70 bg-emerald-900/20',
         };
     }, [providerReady, modelReady, history.length, promptReady]);
+    const updateDiagnosticsPanelPosition = React.useCallback(() => {
+        const trigger = diagnosticsButtonRef.current;
+        if (!trigger) return;
+
+        const triggerRect = trigger.getBoundingClientRect();
+        const panelWidth = 288;
+        const panelHeight = diagnosticsPopoverRef.current?.offsetHeight || 320;
+        const margin = 12;
+        const left = Math.min(
+            Math.max(margin, triggerRect.right - panelWidth),
+            window.innerWidth - panelWidth - margin
+        );
+        const topBelow = triggerRect.bottom + 8;
+        const topAbove = triggerRect.top - panelHeight - 8;
+        const top = topBelow + panelHeight + margin <= window.innerHeight
+            ? topBelow
+            : Math.max(margin, topAbove);
+
+        setDiagnosticsPanelPosition({ left, top });
+    }, []);
+
+    React.useEffect(() => {
+        if (!showDiagnosticsPanel) return;
+
+        const raf = window.requestAnimationFrame(updateDiagnosticsPanelPosition);
+        window.addEventListener('resize', updateDiagnosticsPanelPosition);
+        window.addEventListener('scroll', updateDiagnosticsPanelPosition, true);
+        return () => {
+            window.cancelAnimationFrame(raf);
+            window.removeEventListener('resize', updateDiagnosticsPanelPosition);
+            window.removeEventListener('scroll', updateDiagnosticsPanelPosition, true);
+        };
+    }, [showDiagnosticsPanel, updateDiagnosticsPanelPosition]);
     const contextWindowTokens = currentModelObj?.contextLength || 32768;
     const excludedContextKey = React.useMemo(
         () => Array.from(excludedContextIndices).sort((a, b) => a - b).join(','),
@@ -2465,6 +2514,7 @@ const Chat: React.FC = () => {
                     )}
                     <div ref={diagnosticsPanelRef} className="relative flex-shrink-0">
                         <button
+                            ref={diagnosticsButtonRef}
                             onClick={() => setShowDiagnosticsPanel(prev => !prev)}
                             title="Startup diagnostics and quick fixes"
                             className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors border text-xs ${diagnosticsStatus.className}`}
@@ -2473,7 +2523,11 @@ const Chat: React.FC = () => {
                             <span>{diagnosticsStatus.label}</span>
                         </button>
                         {showDiagnosticsPanel && (
-                            <div className="absolute right-0 top-full mt-2 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-3 z-30">
+                            <div
+                                ref={diagnosticsPopoverRef}
+                                className="fixed w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-3 z-40"
+                                style={{ left: diagnosticsPanelPosition.left, top: diagnosticsPanelPosition.top }}
+                            >
                                 <div className="flex items-start justify-between gap-3">
                                     <div>
                                         <p className="text-xs font-semibold text-slate-200">Startup Diagnostics</p>
@@ -2748,7 +2802,7 @@ const Chat: React.FC = () => {
                         </div>
                     )}
                     {history.length === 0 ? (
-                        <div className="flex flex-col items-center justify-start h-full max-w-2xl mx-auto px-8 pt-16 pb-72 md:pb-80 text-center space-y-8 animate-in fade-in duration-700">
+                        <div className={`flex flex-col items-center justify-start h-full max-w-2xl mx-auto px-8 pt-16 text-center space-y-8 animate-in fade-in duration-700 ${showBottomControls ? 'pb-72 md:pb-80' : 'pb-48 md:pb-56'}`}>
                             <div className="relative">
                                 <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-primary/20 to-blue-500/10 flex items-center justify-center shadow-inner">
                                     <Brain size={48} className="text-primary animate-pulse" />
@@ -2761,38 +2815,42 @@ const Chat: React.FC = () => {
                             <div className="space-y-2">
                                 <h2 className="text-2xl font-heading font-bold text-white tracking-tight">How can I help you today?</h2>
                                 <p className="text-slate-500 text-sm max-w-sm mx-auto leading-relaxed">
-                                    InferencerC 3.1 is focused on speed-to-success. Finish the quick launch checklist, then send.
+                                    {launchChecklistComplete
+                                        ? 'InferencerC 3.1 is ready. Send your first prompt.'
+                                        : 'InferencerC 3.1 is focused on speed-to-success. Finish the quick launch checklist, then send.'}
                                 </p>
                             </div>
 
-                            <div className="w-full max-w-xl text-left bg-slate-900/60 border border-slate-800 rounded-2xl p-4 space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <Shield size={14} className="text-cyan-400" />
-                                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">Launch Checklist</span>
+                            {!launchChecklistComplete && (
+                                <div className="w-full max-w-xl text-left bg-slate-900/60 border border-slate-800 rounded-2xl p-4 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <Shield size={14} className="text-cyan-400" />
+                                            <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">Launch Checklist</span>
+                                        </div>
+                                        <span className="text-[11px] text-slate-400">
+                                            {readinessCompletedCount}/{readinessSteps.length} ready
+                                        </span>
                                     </div>
-                                    <span className="text-[11px] text-slate-400">
-                                        {readinessCompletedCount}/{readinessSteps.length} ready
-                                    </span>
-                                </div>
-                                <div className="space-y-2">
-                                    {readinessSteps.map((step) => (
-                                        <div key={step.id} className={`rounded-lg border px-3 py-2 ${step.complete ? 'border-emerald-800/60 bg-emerald-900/20' : 'border-slate-800 bg-slate-950/40'}`}>
-                                            <div className="flex items-start gap-2">
-                                                {step.complete ? (
-                                                    <Check size={14} className="text-emerald-400 mt-0.5" />
-                                                ) : (
-                                                    <AlertCircle size={14} className="text-amber-400 mt-0.5" />
-                                                )}
-                                                <div>
-                                                    <p className="text-xs font-semibold text-slate-200">{step.title}</p>
-                                                    <p className="text-[11px] text-slate-400">{step.description}</p>
+                                    <div className="space-y-2">
+                                        {readinessSteps.map((step) => (
+                                            <div key={step.id} className={`rounded-lg border px-3 py-2 ${step.complete ? 'border-emerald-800/60 bg-emerald-900/20' : 'border-slate-800 bg-slate-950/40'}`}>
+                                                <div className="flex items-start gap-2">
+                                                    {step.complete ? (
+                                                        <Check size={14} className="text-emerald-400 mt-0.5" />
+                                                    ) : (
+                                                        <AlertCircle size={14} className="text-amber-400 mt-0.5" />
+                                                    )}
+                                                    <div>
+                                                        <p className="text-xs font-semibold text-slate-200">{step.title}</p>
+                                                        <p className="text-[11px] text-slate-400">{step.description}</p>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    ))}
+                                        ))}
+                                    </div>
                                 </div>
-                            </div>
+                            )}
 
                             <div className="grid grid-cols-2 gap-3 w-full max-w-lg">
                                 {[
@@ -2841,7 +2899,7 @@ const Chat: React.FC = () => {
                             computeItemKey={(index, item) => isLoadingMessages ? `skeleton-${index}` : `${index}-${item.role}`}
                             itemContent={renderItemContent}
                             components={{
-                                Footer: () => <div className="h-48" />
+                                Footer: () => <div className={showBottomControls ? 'h-48' : 'h-28'} />
                             }}
                         />
                     )}
@@ -3011,7 +3069,7 @@ const Chat: React.FC = () => {
                         )}
 
                         {/* 1. Main User Input */}
-                        <div className="flex items-start p-4 gap-3 bg-slate-950/30 rounded-t-2xl relative min-w-0 max-w-full overflow-x-hidden">
+                        <div className={`flex items-start p-4 gap-3 bg-slate-950/30 relative min-w-0 max-w-full overflow-x-hidden ${showBottomControls ? 'rounded-t-2xl' : 'rounded-2xl'}`}>
                             {isDragging && (
                                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/80 rounded-t-2xl backdrop-blur-sm pointer-events-none">
                                     <div className="text-primary font-bold text-lg animate-bounce flex items-center gap-2">
@@ -3103,6 +3161,13 @@ const Chat: React.FC = () => {
                                 rows={1}
                             />
                             <div className="flex flex-col gap-2">
+                                <button
+                                    onClick={() => setShowBottomControls(prev => !prev)}
+                                    title={showBottomControls ? 'Hide bottom controls' : 'Show bottom controls'}
+                                    className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-all border border-slate-700"
+                                >
+                                    {showBottomControls ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                                </button>
                                 <button
                                     onClick={() => setShowSuggestions(!showSuggestions)}
                                     disabled={history.length === 0}
@@ -3296,6 +3361,7 @@ const Chat: React.FC = () => {
                         )}
 
                         {/* 3. Control Pills Bar */}
+                        {showBottomControls && (
                         <div className="px-4 py-3 bg-slate-950/50 border-t border-slate-800/50 flex flex-wrap gap-2 items-center relative rounded-b-2xl">
                             {/* Toggle 1: Control Response */}
                             <button
@@ -3533,6 +3599,7 @@ const Chat: React.FC = () => {
                                 </React.Suspense>
                             )}
                         </div>
+                        )}
                     </div>
                 </div>
             </div>
