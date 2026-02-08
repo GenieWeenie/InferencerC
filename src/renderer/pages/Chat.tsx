@@ -319,6 +319,7 @@ const Chat: React.FC = () => {
     const [usageStats, setUsageStats] = React.useState(analyticsService.getUsageStats());
     const [comparisonIndex, setComparisonIndex] = React.useState<number | null>(null);
     const [projectContext, setProjectContext] = React.useState<ProjectContext | null>(null);
+    const [projectContextFeatureEnabled, setProjectContextFeatureEnabled] = React.useState(false);
     const [includeContextInMessages, setIncludeContextInMessages] = React.useState(true);
     const [showGithubInput, setShowGithubInput] = React.useState(false);
     const [githubUrl, setGithubUrl] = React.useState('');
@@ -1200,6 +1201,10 @@ const Chat: React.FC = () => {
         };
     }, [excludedContextIndices, history, systemPrompt, maxTokens, contextWindowTokens, autoSummarizeContext]);
 
+    const enableProjectContextFeature = React.useCallback(() => {
+        setProjectContextFeatureEnabled(true);
+    }, []);
+
     // Wrapper for sendMessage that processes variables and includes project context
     const sendMessageWithContext = React.useCallback(async () => {
         let textToSend = input;
@@ -1249,14 +1254,20 @@ const Chat: React.FC = () => {
         }
     }, [input, projectContext, includeContextInMessages, sendMessage, currentModel, availableModels, sessionId, savedSessions, history, buildContextSendOptions, beginPerfBenchmark]);
 
-    // Project Context subscription
+    // Project Context subscription (lazily enabled when the feature is used)
     React.useEffect(() => {
+        if (!projectContextFeatureEnabled) return;
         const unsubscribe = projectContextService.subscribe((context) => {
             setProjectContext(context);
         });
-        // Load initial context
         setProjectContext(projectContextService.getContext());
         return unsubscribe;
+    }, [projectContextFeatureEnabled]);
+
+    React.useEffect(() => {
+        if (projectContextService.getContext()) {
+            setProjectContextFeatureEnabled(true);
+        }
     }, []);
 
     // Auto-categorization and auto-tagging
@@ -3662,6 +3673,7 @@ const Chat: React.FC = () => {
                                         {!projectContext.isWatching && (
                                             <button
                                                 onClick={async () => {
+                                                    enableProjectContextFeature();
                                                     const success = await projectContextService.startWatching();
                                                     if (success) {
                                                         toast.success('Started watching folder for changes');
@@ -3746,6 +3758,7 @@ const Chat: React.FC = () => {
                             {/* Toggle 2b: Project Context */}
                             <button
                                 onClick={async () => {
+                                    enableProjectContextFeature();
                                     if (projectContext) {
                                         projectContextService.clearContext();
                                         toast.success('Project context cleared');
