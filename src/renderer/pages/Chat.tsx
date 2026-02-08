@@ -66,6 +66,7 @@ import { autoCategorizationService } from '../services/autoCategorization';
 import { autoTaggingService } from '../services/autoTagging';
 import { workflowsService } from '../services/workflows';
 import { apiClientService } from '../services/apiClient';
+import { activityLogService } from '../services/activityLog';
 import { TemplateService, ConversationTemplate } from '../services/templates';
 import { PromptVariableService } from '../services/promptVariables';
 import { ContextManagementService } from '../services/contextManagement';
@@ -93,14 +94,15 @@ const MessageSkeleton: React.FC<{ isUser?: boolean }> = ({ isUser = false }) => 
 
 const Chat: React.FC = () => {
     // API logs state (defined before useChat so it can be passed as callback)
-    const [apiLogs, setApiLogs] = React.useState<LogEntry[]>([]);
+    const [apiLogs, setApiLogs] = React.useState<LogEntry[]>(() => activityLogService.getEntries());
 
     const [streamingEnabled, setStreamingEnabled] = React.useState(true);
     const [isLoadingSessions, setIsLoadingSessions] = React.useState(true);
     const [isLoadingMessages, setIsLoadingMessages] = React.useState(true);
 
     const handleApiLog = React.useCallback((log: LogEntry) => {
-        setApiLogs(prev => [...prev, log]);
+        const next = activityLogService.append(log);
+        setApiLogs(next);
     }, []);
 
     const {
@@ -620,6 +622,38 @@ const Chat: React.FC = () => {
         () => availableModels.find(m => m.id === currentModel),
         [availableModels, currentModel]
     );
+    const providerReady = connectionStatus.local === 'online' || connectionStatus.remote === 'online';
+    const modelReady = Boolean(currentModel);
+    const promptReady = input.trim().length > 0;
+    const readinessSteps = React.useMemo(() => ([
+        {
+            id: 'provider',
+            title: 'Provider Reachable',
+            description: providerReady
+                ? (connectionStatus.local === 'online' ? 'Local provider online.' : 'Remote provider online.')
+                : (connectionStatus.local === 'checking' || connectionStatus.remote === 'checking'
+                    ? 'Checking provider status...'
+                    : 'No reachable provider yet. Start local backend or configure OpenRouter API key.'),
+            complete: providerReady,
+        },
+        {
+            id: 'model',
+            title: 'Model Selected',
+            description: modelReady
+                ? `Selected: ${currentModelObj?.name || currentModel}`
+                : 'Pick a model from the top model selector.',
+            complete: modelReady,
+        },
+        {
+            id: 'prompt',
+            title: 'Prompt Drafted',
+            description: promptReady
+                ? 'Prompt ready. Press Send to get your first response.'
+                : 'Use a starter prompt below or type your own.',
+            complete: promptReady,
+        },
+    ]), [providerReady, connectionStatus.local, connectionStatus.remote, modelReady, currentModelObj, currentModel, promptReady]);
+    const readinessCompletedCount = readinessSteps.filter(step => step.complete).length;
     const contextWindowTokens = currentModelObj?.contextLength || 32768;
     const excludedContextKey = React.useMemo(
         () => Array.from(excludedContextIndices).sort((a, b) => a - b).join(','),
@@ -2495,8 +2529,37 @@ const Chat: React.FC = () => {
                             <div className="space-y-2">
                                 <h2 className="text-2xl font-heading font-bold text-white tracking-tight">How can I help you today?</h2>
                                 <p className="text-slate-500 text-sm max-w-sm mx-auto leading-relaxed">
-                                    InferencerC 3.0 is ready. Select a model or an expert persona to begin your journey.
+                                    InferencerC 3.1 is focused on speed-to-success. Finish the quick launch checklist, then send.
                                 </p>
+                            </div>
+
+                            <div className="w-full max-w-xl text-left bg-slate-900/60 border border-slate-800 rounded-2xl p-4 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Shield size={14} className="text-cyan-400" />
+                                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-300">Launch Checklist</span>
+                                    </div>
+                                    <span className="text-[11px] text-slate-400">
+                                        {readinessCompletedCount}/{readinessSteps.length} ready
+                                    </span>
+                                </div>
+                                <div className="space-y-2">
+                                    {readinessSteps.map((step) => (
+                                        <div key={step.id} className={`rounded-lg border px-3 py-2 ${step.complete ? 'border-emerald-800/60 bg-emerald-900/20' : 'border-slate-800 bg-slate-950/40'}`}>
+                                            <div className="flex items-start gap-2">
+                                                {step.complete ? (
+                                                    <Check size={14} className="text-emerald-400 mt-0.5" />
+                                                ) : (
+                                                    <AlertCircle size={14} className="text-amber-400 mt-0.5" />
+                                                )}
+                                                <div>
+                                                    <p className="text-xs font-semibold text-slate-200">{step.title}</p>
+                                                    <p className="text-[11px] text-slate-400">{step.description}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-3 w-full max-w-lg">
@@ -3640,7 +3703,10 @@ const Chat: React.FC = () => {
                 isOpen={showRequestLog}
                 onClose={() => setShowRequestLog(false)}
                 logs={apiLogs}
-                onClear={() => setApiLogs([])}
+                onClear={() => {
+                    activityLogService.clear();
+                    setApiLogs([]);
+                }}
             />
 
             {/* Analytics Dashboard */}

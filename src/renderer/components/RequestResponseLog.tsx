@@ -1,17 +1,9 @@
 import React, { useState } from 'react';
 import { X, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import type { ApiActivityLogEntry } from '../services/activityLog';
 
-export interface LogEntry {
-    id: string;
-    timestamp: number;
-    type: 'request' | 'response' | 'error';
-    model: string;
-    request?: any;
-    response?: any;
-    error?: string;
-    duration?: number;
-}
+export type LogEntry = ApiActivityLogEntry;
 
 interface RequestResponseLogProps {
     isOpen: boolean;
@@ -62,7 +54,7 @@ const RequestResponseLog: React.FC<RequestResponseLogProps> = ({ isOpen, onClose
                         {/* Header */}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700 bg-slate-800/50">
                             <div className="flex items-center gap-3">
-                                <h2 className="text-lg font-bold text-white">Request/Response Log</h2>
+                                <h2 className="text-lg font-bold text-white">API Activity Log</h2>
                                 <span className="text-xs text-slate-500 bg-slate-800 px-2 py-1 rounded">
                                     {logs.length} {logs.length === 1 ? 'entry' : 'entries'}
                                 </span>
@@ -88,7 +80,7 @@ const RequestResponseLog: React.FC<RequestResponseLogProps> = ({ isOpen, onClose
                             {logs.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center h-full text-slate-500">
                                     <p className="text-sm">No API calls yet</p>
-                                    <p className="text-xs mt-1">Logs will appear here when you send messages</p>
+                                    <p className="text-xs mt-1">Requests and responses will appear here when you send messages</p>
                                 </div>
                             ) : (
                                 <div className="space-y-3">
