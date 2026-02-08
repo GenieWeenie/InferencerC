@@ -12,8 +12,6 @@
  * to avoid blocking the main thread for large conversations.
  */
 
-import jsPDF from 'jspdf';
-import { Document, Paragraph, TextRun, HeadingLevel, Packer } from 'docx';
 import { ChatMessage } from '../../shared/types';
 import { ConversationTreeManager } from './conversationTree';
 import { workerManager } from '../services/workerManager';
@@ -151,6 +149,7 @@ export class ExportService {
         messages: ChatMessage[],
         options: ExportOptions
     ): Promise<Blob> {
+        const { default: jsPDF } = await import('jspdf');
         const doc = new jsPDF({
             orientation: 'portrait',
             unit: 'mm',
@@ -238,7 +237,8 @@ export class ExportService {
         messages: ChatMessage[],
         options: ExportOptions
     ): Promise<Blob> {
-        const children: Paragraph[] = [];
+        const { Document, Paragraph, TextRun, HeadingLevel, Packer } = await import('docx');
+        const children: any[] = [];
 
         // Title
         children.push(
