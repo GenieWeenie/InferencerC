@@ -20,11 +20,6 @@ import { analyticsService } from '../services/analytics';
 import { projectContextService, ProjectContext } from '../services/projectContext';
 import { githubService } from '../services/github';
 import { HistoryService } from '../services/history';
-import { notionService } from '../services/notion';
-import { slackService } from '../services/slack';
-import { discordService } from '../services/discord';
-import { emailService } from '../services/email';
-import { calendarService } from '../services/calendar';
 import { autoCategorizationService } from '../services/autoCategorization';
 import { autoTaggingService } from '../services/autoTagging';
 import { workflowsService } from '../services/workflows';
@@ -143,6 +138,14 @@ interface PendingChatPerfBenchmark {
     inputChars: number;
     inputToRenderMs?: number;
     inputToFirstTokenMs?: number;
+}
+
+interface IntegrationAvailability {
+    notion: boolean;
+    slack: boolean;
+    discord: boolean;
+    email: boolean;
+    calendar: boolean;
 }
 
 // Message skeleton component for loading states
@@ -366,6 +369,13 @@ const Chat: React.FC = () => {
     const [showBlockchain, setShowBlockchain] = React.useState(false);
     const [showAIAgents, setShowAIAgents] = React.useState(false);
     const [showFederatedLearning, setShowFederatedLearning] = React.useState(false);
+    const [integrationAvailability, setIntegrationAvailability] = React.useState<IntegrationAvailability>({
+        notion: false,
+        slack: false,
+        discord: false,
+        email: false,
+        calendar: false,
+    });
     const [excludedContextIndices, setExcludedContextIndices] = React.useState<Set<number>>(new Set());
     const [autoSummarizeContext, setAutoSummarizeContext] = React.useState(true);
     const contextWarningTriggered = React.useRef(false);
@@ -522,6 +532,65 @@ const Chat: React.FC = () => {
             // Ignore persistence failures for perf diagnostics.
         }
     }, [recentPerfBenchmarks]);
+
+    const resolveIntegrationAvailability = React.useCallback(async (): Promise<IntegrationAvailability> => {
+        try {
+            const [notionModule, slackModule, discordModule, emailModule, calendarModule] = await Promise.all([
+                import('../services/notion'),
+                import('../services/slack'),
+                import('../services/discord'),
+                import('../services/email'),
+                import('../services/calendar'),
+            ]);
+
+            return {
+                notion: notionModule.notionService.isConfigured(),
+                slack: slackModule.slackService.isConfigured(),
+                discord: discordModule.discordService.isConfigured(),
+                email: emailModule.emailService.isConfigured(),
+                calendar: calendarModule.calendarService.isConfigured(),
+            };
+        } catch {
+            return {
+                notion: false,
+                slack: false,
+                discord: false,
+                email: false,
+                calendar: false,
+            };
+        }
+    }, []);
+
+    React.useEffect(() => {
+        if (history.length === 0) {
+            setIntegrationAvailability({
+                notion: false,
+                slack: false,
+                discord: false,
+                email: false,
+                calendar: false,
+            });
+            return;
+        }
+
+        let cancelled = false;
+        const refresh = async () => {
+            const availability = await resolveIntegrationAvailability();
+            if (!cancelled) {
+                setIntegrationAvailability(availability);
+            }
+        };
+
+        refresh();
+        const handleStorage = () => {
+            refresh();
+        };
+        window.addEventListener('storage', handleStorage);
+        return () => {
+            cancelled = true;
+            window.removeEventListener('storage', handleStorage);
+        };
+    }, [history.length, resolveIntegrationAvailability]);
 
     // Context management state persistence (per session)
     React.useEffect(() => {
@@ -2522,7 +2591,7 @@ const Chat: React.FC = () => {
                             >
                                 <FileText size={14} /> <span>Obsidian</span>
                             </button>
-                            {notionService.isConfigured() && (
+                            {integrationAvailability.notion && (
                                 <button
                                     onClick={async () => {
                                         const session = HistoryService.getSession(sessionId);
@@ -2532,6 +2601,7 @@ const Chat: React.FC = () => {
                                         }
 
                                         try {
+                                            const { notionService } = await import('../services/notion');
                                             const result = await notionService.saveConversation(
                                                 session.title,
                                                 session.messages,
@@ -2561,7 +2631,7 @@ const Chat: React.FC = () => {
                                 <FileText size={14} /> <span>Notion</span>
                             </button>
                             )}
-                            {slackService.isConfigured() && (
+                            {integrationAvailability.slack && (
                                 <button
                                     onClick={async () => {
                                         const session = HistoryService.getSession(sessionId);
@@ -2571,6 +2641,7 @@ const Chat: React.FC = () => {
                                         }
 
                                         try {
+                                            const { slackService } = await import('../services/slack');
                                             const result = await slackService.sendConversation(
                                                 session.title,
                                                 session.messages.map(m => ({
@@ -2594,7 +2665,7 @@ const Chat: React.FC = () => {
                                     <MessageSquare size={14} /> <span>Slack</span>
                                 </button>
                             )}
-                            {discordService.isConfigured() && (
+                            {integrationAvailability.discord && (
                                 <button
                                     onClick={async () => {
                                         const session = HistoryService.getSession(sessionId);
@@ -2604,6 +2675,7 @@ const Chat: React.FC = () => {
                                         }
 
                                         try {
+                                            const { discordService } = await import('../services/discord');
                                             const result = await discordService.sendConversation(
                                                 session.title,
                                                 session.messages.map(m => ({
@@ -2627,7 +2699,7 @@ const Chat: React.FC = () => {
                                     <MessageSquare size={14} /> <span>Discord</span>
                                 </button>
                             )}
-                            {emailService.isConfigured() && (
+                            {integrationAvailability.email && (
                                 <button
                                     onClick={async () => {
                                         const session = HistoryService.getSession(sessionId);
@@ -2637,6 +2709,7 @@ const Chat: React.FC = () => {
                                         }
 
                                         try {
+                                            const { emailService } = await import('../services/email');
                                             const result = await emailService.sendConversation(
                                                 session.title,
                                                 session.messages.map(m => ({
@@ -2660,7 +2733,7 @@ const Chat: React.FC = () => {
                                     <Mail size={14} /> <span>Email</span>
                                 </button>
                             )}
-                            {calendarService.isConfigured() && (
+                            {integrationAvailability.calendar && (
                                 <button
                                     onClick={() => setShowCalendarSchedule(true)}
                                     title="Schedule Reminder"
