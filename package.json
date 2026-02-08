@@ -4,8 +4,10 @@
   "description": "Windows Desktop App for Local LLM Inference",
   "main": "dist/main/index.js",
   "scripts": {
-    "dev": "concurrently -k \"npm run dev:renderer\" \"npm run dev:electron\"",
+    "dev": "concurrently \"npm run dev:renderer\" \"npm run dev:electron\"",
+    "dev:web": "concurrently \"npm run dev:renderer\" \"npm run dev:backend\"",
     "dev:renderer": "vite",
+    "dev:backend": "tsc -p tsconfig.node.json && node dist/server/index.js",
     "dev:electron": "wait-on http://localhost:5173 && tsc -p tsconfig.node.json && electron .",
     "build": "tsc -p tsconfig.node.json && vite build",
     "build:win": "npm run build && electron-builder --win",
