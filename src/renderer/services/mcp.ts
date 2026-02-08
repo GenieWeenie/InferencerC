@@ -23,9 +23,20 @@ declare global {
             checkForUpdates: () => Promise<{ available: boolean; version?: string; error?: string; message?: string }>;
             quitAndInstall: () => Promise<void>;
             onUpdateDownloaded: (callback: (event: any, info: any) => void) => (() => void) | undefined;
+            secureStorageIsAvailable?: () => Promise<boolean>;
+            secureStorageSetItem?: (key: string, value: string) => Promise<{ success: boolean; error?: string }>;
+            secureStorageGetItem?: (key: string) => Promise<{ success: boolean; value?: string | null; error?: string }>;
+            secureStorageRemoveItem?: (key: string) => Promise<{ success: boolean; error?: string }>;
+            checkBackendHealth?: () => Promise<{ online: boolean }>;
             mcpConnect?: (server: any) => Promise<any>;
             mcpDisconnect?: (id: string) => Promise<void>;
-            mcpExecuteTool?: (toolCall: any) => Promise<any>;
+            mcpExecuteTool?: (toolCall: any) => Promise<{
+                success?: boolean;
+                error?: string;
+                result?: any;
+                content?: string;
+                isError?: boolean;
+            }>;
             downloadModel?: (options: any) => Promise<any>;
         };
     }
@@ -302,16 +313,41 @@ class MCPClient {
 
         try {
             if (window.electronAPI?.mcpExecuteTool) {
-                const result = await window.electronAPI.mcpExecuteTool({
+                const response = await window.electronAPI.mcpExecuteTool({
                     serverId: tool.serverId,
                     toolName: toolCall.name,
                     arguments: toolCall.arguments
                 });
 
+                if (response?.success === false) {
+                    return {
+                        toolCallId: toolCall.id,
+                        content: response.error || 'Tool execution failed',
+                        isError: true
+                    };
+                }
+
+                const payload = response?.result ?? response;
+                let content = '';
+                if (typeof payload?.content === 'string') {
+                    content = payload.content;
+                } else if (Array.isArray(payload?.content)) {
+                    content = payload.content
+                        .map((entry: any) => {
+                            if (!entry) return '';
+                            if (entry.type === 'text' && typeof entry.text === 'string') return entry.text;
+                            return JSON.stringify(entry);
+                        })
+                        .filter(Boolean)
+                        .join('\n');
+                } else {
+                    content = JSON.stringify(payload);
+                }
+
                 return {
                     toolCallId: toolCall.id,
-                    content: result.content || JSON.stringify(result),
-                    isError: result.isError
+                    content,
+                    isError: Boolean(payload?.isError)
                 };
             } else {
                 // Mock tool execution for development
@@ -400,7 +436,12 @@ declare global {
             mcpConnect?: (server: MCPServer) => Promise<{ success: boolean; error?: string; tools?: MCPTool[] }>;
             mcpDisconnect?: (serverId: string) => Promise<void>;
             mcpExecuteTool?: (params: { serverId: string; toolName: string; arguments: Record<string, any> }) =>
-                Promise<{ content: string; isError?: boolean }>;
+                Promise<{ success?: boolean; error?: string; result?: any; content?: string; isError?: boolean }>;
+            secureStorageIsAvailable?: () => Promise<boolean>;
+            secureStorageSetItem?: (key: string, value: string) => Promise<{ success: boolean; error?: string }>;
+            secureStorageGetItem?: (key: string) => Promise<{ success: boolean; value?: string | null; error?: string }>;
+            secureStorageRemoveItem?: (key: string) => Promise<{ success: boolean; error?: string }>;
+            checkBackendHealth?: () => Promise<{ online: boolean }>;
             downloadModel?: (params: { modelId: string; fileName: string; url: string; size: number }) => Promise<void>;
         };
     }

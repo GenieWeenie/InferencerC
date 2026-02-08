@@ -8,6 +8,10 @@ import { analyticsService } from '../services/analytics';
 import { webhookService } from '../services/webhooks';
 import { performanceService } from '../services/performance';
 import { crashRecoveryService } from '../services/crashRecovery';
+import { teamWorkspacesService } from '../services/teamWorkspaces';
+import { enterpriseComplianceService } from '../services/enterpriseCompliance';
+import { credentialService } from '../services/credentials';
+import { backendHealthService } from '../services/backendHealth';
 
 export interface ApiLogCallback {
     (log: {
@@ -69,7 +73,39 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         remote: 'checking'
     });
 
-    const openRouterApiKey = localStorage.getItem('openRouterApiKey');
+    const [openRouterApiKey, setOpenRouterApiKey] = useState<string | null>(null);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const refreshOpenRouterKey = async () => {
+            try {
+                const key = await credentialService.getOpenRouterApiKey();
+                if (isMounted) {
+                    setOpenRouterApiKey(key);
+                }
+            } catch (error) {
+                if (isMounted) {
+                    setOpenRouterApiKey(null);
+                }
+            }
+        };
+
+        const handleCredentialUpdate = (event: Event) => {
+            const customEvent = event as CustomEvent<{ key?: string }>;
+            if (!customEvent.detail?.key || customEvent.detail.key === 'openRouterApiKey') {
+                void refreshOpenRouterKey();
+            }
+        };
+
+        void refreshOpenRouterKey();
+        window.addEventListener('credentials-updated', handleCredentialUpdate as EventListener);
+
+        return () => {
+            isMounted = false;
+            window.removeEventListener('credentials-updated', handleCredentialUpdate as EventListener);
+        };
+    }, []);
 
     const handleExpertSelect = (mode: string | null) => {
         setExpertMode(mode);
@@ -106,19 +142,25 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
         const fetchModels = async () => {
             let models: Model[] = [];
-            let localStatus: 'online' | 'offline' = 'offline';
+            let localStatus: 'online' | 'offline' = backendHealthService.isOnline() ? 'online' : 'offline';
             let remoteStatus: 'online' | 'offline' | 'none' = openRouterApiKey ? 'offline' : 'none';
 
-            try {
-                const res = await fetch('http://localhost:3000/v1/models', { signal: AbortSignal.timeout(3000) });
-                const data = await res.json();
-                if (data && Array.isArray(data.data)) {
-                    models = [...models, ...data.data];
-                    localStatus = 'online';
+            if (backendHealthService.isOnline()) {
+                try {
+                    const res = await fetch('http://localhost:3000/v1/models', { signal: AbortSignal.timeout(3000) });
+                    const data = await res.json();
+                    if (data && Array.isArray(data.data)) {
+                        models = [...models, ...data.data];
+                        localStatus = 'online';
+                        backendHealthService.reportRequestResult(true);
+                    }
+                } catch (e) {
+                    localStatus = 'offline';
+                    backendHealthService.reportRequestResult(false);
                 }
-            } catch (e) {
-                console.error("Failed to fetch local models", e);
-                localStatus = 'offline';
+            } else {
+                // Shared health service handles backend recovery probing with backoff.
+                void backendHealthService.checkNow();
             }
 
             if (openRouterApiKey) {
@@ -142,11 +184,14 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                         remoteStatus = 'online';
                     }
                 } catch (e) {
-                    console.error("Failed to fetch OpenRouter models", e);
                     remoteStatus = 'offline';
                 }
             }
-            setAvailableModels(models);
+            const filteredModels = teamWorkspacesService.filterAllowedModels(models);
+            setAvailableModels(filteredModels);
+            if (filteredModels.length === 0) {
+                setCurrentModel('');
+            }
             setConnectionStatus({ local: localStatus, remote: remoteStatus });
 
             // Restore last model selection from localStorage (only on initial load)
@@ -169,6 +214,14 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         // Auto-reconnect / Health check interval
         const interval = setInterval(fetchModels, 30000); // Check every 30s
 
+        const handleWorkspaceChange = () => {
+            fetchModels();
+        };
+
+        if (typeof window !== 'undefined') {
+            window.addEventListener('team-workspace-changed', handleWorkspaceChange);
+        }
+
         setSavedSessions(HistoryService.getAllSessions());
         const lastId = HistoryService.getLastActiveSessionId();
 
@@ -178,7 +231,12 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             createNewSession();
         }
 
-        return () => clearInterval(interval);
+        return () => {
+            clearInterval(interval);
+            if (typeof window !== 'undefined') {
+                window.removeEventListener('team-workspace-changed', handleWorkspaceChange);
+            }
+        };
     }, [openRouterApiKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Separate effect to handle model switching with proper history dependency
@@ -357,6 +415,17 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         } else {
             setInput('');
         }
+
+        enterpriseComplianceService.logEvent({
+            category: 'chat.session',
+            action: 'created',
+            result: 'success',
+            resourceType: 'session',
+            resourceId: newSession.id,
+            details: {
+                modelId: newSession.modelId,
+            },
+        });
     };
 
     const loadSession = (id: string) => {
@@ -432,6 +501,18 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             } else {
                 setInput('');
             }
+
+            enterpriseComplianceService.logEvent({
+                category: 'chat.session',
+                action: 'loaded',
+                result: 'success',
+                resourceType: 'session',
+                resourceId: session.id,
+                details: {
+                    messageCount,
+                    modelId: session.modelId,
+                },
+            });
         }
     };
 
@@ -439,6 +520,14 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         HistoryService.deleteSession(id);
         setSavedSessions(HistoryService.getAllSessions());
         if (id === sessionId) createNewSession();
+        enterpriseComplianceService.logEvent({
+            category: 'chat.session',
+            action: 'deleted',
+            result: 'success',
+            resourceType: 'session',
+            resourceId: id,
+            details: {},
+        });
     };
 
     // Lazy loading: Load message content on demand
@@ -502,8 +591,22 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const content = `[CONTEXT FROM WEB: ${url}]\n\n${data.content}`;
             setHistory(prev => [...prev, { role: 'user', content }]);
             toast.success("Web content added to conversation context.");
+            enterpriseComplianceService.logEvent({
+                category: 'chat.tools',
+                action: 'web_fetch.completed',
+                result: 'success',
+                details: { url },
+                piiFields: ['url'],
+            });
         } catch (err: any) {
             toast.error(err.message);
+            enterpriseComplianceService.logEvent({
+                category: 'chat.tools',
+                action: 'web_fetch.failed',
+                result: 'failure',
+                details: { url, error: err?.message || 'Unknown error' },
+                piiFields: ['url'],
+            });
         } finally {
             setIsFetchingWeb(false);
         }
@@ -803,6 +906,20 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const estimatedTokens = Math.ceil(fullContent.length / 4);
             analyticsService.trackMessage(sessionId, modelId, estimatedTokens);
 
+            enterpriseComplianceService.logEvent({
+                category: 'chat.message',
+                action: 'generation.completed',
+                result: 'success',
+                resourceType: 'session',
+                resourceId: sessionId,
+                details: {
+                    modelId,
+                    tokenEstimate: estimatedTokens,
+                    battleMode,
+                    streamingEnabled,
+                },
+            });
+
             // Trigger webhooks for conversation_complete event
             // Get current session for webhook payload
             const currentSession = HistoryService.getSession(sessionId);
@@ -868,6 +985,17 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
             updateMessageContent(targetIndex, `Error: ${errorMsg}`, false);
             toast.error(errorMsg);
+            enterpriseComplianceService.logEvent({
+                category: 'chat.message',
+                action: 'generation.failed',
+                result: 'failure',
+                resourceType: 'session',
+                resourceId: sessionId,
+                details: {
+                    modelId,
+                    error: errorMsg,
+                },
+            });
         }
     };
 
@@ -891,6 +1019,16 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             return newHistory;
         });
         toast.info("Generation stopped.");
+        enterpriseComplianceService.logEvent({
+            category: 'chat.message',
+            action: 'generation.stopped',
+            result: 'info',
+            resourceType: 'session',
+            resourceId: sessionId,
+            details: {
+                activeControllers: abortControllers.length,
+            },
+        });
     };
 
     const [attachments, setAttachments] = useState<{ id: string, name: string, content: string }[]>([]);
@@ -912,7 +1050,10 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         setImageAttachments(prev => prev.filter(a => a.id !== id));
     };
 
-    const sendMessage = async () => {
+    const sendMessage = async (contextOptions?: {
+        excludedMessageIndices?: number[];
+        contextSummary?: string;
+    }) => {
         if (!input.trim() && attachments.length === 0 && imageAttachments.length === 0) return;
 
         let finalInput = input;
@@ -928,8 +1069,35 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                 // Or change it? Changing it feels better for continuity.
                 setCurrentModel(best);
                 toast.info(`Auto-routed to ${best} (${intent})`);
+                enterpriseComplianceService.logEvent({
+                    category: 'chat.routing',
+                    action: 'auto_route.selected',
+                    result: 'info',
+                    resourceType: 'session',
+                    resourceId: sessionId,
+                    details: {
+                        fromModel: currentModel,
+                        toModel: best,
+                        intent,
+                    },
+                });
             }
         }
+
+        enterpriseComplianceService.logEvent({
+            category: 'chat.message',
+            action: 'send.requested',
+            result: 'info',
+            resourceType: 'session',
+            resourceId: sessionId,
+            details: {
+                modelId: modelToUse,
+                battleMode,
+                attachmentCount: attachments.length,
+                imageCount: imageAttachments.length,
+                excludedContextCount: contextOptions?.excludedMessageIndices?.length || 0,
+            },
+        });
 
         // Append text attachments to the user message transparently
         if (attachments.length > 0) {
@@ -971,9 +1139,15 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             userMessageContent = contentParts;
         }
 
+        const excludedIndices = new Set(contextOptions?.excludedMessageIndices || []);
+        const contextHistory = history.filter((_, index) => !excludedIndices.has(index));
+
         const baseMessages: Message[] = [
             { role: 'system', content: finalSystemPrompt },
-            ...history.map(m => ({ role: m.role, content: m.content })),
+            ...(contextOptions?.contextSummary
+                ? [{ role: 'system' as const, content: contextOptions.contextSummary }]
+                : []),
+            ...contextHistory.map(m => ({ role: m.role, content: m.content })),
             { role: 'user', content: userMessageContent }
         ];
 
@@ -1113,10 +1287,26 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         renameSession: (id: string, newTitle: string) => {
             HistoryService.renameSession(id, newTitle);
             setSavedSessions(HistoryService.getAllSessions());
+            enterpriseComplianceService.logEvent({
+                category: 'chat.session',
+                action: 'renamed',
+                result: 'success',
+                resourceType: 'session',
+                resourceId: id,
+                details: { newTitle },
+            });
         },
         togglePinSession: (id: string) => {
             HistoryService.togglePinSession(id);
             setSavedSessions(HistoryService.getAllSessions());
+            enterpriseComplianceService.logEvent({
+                category: 'chat.session',
+                action: 'pin_toggled',
+                result: 'success',
+                resourceType: 'session',
+                resourceId: id,
+                details: {},
+            });
         },
         executeWebFetch,
         deleteMessage,

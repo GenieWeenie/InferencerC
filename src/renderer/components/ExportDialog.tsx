@@ -9,7 +9,7 @@
  * - JSON: Raw data export
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -28,6 +28,10 @@ import {
 } from 'lucide-react';
 import { ExportService, ExportFormat, ExportOptions, ExportResult } from '../lib/exportService';
 import { ChatMessage } from '../../shared/types';
+import {
+    pluginSystemService,
+    RegisteredPluginExportFormat,
+} from '../services/pluginSystem';
 
 interface ExportDialogProps {
     isOpen: boolean;
@@ -44,7 +48,7 @@ interface FormatOption {
     color: string;
 }
 
-const formatOptions: FormatOption[] = [
+const coreFormatOptions: FormatOption[] = [
     {
         id: 'pdf',
         label: 'PDF',
@@ -89,6 +93,7 @@ const ExportDialog: React.FC<ExportDialogProps> = ({
     sessionTitle = 'Conversation'
 }) => {
     const [selectedFormat, setSelectedFormat] = useState<ExportFormat>('pdf');
+    const [pluginFormats, setPluginFormats] = useState<RegisteredPluginExportFormat[]>([]);
     const [title, setTitle] = useState(sessionTitle);
     const [includeMetadata, setIncludeMetadata] = useState(true);
     const [includeTimestamps, setIncludeTimestamps] = useState(true);
@@ -97,6 +102,36 @@ const ExportDialog: React.FC<ExportDialogProps> = ({
     const [isExporting, setIsExporting] = useState(false);
     const [exportResult, setExportResult] = useState<ExportResult | null>(null);
     const [showAdvanced, setShowAdvanced] = useState(false);
+
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const syncPluginFormats = () => {
+            setPluginFormats(pluginSystemService.getRegisteredExportFormats());
+        };
+
+        syncPluginFormats();
+        const unsubscribe = pluginSystemService.subscribe(() => syncPluginFormats());
+        return unsubscribe;
+    }, [isOpen]);
+
+    const formatOptions = useMemo<FormatOption[]>(() => {
+        const pluginOptions: FormatOption[] = pluginFormats.map(pluginFormat => ({
+            id: pluginFormat.runtimeId as ExportFormat,
+            label: `${pluginFormat.format.label} (Plugin)`,
+            description: `${pluginFormat.format.description} • ${pluginFormat.pluginName}`,
+            icon: FileCode,
+            color: 'text-cyan-300 bg-cyan-400/10 border-cyan-400/20',
+        }));
+
+        return [...coreFormatOptions, ...pluginOptions];
+    }, [pluginFormats]);
+
+    useEffect(() => {
+        if (!formatOptions.some(format => format.id === selectedFormat)) {
+            setSelectedFormat(formatOptions[0]?.id || 'pdf');
+        }
+    }, [formatOptions, selectedFormat]);
 
     const handleExport = async () => {
         setIsExporting(true);

@@ -7,6 +7,7 @@
  */
 
 import { workerManager } from './workerManager';
+import { secureStorageService } from './secureStorage';
 
 class EncryptionService {
   private static readonly ALGORITHM = 'AES-GCM';
@@ -20,7 +21,7 @@ class EncryptionService {
    */
   private async getKey(): Promise<CryptoKey> {
     // Try to get existing key from storage
-    const storedKey = localStorage.getItem(EncryptionService.KEY_STORAGE);
+    const storedKey = await this.getKeyBase64();
     
     if (storedKey) {
       // Import existing key
@@ -48,7 +49,8 @@ class EncryptionService {
     const exportedKey = await crypto.subtle.exportKey('raw', key);
     const keyArray = new Uint8Array(exportedKey);
     const keyBase64 = btoa(String.fromCharCode(...keyArray));
-    localStorage.setItem(EncryptionService.KEY_STORAGE, keyBase64);
+    await secureStorageService.setItem(EncryptionService.KEY_STORAGE, keyBase64);
+    localStorage.removeItem(EncryptionService.KEY_STORAGE);
 
     return key;
   }
@@ -138,14 +140,16 @@ class EncryptionService {
    * Clear encryption key (for secure wipe)
    */
   clearKey(): void {
+    void secureStorageService.removeItem(EncryptionService.KEY_STORAGE);
     localStorage.removeItem(EncryptionService.KEY_STORAGE);
   }
 
   /**
    * Get the current encryption key as base64 (for worker)
    */
-  private getKeyBase64(): string | null {
-    return localStorage.getItem(EncryptionService.KEY_STORAGE);
+  private async getKeyBase64(): Promise<string | null> {
+    await secureStorageService.migrateFromLocalStorage(EncryptionService.KEY_STORAGE);
+    return secureStorageService.getItem(EncryptionService.KEY_STORAGE);
   }
 
   /**
@@ -170,11 +174,11 @@ class EncryptionService {
     if (!plaintext) return '';
 
     // Ensure we have a key
-    let keyBase64 = this.getKeyBase64();
+    let keyBase64 = await this.getKeyBase64();
     if (!keyBase64) {
-      // Generate key first (on main thread to store in localStorage)
+      // Generate key first and persist in secure storage
       await this.getKey();
-      keyBase64 = this.getKeyBase64();
+      keyBase64 = await this.getKeyBase64();
     }
 
     if (!keyBase64) {
@@ -200,7 +204,7 @@ class EncryptionService {
   async decryptWithWorker(ciphertext: string): Promise<string> {
     if (!ciphertext) return '';
 
-    const keyBase64 = this.getKeyBase64();
+    const keyBase64 = await this.getKeyBase64();
     if (!keyBase64) {
       throw new Error('No encryption key available');
     }

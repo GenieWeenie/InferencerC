@@ -16,7 +16,7 @@ interface MessageContentProps {
     content: string;
     isUser: boolean;
     mcpAvailable?: boolean;
-    onInsertToFile?: (code: string, language: string) => void;
+    onInsertToFile?: (code: string, language: string, filePath: string) => void;
     isStreaming?: boolean;
     isLazyLoaded?: boolean;
     onLoadContent?: () => void;
@@ -206,7 +206,7 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
         }
 
         if (onInsertToFile) {
-            onInsertToFile(codeString, language);
+            onInsertToFile(codeString, language, filePath.trim());
             toast.success(`Inserting code to ${filePath}...`);
             setShowFilePathInput(null);
             setFilePath('');

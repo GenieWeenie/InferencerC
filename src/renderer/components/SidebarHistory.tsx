@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Clock, MessageSquare, Trash2, Calendar, Archive, Pin, Edit2, Search, X, Check, Filter } from 'lucide-react';
 import { ChatSession } from '../services/history';
 import SkeletonLoader from './SkeletonLoader';
+import { useSwipeNavigation } from '../hooks/useGestures';
 
 interface SidebarHistoryProps {
     sessions: ChatSession[];
@@ -25,6 +26,9 @@ const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessio
     const [showDateFilter, setShowDateFilter] = useState(false);
     const [dateRangeStart, setDateRangeStart] = useState<string>('');
     const [dateRangeEnd, setDateRangeEnd] = useState<string>('');
+    const [swipeIndicator, setSwipeIndicator] = useState<'up' | 'down' | null>(null);
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const swipeIndicatorTimerRef = useRef<number | null>(null);
 
     // Get unique models from sessions
     const availableModels = useMemo(() => {
@@ -122,6 +126,57 @@ const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessio
         return groups;
     }, [filteredSessions]);
 
+    const orderedVisibleSessions = useMemo(
+        () => [
+            ...groupedSessions['Pinned'],
+            ...groupedSessions['Today'],
+            ...groupedSessions['Yesterday'],
+            ...groupedSessions['Previous 7 Days'],
+            ...groupedSessions['Older'],
+        ],
+        [groupedSessions]
+    );
+
+    useEffect(() => {
+        return () => {
+            if (swipeIndicatorTimerRef.current !== null) {
+                window.clearTimeout(swipeIndicatorTimerRef.current);
+            }
+        };
+    }, []);
+
+    useSwipeNavigation((event) => {
+        const targetNode = event.target as Node | null;
+        if (!targetNode || !containerRef.current?.contains(targetNode)) {
+            return;
+        }
+
+        if (event.direction !== 'up' && event.direction !== 'down') {
+            return;
+        }
+
+        const currentIndex = orderedVisibleSessions.findIndex(s => s.id === currentSessionId);
+        if (currentIndex === -1 || orderedVisibleSessions.length <= 1) {
+            return;
+        }
+
+        const nextIndex =
+            event.direction === 'up'
+                ? Math.min(currentIndex + 1, orderedVisibleSessions.length - 1)
+                : Math.max(currentIndex - 1, 0);
+
+        if (nextIndex === currentIndex) {
+            return;
+        }
+
+        setSwipeIndicator(event.direction);
+        if (swipeIndicatorTimerRef.current !== null) {
+            window.clearTimeout(swipeIndicatorTimerRef.current);
+        }
+        swipeIndicatorTimerRef.current = window.setTimeout(() => setSwipeIndicator(null), 700);
+        onLoadSession(orderedVisibleSessions[nextIndex].id);
+    }, !isLoading);
+
     const handleStartRename = (e: React.MouseEvent, session: ChatSession) => {
         e.stopPropagation();
         setEditingId(session.id);
@@ -180,13 +235,13 @@ const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessio
                 {/* Hover Actions (Pinned items show unpin, others show pin) */}
                 {!isEditing && (
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/95 rounded-lg p-1 shadow-lg border border-slate-700/50 backdrop-blur-sm">
-                        <button onClick={(e) => { e.stopPropagation(); onTogglePinSession(s.id); }} className={`p-1.5 hover:bg-slate-700 rounded transition-colors ${s.pinned ? 'text-primary' : 'text-slate-500 hover:text-slate-300'}`} title={s.pinned ? "Unpin" : "Pin"}>
+                        <button onClick={(e) => { e.stopPropagation(); onTogglePinSession(s.id); }} className={`touch-target p-1.5 hover:bg-slate-700 rounded transition-colors ${s.pinned ? 'text-primary' : 'text-slate-500 hover:text-slate-300'}`} title={s.pinned ? "Unpin" : "Pin"}>
                             <Pin size={12} fill={s.pinned ? "currentColor" : "none"} />
                         </button>
-                        <button onClick={(e) => handleStartRename(e, s)} className="p-1.5 text-slate-500 hover:text-blue-400 hover:bg-slate-700 rounded transition-colors" title="Rename">
+                        <button onClick={(e) => handleStartRename(e, s)} className="touch-target p-1.5 text-slate-500 hover:text-blue-400 hover:bg-slate-700 rounded transition-colors" title="Rename">
                             <Edit2 size={12} />
                         </button>
-                        <button onClick={(e) => { e.stopPropagation(); onDeleteSession(s.id); }} className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded transition-colors" title="Delete">
+                        <button onClick={(e) => { e.stopPropagation(); onDeleteSession(s.id); }} className="touch-target p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded transition-colors" title="Delete">
                             <Trash2 size={12} />
                         </button>
                     </div>
@@ -241,7 +296,12 @@ const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessio
     };
 
     return (
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div ref={containerRef} className="flex-1 flex flex-col overflow-hidden relative">
+            {swipeIndicator && (
+                <div className="absolute top-3 right-3 z-20 px-2 py-1 rounded bg-primary/20 border border-primary/40 text-primary text-xs font-semibold">
+                    {swipeIndicator === 'up' ? '↑ Next chat' : '↓ Previous chat'}
+                </div>
+            )}
             {/* Search Bar */}
             <div className="p-3 border-b border-slate-800/50 space-y-2">
                 <div className="relative">
@@ -256,7 +316,7 @@ const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessio
                     {searchQuery && (
                         <button
                             onClick={() => setSearchQuery('')}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 p-1"
+                            className="touch-target absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 p-1"
                         >
                             <X size={12} />
                         </button>
@@ -284,7 +344,7 @@ const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessio
                     {/* Date Filter Toggle */}
                     <button
                         onClick={() => setShowDateFilter(!showDateFilter)}
-                        className={`px-2 py-2 rounded-lg transition-colors border ${
+                        className={`touch-target px-2 py-2 rounded-lg transition-colors border ${
                             showDateFilter || dateRangeStart || dateRangeEnd
                                 ? 'bg-primary/20 border-primary/50 text-primary'
                                 : 'bg-slate-800/50 border-slate-700/50 text-slate-400 hover:text-slate-300'
@@ -346,7 +406,7 @@ const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessio
                                     setDateRangeStart(today.toISOString().split('T')[0]);
                                     setDateRangeEnd(today.toISOString().split('T')[0]);
                                 }}
-                                className="px-2 py-0.5 text-[10px] bg-slate-700/50 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors"
+                                className="touch-target px-2 py-0.5 text-[10px] bg-slate-700/50 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors"
                             >
                                 Today
                             </button>
@@ -358,7 +418,7 @@ const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessio
                                     setDateRangeStart(yesterday.toISOString().split('T')[0]);
                                     setDateRangeEnd(today.toISOString().split('T')[0]);
                                 }}
-                                className="px-2 py-0.5 text-[10px] bg-slate-700/50 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors"
+                                className="touch-target px-2 py-0.5 text-[10px] bg-slate-700/50 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors"
                             >
                                 Last 2 Days
                             </button>
@@ -370,7 +430,7 @@ const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessio
                                     setDateRangeStart(weekAgo.toISOString().split('T')[0]);
                                     setDateRangeEnd(today.toISOString().split('T')[0]);
                                 }}
-                                className="px-2 py-0.5 text-[10px] bg-slate-700/50 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors"
+                                className="touch-target px-2 py-0.5 text-[10px] bg-slate-700/50 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors"
                             >
                                 Last 7 Days
                             </button>
@@ -382,7 +442,7 @@ const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessio
                                     setDateRangeStart(monthAgo.toISOString().split('T')[0]);
                                     setDateRangeEnd(today.toISOString().split('T')[0]);
                                 }}
-                                className="px-2 py-0.5 text-[10px] bg-slate-700/50 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors"
+                                className="touch-target px-2 py-0.5 text-[10px] bg-slate-700/50 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors"
                             >
                                 Last 30 Days
                             </button>

@@ -263,11 +263,13 @@ export const HistoryService = {
       const session = HistoryService.getSession(id);
       if (!session) return null;
 
-      // Note: Full encryption implementation would decrypt messages here
-      // For MVP, we'll just mark it as decrypted
+      const decryptedJson = await encryptionService.decrypt(encryptedData);
+      const decryptedMessages = JSON.parse(decryptedJson) as ChatMessage[];
+
       return {
         ...session,
-        encrypted: false, // Mark as decrypted for this session
+        messages: decryptedMessages,
+        encrypted: false, // Decrypted for the current runtime session
       };
     } catch (error) {
       console.error('Failed to decrypt session:', error);

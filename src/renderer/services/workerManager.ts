@@ -60,6 +60,7 @@ export interface SearchResult {
     matchEnd: number;
     relevanceScore: number;
     timestamp: number;
+    isInCollapsedSection?: boolean;
     context?: {
         before?: string;
         after?: string;

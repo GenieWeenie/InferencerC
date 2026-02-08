@@ -17,8 +17,10 @@ import { Document, Paragraph, TextRun, HeadingLevel, Packer } from 'docx';
 import { ChatMessage } from '../../shared/types';
 import { ConversationTreeManager } from './conversationTree';
 import { workerManager } from '../services/workerManager';
+import { pluginSystemService } from '../services/pluginSystem';
 
-export type ExportFormat = 'pdf' | 'docx' | 'html' | 'markdown' | 'json';
+export type CoreExportFormat = 'pdf' | 'docx' | 'html' | 'markdown' | 'json';
+export type ExportFormat = CoreExportFormat | `plugin:${string}`;
 
 // Formats that can be processed in a Web Worker
 type WorkerExportFormat = 'html' | 'markdown' | 'json';
@@ -57,7 +59,8 @@ export class ExportService {
     ): Promise<ExportResult> {
         const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
         const title = options.title || 'Conversation';
-        const fileName = `${title}_${timestamp}.${options.format}`;
+        const fileExtension = this.getFileExtension(options.format);
+        const fileName = `${title}_${timestamp}.${fileExtension}`;
 
         try {
             let blob: Blob;
@@ -113,6 +116,18 @@ export class ExportService {
         messages: ChatMessage[],
         options: ExportOptions
     ): Promise<Blob> {
+        if (pluginSystemService.isRegisteredExportFormat(options.format)) {
+            const pluginResult = await pluginSystemService.exportWithRegisteredFormat(
+                options.format,
+                messages,
+                {
+                    title: options.title,
+                    includeMetadata: options.includeMetadata,
+                }
+            );
+            return new Blob([pluginResult.content], { type: pluginResult.mimeType });
+        }
+
         switch (options.format) {
             case 'pdf':
                 return this.exportToPDF(messages, options);
@@ -585,6 +600,10 @@ export class ExportService {
     static estimateFileSize(messages: ChatMessage[], format: ExportFormat): number {
         const totalChars = messages.reduce((sum, msg) => sum + msg.content.length, 0);
 
+        if (pluginSystemService.isRegisteredExportFormat(format)) {
+            return Math.ceil((totalChars * 1.1) / 1024);
+        }
+
         switch (format) {
             case 'pdf':
                 return Math.ceil(totalChars / 500); // Rough estimate
@@ -599,5 +618,17 @@ export class ExportService {
             default:
                 return 0;
         }
+    }
+
+    private static getFileExtension(format: ExportFormat): string {
+        if (pluginSystemService.isRegisteredExportFormat(format)) {
+            const pluginFormat = pluginSystemService
+                .getRegisteredExportFormats()
+                .find(entry => entry.runtimeId === format);
+            if (pluginFormat) {
+                return pluginFormat.format.fileExtension;
+            }
+        }
+        return format;
     }
 }

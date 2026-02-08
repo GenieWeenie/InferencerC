@@ -3,6 +3,8 @@
  * Handles saving conversations to Notion pages
  */
 
+import { credentialService } from './credentials';
+
 export interface NotionPage {
   id: string;
   url: string;
@@ -17,19 +19,24 @@ class NotionService {
   /**
    * Initialize with API key and database ID
    */
-  setConfig(apiKey: string, databaseId: string): void {
-    this.apiKey = apiKey;
+  async setConfig(apiKey: string, databaseId: string): Promise<void> {
+    const trimmedApiKey = apiKey.trim();
+    this.apiKey = trimmedApiKey || null;
     this.databaseId = databaseId;
-    localStorage.setItem('notion_api_key', apiKey);
+    if (trimmedApiKey) {
+      await credentialService.setNotionApiKey(trimmedApiKey);
+    } else {
+      await credentialService.clearNotionApiKey();
+    }
     localStorage.setItem('notion_database_id', databaseId);
   }
 
   /**
    * Get stored API key
    */
-  getApiKey(): string | null {
+  async getApiKey(): Promise<string | null> {
     if (!this.apiKey) {
-      this.apiKey = localStorage.getItem('notion_api_key');
+      this.apiKey = await credentialService.getNotionApiKey();
     }
     return this.apiKey;
   }
@@ -47,10 +54,10 @@ class NotionService {
   /**
    * Clear configuration
    */
-  clearConfig(): void {
+  async clearConfig(): Promise<void> {
     this.apiKey = null;
     this.databaseId = null;
-    localStorage.removeItem('notion_api_key');
+    await credentialService.clearNotionApiKey();
     localStorage.removeItem('notion_database_id');
   }
 
@@ -58,14 +65,14 @@ class NotionService {
    * Check if service is configured
    */
   isConfigured(): boolean {
-    return !!(this.getApiKey() && this.getDatabaseId());
+    return Boolean((this.apiKey || credentialService.hasNotionApiKey()) && this.getDatabaseId());
   }
 
   /**
    * Get headers for API requests
    */
-  private getHeaders(): HeadersInit {
-    const key = this.getApiKey();
+  private async getHeaders(): Promise<HeadersInit> {
+    const key = await this.getApiKey();
     if (!key) {
       throw new Error('Notion API key not configured');
     }
@@ -227,7 +234,7 @@ class NotionService {
       // Create page in database
       const response = await fetch(`${this.baseUrl}/pages`, {
         method: 'POST',
-        headers: this.getHeaders(),
+        headers: await this.getHeaders(),
         body: JSON.stringify({
           parent: { database_id: dbId },
           properties: {
@@ -260,7 +267,7 @@ class NotionService {
           const chunk = remainingBlocks.slice(i, i + 100);
           await fetch(`${this.baseUrl}/blocks/${page.id}/children`, {
             method: 'PATCH',
-            headers: this.getHeaders(),
+            headers: await this.getHeaders(),
             body: JSON.stringify({ children: chunk }),
           });
         }

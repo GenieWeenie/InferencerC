@@ -8,6 +8,7 @@ export interface AccessibilityConfig {
     reducedMotion: boolean;
     highContrast: boolean;
     fontSize: 'small' | 'medium' | 'large' | 'xlarge';
+    touchTargetSize: 'standard' | 'large' | 'xlarge';
     screenReader: boolean;
     keyboardNavigation: boolean;
     focusVisible: boolean;
@@ -47,21 +48,22 @@ export class AccessibilityService {
         const config = this.getConfig();
 
         // Apply reduced motion
-        if (config.reducedMotion) {
-            document.documentElement.style.setProperty('--motion-reduce', '1');
-        }
+        document.documentElement.setAttribute('data-motion-reduce', config.reducedMotion ? '1' : '0');
 
         // Apply high contrast
-        if (config.highContrast) {
-            document.documentElement.classList.add('high-contrast');
-        }
+        document.documentElement.classList.toggle('high-contrast', config.highContrast);
 
         // Apply font size
         document.documentElement.setAttribute('data-font-size', config.fontSize);
 
+        // Apply touch target size
+        document.documentElement.setAttribute('data-touch-target-size', config.touchTargetSize);
+
         // Apply color blind mode
         if (config.colorBlindMode !== 'none') {
             document.documentElement.setAttribute('data-color-blind', config.colorBlindMode);
+        } else {
+            document.documentElement.removeAttribute('data-color-blind');
         }
     }
 
@@ -69,25 +71,31 @@ export class AccessibilityService {
      * Get accessibility configuration
      */
     getConfig(): AccessibilityConfig {
-        try {
-            const stored = localStorage.getItem(this.STORAGE_KEY);
-            if (stored) {
-                return JSON.parse(stored);
-            }
-        } catch (error) {
-            console.error('Failed to load accessibility config:', error);
-        }
-
-        return {
+        const defaults: AccessibilityConfig = {
             reducedMotion: false,
             highContrast: false,
             fontSize: 'medium',
+            touchTargetSize: 'standard',
             screenReader: true,
             keyboardNavigation: true,
             focusVisible: true,
             ariaLabels: true,
             colorBlindMode: 'none',
         };
+
+        try {
+            const stored = localStorage.getItem(this.STORAGE_KEY);
+            if (stored) {
+                return {
+                    ...defaults,
+                    ...JSON.parse(stored),
+                };
+            }
+        } catch (error) {
+            console.error('Failed to load accessibility config:', error);
+        }
+
+        return defaults;
     }
 
     /**

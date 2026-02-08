@@ -11,6 +11,7 @@ interface InvertedIndex {
     version: number;
     updatedAt: number;
     terms: Record<string, string[]>; // term -> sessionIds
+    sessionTerms: Record<string, string[]>; // sessionId -> terms
 }
 
 const INDEX_STORAGE_KEY = 'app_search_index';
@@ -29,11 +30,19 @@ export const SearchIndexService = {
     getIndex: (): InvertedIndex => {
         try {
             const raw = localStorage.getItem(INDEX_STORAGE_KEY);
-            if (raw) return JSON.parse(raw);
+            if (raw) {
+                const parsed = JSON.parse(raw) as Partial<InvertedIndex>;
+                return {
+                    version: parsed.version || 1,
+                    updatedAt: parsed.updatedAt || Date.now(),
+                    terms: parsed.terms || {},
+                    sessionTerms: parsed.sessionTerms || {},
+                };
+            }
         } catch (e) {
             console.error('Failed to load search index', e);
         }
-        return { version: 1, updatedAt: Date.now(), terms: {} };
+        return { version: 1, updatedAt: Date.now(), terms: {}, sessionTerms: {} };
     },
 
     /**
@@ -66,12 +75,9 @@ export const SearchIndexService = {
         const index = SearchIndexService.getIndex();
         const sessionId = session.id;
 
-        // 1. Remove existing references to this session (cleanup mainly needed if terms change drastically, 
-        // but for simplicity we just add new ones. Over time this might leave stale refs for terms no longer in session)
-        // Optimization: Ideally we'd remove invalid refs. For now, we'll implement 'removeSession' logic first inside here? 
-        // No, that's expensive. Index is additive. We can prune later or simple overwrite?
-        // Let's implement fully "clean then add" methodology.
-        SearchIndexService._removeSessionFromIndex(index, sessionId);
+        // Remove this session from only the terms it previously owned.
+        const previousTerms = index.sessionTerms[sessionId] || [];
+        SearchIndexService._removeSessionFromIndex(index, sessionId, previousTerms);
 
         // 2. Extract all text
         let fullText = session.title + ' ';
@@ -93,6 +99,7 @@ export const SearchIndexService = {
                 index.terms[term].push(sessionId);
             }
         });
+        index.sessionTerms[sessionId] = Array.from(terms);
 
         SearchIndexService.saveIndex(index);
     },
@@ -102,15 +109,19 @@ export const SearchIndexService = {
      */
     removeSession: (sessionId: string) => {
         const index = SearchIndexService.getIndex();
-        SearchIndexService._removeSessionFromIndex(index, sessionId);
+        const previousTerms = index.sessionTerms[sessionId] || [];
+        SearchIndexService._removeSessionFromIndex(index, sessionId, previousTerms);
+        delete index.sessionTerms[sessionId];
         SearchIndexService.saveIndex(index);
     },
 
     /**
      * Internal helper to remove session from index object
      */
-    _removeSessionFromIndex: (index: InvertedIndex, sessionId: string) => {
-        Object.keys(index.terms).forEach(term => {
+    _removeSessionFromIndex: (index: InvertedIndex, sessionId: string, termsHint?: string[]) => {
+        const termsToScan = termsHint && termsHint.length > 0 ? termsHint : Object.keys(index.terms);
+        termsToScan.forEach(term => {
+            if (!index.terms[term]) return;
             index.terms[term] = index.terms[term].filter(id => id !== sessionId);
             if (index.terms[term].length === 0) {
                 delete index.terms[term];
@@ -157,7 +168,7 @@ export const SearchIndexService = {
      * Note: This assumes HistoryService is available and updated to return all sessions
      */
     rebuildIndex: (sessions: ChatSession[]) => {
-        const index: InvertedIndex = { version: 1, updatedAt: Date.now(), terms: {} };
+        const index: InvertedIndex = { version: 1, updatedAt: Date.now(), terms: {}, sessionTerms: {} };
 
         sessions.forEach(session => {
             // Tokenize
@@ -169,6 +180,7 @@ export const SearchIndexService = {
             });
 
             const terms = new Set(SearchIndexService.tokenize(fullText));
+            index.sessionTerms[session.id] = Array.from(terms);
 
             terms.forEach(term => {
                 if (!index.terms[term]) {

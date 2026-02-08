@@ -3,6 +3,29 @@
  *
  * Full plugin system with API for extending InferencerC functionality
  */
+import type { CommandCategory } from '../lib/commandRegistry';
+import type { ChatMessage } from '../../shared/types';
+
+const VALID_PERMISSIONS = new Set<PluginPermission['type']>([
+    'read-conversations',
+    'write-conversations',
+    'access-files',
+    'execute-code',
+    'network-access',
+    'storage',
+]);
+
+const VALID_COMMAND_CATEGORIES = new Set<CommandCategory>([
+    'Navigation',
+    'Actions',
+    'Editing',
+    'Settings',
+    'Models',
+    'Sessions',
+    'Export',
+    'View',
+    'Help',
+]);
 
 export interface PluginManifest {
     id: string;
@@ -16,11 +39,40 @@ export interface PluginManifest {
     icon?: string;
     homepage?: string;
     repository?: string;
+    commands?: PluginCommandDefinition[];
+    exportFormats?: PluginExportFormatDefinition[];
+    uiExtensions?: PluginUIExtension[];
 }
 
 export interface PluginPermission {
     type: 'read-conversations' | 'write-conversations' | 'access-files' | 'execute-code' | 'network-access' | 'storage';
     scope?: string; // Optional scope restriction
+}
+
+export interface PluginCommandDefinition {
+    id: string;
+    label: string;
+    description?: string;
+    keywords?: string[];
+    category?: CommandCategory;
+}
+
+export type PluginExportStrategy = 'plain-text' | 'jsonl' | 'markdown-transcript';
+
+export interface PluginExportFormatDefinition {
+    id: string;
+    label: string;
+    description: string;
+    fileExtension: string;
+    mimeType: string;
+    strategy?: PluginExportStrategy;
+}
+
+export interface PluginUIExtension {
+    id: string;
+    type: 'settings-section' | 'chat-panel' | 'toolbar-action';
+    title: string;
+    description?: string;
 }
 
 export interface Plugin {
@@ -82,15 +134,48 @@ export interface PluginAPI {
 export interface PluginHook {
     name: string;
     handler: (...args: unknown[]) => unknown | Promise<unknown>;
+    pluginId?: string;
     priority?: number;
 }
+
+export interface RegisteredPluginCommand {
+    runtimeId: string;
+    pluginId: string;
+    pluginName: string;
+    command: PluginCommandDefinition;
+}
+
+export interface RegisteredPluginExportFormat {
+    runtimeId: string;
+    pluginId: string;
+    pluginName: string;
+    format: PluginExportFormatDefinition;
+}
+
+export interface PluginExportResult {
+    content: string;
+    mimeType: string;
+    fileExtension: string;
+}
+
+type PluginEventType = 'installed' | 'updated' | 'uninstalled' | 'enabled' | 'disabled';
+
+export interface PluginChangeEvent {
+    type: PluginEventType;
+    pluginId: string;
+}
+
+type PluginEventListener = (event: PluginChangeEvent) => void;
 
 export class PluginSystemService {
     private static instance: PluginSystemService;
     private plugins: Map<string, Plugin> = new Map();
     private hooks: Map<string, PluginHook[]> = new Map();
+    private listeners: Set<PluginEventListener> = new Set();
+    private registeredCommands: Map<string, RegisteredPluginCommand> = new Map();
+    private registeredExportFormats: Map<string, RegisteredPluginExportFormat> = new Map();
+    private memoryStorage: Map<string, string> = new Map();
     private readonly STORAGE_KEY = 'plugins';
-    private readonly PLUGINS_DIR = 'plugins'; // Relative to app data
 
     private constructor() {
         this.loadPlugins();
@@ -108,11 +193,18 @@ export class PluginSystemService {
      */
     private loadPlugins(): void {
         try {
-            const stored = localStorage.getItem(this.STORAGE_KEY);
+            const stored = this.storageGet(this.STORAGE_KEY);
             if (stored) {
-                const pluginData: Plugin[] = JSON.parse(stored);
+                const pluginData: Array<Omit<Plugin, 'instance'>> = JSON.parse(stored);
                 pluginData.forEach(plugin => {
-                    this.plugins.set(plugin.manifest.id, plugin);
+                    const hydrated: Plugin = {
+                        ...plugin,
+                        manifest: this.normalizeManifest(plugin.manifest),
+                    };
+                    this.plugins.set(hydrated.manifest.id, hydrated);
+                    if (hydrated.enabled) {
+                        this.registerPluginContributions(hydrated);
+                    }
                 });
             }
         } catch (error) {
@@ -125,26 +217,135 @@ export class PluginSystemService {
      */
     private savePlugins(): void {
         try {
-            const plugins = Array.from(this.plugins.values());
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(plugins));
+            const plugins = Array.from(this.plugins.values()).map(({ instance: _instance, ...plugin }) => plugin);
+            this.storageSet(this.STORAGE_KEY, JSON.stringify(plugins));
         } catch (error) {
             console.error('Failed to save plugins:', error);
         }
+    }
+
+    private hasUsableLocalStorage(): boolean {
+        const candidate = (globalThis as Record<string, unknown>).localStorage as Record<string, unknown> | undefined;
+        return Boolean(
+            candidate &&
+            typeof candidate.getItem === 'function' &&
+            typeof candidate.setItem === 'function' &&
+            typeof candidate.removeItem === 'function' &&
+            typeof candidate.key === 'function'
+        );
+    }
+
+    private storageGet(key: string): string | null {
+        if (this.hasUsableLocalStorage()) {
+            return (globalThis.localStorage as Storage).getItem(key);
+        }
+        return this.memoryStorage.has(key) ? this.memoryStorage.get(key)! : null;
+    }
+
+    private storageSet(key: string, value: string): void {
+        if (this.hasUsableLocalStorage()) {
+            (globalThis.localStorage as Storage).setItem(key, value);
+            return;
+        }
+        this.memoryStorage.set(key, value);
+    }
+
+    private storageRemove(key: string): void {
+        if (this.hasUsableLocalStorage()) {
+            (globalThis.localStorage as Storage).removeItem(key);
+            return;
+        }
+        this.memoryStorage.delete(key);
+    }
+
+    private storageKeys(): string[] {
+        if (this.hasUsableLocalStorage()) {
+            const storage = globalThis.localStorage as Storage;
+            const keys: string[] = [];
+            for (let i = 0; i < storage.length; i++) {
+                const key = storage.key(i);
+                if (key) keys.push(key);
+            }
+            return keys;
+        }
+        return Array.from(this.memoryStorage.keys());
+    }
+
+    /**
+     * Subscribe to plugin lifecycle updates
+     */
+    subscribe(listener: PluginEventListener): () => void {
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+    }
+
+    private emitChange(type: PluginEventType, pluginId: string): void {
+        this.listeners.forEach(listener => listener({ type, pluginId }));
+    }
+
+    private normalizeManifest(manifest: PluginManifest): PluginManifest {
+        return {
+            ...manifest,
+            apiVersion: manifest.apiVersion || '1.0.0',
+            permissions: manifest.permissions || [],
+            commands: manifest.commands || [],
+            exportFormats: manifest.exportFormats || [],
+            uiExtensions: manifest.uiExtensions || [],
+        };
     }
 
     /**
      * Install a plugin
      */
     async installPlugin(manifest: PluginManifest): Promise<Plugin> {
+        if (!this.validateManifest(manifest)) {
+            throw new Error('Invalid plugin manifest');
+        }
+        if (this.plugins.has(manifest.id)) {
+            throw new Error(`Plugin "${manifest.id}" is already installed`);
+        }
+
         const plugin: Plugin = {
-            manifest,
+            manifest: this.normalizeManifest(manifest),
             enabled: false,
             installedAt: Date.now(),
         };
 
         this.plugins.set(manifest.id, plugin);
         this.savePlugins();
+        this.emitChange('installed', manifest.id);
 
+        return plugin;
+    }
+
+    /**
+     * Update an installed plugin
+     */
+    async updatePlugin(manifest: PluginManifest): Promise<Plugin> {
+        const plugin = this.plugins.get(manifest.id);
+        if (!plugin) {
+            throw new Error(`Plugin "${manifest.id}" is not installed`);
+        }
+        if (!this.validateManifest(manifest)) {
+            throw new Error('Invalid plugin manifest');
+        }
+
+        const wasEnabled = plugin.enabled;
+        if (plugin.instance) {
+            this.unloadPlugin(plugin.manifest.id);
+        }
+        this.unregisterPluginContributions(plugin.manifest.id);
+
+        plugin.manifest = this.normalizeManifest(manifest);
+        plugin.lastUpdated = Date.now();
+
+        if (wasEnabled) {
+            await this.loadPlugin(plugin.manifest.id);
+            this.registerPluginContributions(plugin);
+        }
+
+        this.savePlugins();
+        this.emitChange('updated', plugin.manifest.id);
         return plugin;
     }
 
@@ -155,12 +356,19 @@ export class PluginSystemService {
         const plugin = this.plugins.get(pluginId);
         if (!plugin) return false;
 
+        this.unregisterPluginContributions(pluginId);
         if (plugin.instance) {
             this.unloadPlugin(pluginId);
         }
 
         this.plugins.delete(pluginId);
+        this.storageKeys().forEach(key => {
+            if (key.startsWith(`plugin:${pluginId}:`)) {
+                this.storageRemove(key);
+            }
+        });
         this.savePlugins();
+        this.emitChange('uninstalled', pluginId);
         return true;
     }
 
@@ -170,13 +378,16 @@ export class PluginSystemService {
     async enablePlugin(pluginId: string): Promise<boolean> {
         const plugin = this.plugins.get(pluginId);
         if (!plugin) return false;
+        if (plugin.enabled) return true;
 
         if (!plugin.instance) {
             await this.loadPlugin(pluginId);
         }
 
         plugin.enabled = true;
+        this.registerPluginContributions(plugin);
         this.savePlugins();
+        this.emitChange('enabled', pluginId);
         return true;
     }
 
@@ -187,12 +398,14 @@ export class PluginSystemService {
         const plugin = this.plugins.get(pluginId);
         if (!plugin) return false;
 
+        this.unregisterPluginContributions(pluginId);
         if (plugin.instance) {
             this.unloadPlugin(pluginId);
         }
 
         plugin.enabled = false;
         this.savePlugins();
+        this.emitChange('disabled', pluginId);
         return true;
     }
 
@@ -233,11 +446,168 @@ export class PluginSystemService {
         this.hooks.forEach((hooks, hookName) => {
             this.hooks.set(
                 hookName,
-                hooks.filter(h => !h.handler.toString().includes(pluginId))
+                hooks.filter(h => h.pluginId !== pluginId)
             );
         });
 
         plugin.instance = undefined;
+    }
+
+    private registerPluginContributions(plugin: Plugin): void {
+        const pluginId = plugin.manifest.id;
+        (plugin.manifest.commands || []).forEach(command => {
+            const runtimeId = this.toRuntimeCommandId(pluginId, command.id);
+            this.registeredCommands.set(runtimeId, {
+                runtimeId,
+                pluginId,
+                pluginName: plugin.manifest.name,
+                command: {
+                    ...command,
+                    category: VALID_COMMAND_CATEGORIES.has(command.category || 'Actions')
+                        ? command.category
+                        : 'Actions',
+                },
+            });
+        });
+
+        (plugin.manifest.exportFormats || []).forEach(format => {
+            const runtimeId = this.toRuntimeExportId(pluginId, format.id);
+            this.registeredExportFormats.set(runtimeId, {
+                runtimeId,
+                pluginId,
+                pluginName: plugin.manifest.name,
+                format,
+            });
+        });
+    }
+
+    private unregisterPluginContributions(pluginId: string): void {
+        Array.from(this.registeredCommands.entries()).forEach(([runtimeId, command]) => {
+            if (command.pluginId === pluginId) {
+                this.registeredCommands.delete(runtimeId);
+            }
+        });
+        Array.from(this.registeredExportFormats.entries()).forEach(([runtimeId, format]) => {
+            if (format.pluginId === pluginId) {
+                this.registeredExportFormats.delete(runtimeId);
+            }
+        });
+    }
+
+    private toRuntimeCommandId(pluginId: string, commandId: string): string {
+        return `plugin:${pluginId}:command:${commandId}`;
+    }
+
+    private toRuntimeExportId(pluginId: string, formatId: string): string {
+        return `plugin:${pluginId}:export:${formatId}`;
+    }
+
+    getRegisteredCommands(): RegisteredPluginCommand[] {
+        return Array.from(this.registeredCommands.values())
+            .sort((a, b) => a.pluginName.localeCompare(b.pluginName) || a.command.label.localeCompare(b.command.label));
+    }
+
+    async executeRegisteredCommand(runtimeId: string, payload?: Record<string, unknown>): Promise<void> {
+        const command = this.registeredCommands.get(runtimeId);
+        if (!command) {
+            throw new Error(`Unknown plugin command: ${runtimeId}`);
+        }
+        const hookName = `plugin:command:${runtimeId}`;
+        const hookResults = await this.executeHooks(hookName, payload || {});
+
+        if (hookResults.length === 0) {
+            const plugin = this.plugins.get(command.pluginId);
+            plugin?.instance?.api.ui.showNotification(
+                `Command "${command.command.label}" executed.`,
+                'success'
+            );
+        }
+    }
+
+    getRegisteredExportFormats(): RegisteredPluginExportFormat[] {
+        return Array.from(this.registeredExportFormats.values())
+            .sort((a, b) => a.pluginName.localeCompare(b.pluginName) || a.format.label.localeCompare(b.format.label));
+    }
+
+    isRegisteredExportFormat(runtimeId: string): boolean {
+        return this.registeredExportFormats.has(runtimeId);
+    }
+
+    async exportWithRegisteredFormat(
+        runtimeId: string,
+        messages: ChatMessage[],
+        options?: { title?: string; includeMetadata?: boolean }
+    ): Promise<PluginExportResult> {
+        const contribution = this.registeredExportFormats.get(runtimeId);
+        if (!contribution) {
+            throw new Error(`Unknown plugin export format: ${runtimeId}`);
+        }
+
+        const hookName = `plugin:export:${runtimeId}`;
+        const hookResults = await this.executeHooks(hookName, {
+            messages,
+            title: options?.title,
+            includeMetadata: options?.includeMetadata,
+        });
+
+        const hookContent = hookResults.find((result): result is string => typeof result === 'string');
+        const content = hookContent ?? this.renderBuiltInExport(contribution.format, messages, options);
+
+        return {
+            content,
+            mimeType: contribution.format.mimeType,
+            fileExtension: contribution.format.fileExtension,
+        };
+    }
+
+    private renderBuiltInExport(
+        format: PluginExportFormatDefinition,
+        messages: ChatMessage[],
+        options?: { title?: string; includeMetadata?: boolean }
+    ): string {
+        const strategy = format.strategy || 'plain-text';
+        const title = options?.title || 'Conversation Export';
+        const includeMetadata = options?.includeMetadata !== false;
+
+        if (strategy === 'jsonl') {
+            return messages
+                .map(message => JSON.stringify({
+                    role: message.role,
+                    content: message.content,
+                    generationTime: message.generationTime,
+                }))
+                .join('\n');
+        }
+
+        if (strategy === 'markdown-transcript') {
+            const lines: string[] = [`# ${title}`, ''];
+            if (includeMetadata) {
+                lines.push(`Exported: ${new Date().toISOString()}`);
+                lines.push(`Messages: ${messages.length}`);
+                lines.push('');
+            }
+            messages.forEach(message => {
+                lines.push(`## ${message.role}`);
+                lines.push('');
+                lines.push(message.content);
+                lines.push('');
+            });
+            return lines.join('\n');
+        }
+
+        const lines: string[] = [];
+        if (includeMetadata) {
+            lines.push(title);
+            lines.push(`Exported: ${new Date().toISOString()}`);
+            lines.push(`Messages: ${messages.length}`);
+            lines.push('');
+        }
+        messages.forEach(message => {
+            lines.push(`[${message.role.toUpperCase()}]`);
+            lines.push(message.content);
+            lines.push('');
+        });
+        return lines.join('\n');
     }
 
     /**
@@ -247,40 +617,38 @@ export class PluginSystemService {
         return {
             getConversations: async () => {
                 // Check permission
-                if (!this.hasPermission(manifest, 'read-conversations')) {
-                    throw new Error('Permission denied: read-conversations');
-                }
+                this.assertPermission(manifest, 'read-conversations');
                 // Implementation would fetch from HistoryService
                 return [];
             },
             getConversation: async (sessionId: string) => {
-                if (!this.hasPermission(manifest, 'read-conversations')) {
-                    throw new Error('Permission denied: read-conversations');
-                }
+                this.assertPermission(manifest, 'read-conversations');
                 return null;
             },
             sendMessage: async (message: string) => {
-                if (!this.hasPermission(manifest, 'write-conversations')) {
-                    throw new Error('Permission denied: write-conversations');
-                }
+                this.assertPermission(manifest, 'write-conversations');
                 return { success: true };
             },
             storage: {
                 get: async (key: string) => {
-                    const stored = localStorage.getItem(`plugin:${manifest.id}:${key}`);
+                    this.assertPermission(manifest, 'storage');
+                    const stored = this.storageGet(`plugin:${manifest.id}:${key}`);
                     return stored ? JSON.parse(stored) : null;
                 },
                 set: async (key: string, value: unknown) => {
-                    localStorage.setItem(`plugin:${manifest.id}:${key}`, JSON.stringify(value));
+                    this.assertPermission(manifest, 'storage');
+                    this.storageSet(`plugin:${manifest.id}:${key}`, JSON.stringify(value));
                 },
                 delete: async (key: string) => {
-                    localStorage.removeItem(`plugin:${manifest.id}:${key}`);
+                    this.assertPermission(manifest, 'storage');
+                    this.storageRemove(`plugin:${manifest.id}:${key}`);
                 },
                 clear: async () => {
-                    const keys = Object.keys(localStorage);
+                    this.assertPermission(manifest, 'storage');
+                    const keys = this.storageKeys();
                     keys.forEach(key => {
                         if (key.startsWith(`plugin:${manifest.id}:`)) {
-                            localStorage.removeItem(key);
+                            this.storageRemove(key);
                         }
                     });
                 },
@@ -304,30 +672,22 @@ export class PluginSystemService {
             },
             files: {
                 read: async (path: string) => {
-                    if (!this.hasPermission(manifest, 'access-files')) {
-                        throw new Error('Permission denied: access-files');
-                    }
+                    this.assertPermission(manifest, 'access-files', path);
                     // Would use Electron IPC
                     return '';
                 },
                 write: async (path: string, content: string) => {
-                    if (!this.hasPermission(manifest, 'access-files')) {
-                        throw new Error('Permission denied: access-files');
-                    }
+                    this.assertPermission(manifest, 'access-files', path);
                     // Would use Electron IPC
                 },
                 exists: async (path: string) => {
-                    if (!this.hasPermission(manifest, 'access-files')) {
-                        throw new Error('Permission denied: access-files');
-                    }
+                    this.assertPermission(manifest, 'access-files', path);
                     return false;
                 },
             },
             network: {
                 fetch: async (url: string, options?: RequestInit) => {
-                    if (!this.hasPermission(manifest, 'network-access')) {
-                        throw new Error('Permission denied: network-access');
-                    }
+                    this.assertPermission(manifest, 'network-access', url);
                     return fetch(url, options);
                 },
             },
@@ -337,8 +697,64 @@ export class PluginSystemService {
     /**
      * Check if plugin has permission
      */
-    private hasPermission(manifest: PluginManifest, permission: PluginPermission['type']): boolean {
-        return manifest.permissions.some(p => p.type === permission);
+    private assertPermission(
+        manifest: PluginManifest,
+        permission: PluginPermission['type'],
+        target?: string
+    ): void {
+        const granted = manifest.permissions.find(p => p.type === permission);
+        if (!granted) {
+            throw new Error(`Permission denied: ${permission}`);
+        }
+
+        if (permission === 'access-files') {
+            if (!granted.scope) {
+                throw new Error('Permission denied: access-files requires explicit scope');
+            }
+            if (target && !this.isPathInScope(target, granted.scope)) {
+                throw new Error(`Permission denied: path "${target}" is outside plugin scope`);
+            }
+        }
+
+        if (permission === 'network-access') {
+            if (!granted.scope) {
+                throw new Error('Permission denied: network-access requires explicit scope');
+            }
+            if (target && !this.isUrlInScope(target, granted.scope)) {
+                throw new Error(`Permission denied: network target "${target}" is outside plugin scope`);
+            }
+        }
+    }
+
+    private isPathInScope(path: string, rawScope: string): boolean {
+        const normalizedPath = path.replace(/\\/g, '/');
+        const scopes = rawScope.split(',').map(entry => entry.trim().replace(/\\/g, '/')).filter(Boolean);
+        return scopes.some(scope => normalizedPath.startsWith(scope));
+    }
+
+    private isUrlInScope(targetUrl: string, rawScope: string): boolean {
+        let targetHost = '';
+        try {
+            targetHost = new URL(targetUrl).hostname.toLowerCase();
+        } catch {
+            return false;
+        }
+
+        const scopes = rawScope.split(',').map(entry => entry.trim().toLowerCase()).filter(Boolean);
+        return scopes.some(scope => {
+            if (scope.startsWith('*.')) {
+                const base = scope.slice(2);
+                return targetHost === base || targetHost.endsWith(`.${base}`);
+            }
+            if (scope.includes('://')) {
+                try {
+                    return new URL(scope).hostname.toLowerCase() === targetHost;
+                } catch {
+                    return false;
+                }
+            }
+            return scope === targetHost;
+        });
     }
 
     /**
@@ -398,6 +814,10 @@ export class PluginSystemService {
         if (typeof manifest !== 'object' || manifest === null) return false;
 
         const m = manifest as Record<string, unknown>;
+        const permissions = Array.isArray(m.permissions) ? m.permissions : [];
+        const commands = Array.isArray(m.commands) ? m.commands : [];
+        const exportFormats = Array.isArray(m.exportFormats) ? m.exportFormats : [];
+
         return (
             typeof m.id === 'string' &&
             typeof m.name === 'string' &&
@@ -405,7 +825,42 @@ export class PluginSystemService {
             typeof m.description === 'string' &&
             typeof m.author === 'string' &&
             typeof m.entryPoint === 'string' &&
-            Array.isArray(m.permissions)
+            (typeof m.apiVersion === 'string' || typeof m.apiVersion === 'undefined') &&
+            permissions.every(permission => {
+                if (!permission || typeof permission !== 'object') return false;
+                const typedPermission = permission as Record<string, unknown>;
+                return (
+                    typeof typedPermission.type === 'string' &&
+                    VALID_PERMISSIONS.has(typedPermission.type as PluginPermission['type']) &&
+                    (typeof typedPermission.scope === 'undefined' || typeof typedPermission.scope === 'string')
+                );
+            }) &&
+            commands.every(command => {
+                if (!command || typeof command !== 'object') return false;
+                const typedCommand = command as Record<string, unknown>;
+                return (
+                    typeof typedCommand.id === 'string' &&
+                    typeof typedCommand.label === 'string' &&
+                    (typeof typedCommand.description === 'undefined' || typeof typedCommand.description === 'string') &&
+                    (typeof typedCommand.category === 'undefined' || VALID_COMMAND_CATEGORIES.has(typedCommand.category as CommandCategory)) &&
+                    (typeof typedCommand.keywords === 'undefined' || Array.isArray(typedCommand.keywords))
+                );
+            }) &&
+            exportFormats.every(format => {
+                if (!format || typeof format !== 'object') return false;
+                const typedFormat = format as Record<string, unknown>;
+                return (
+                    typeof typedFormat.id === 'string' &&
+                    typeof typedFormat.label === 'string' &&
+                    typeof typedFormat.description === 'string' &&
+                    typeof typedFormat.fileExtension === 'string' &&
+                    typeof typedFormat.mimeType === 'string' &&
+                    (typeof typedFormat.strategy === 'undefined' ||
+                        typedFormat.strategy === 'plain-text' ||
+                        typedFormat.strategy === 'jsonl' ||
+                        typedFormat.strategy === 'markdown-transcript')
+                );
+            })
         );
     }
 }

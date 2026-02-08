@@ -3,6 +3,8 @@
  * Handles fetching file contents from repos and creating gists
  */
 
+import { credentialService } from './credentials';
+
 export interface GitHubFileContent {
   content: string;
   encoding: string;
@@ -27,17 +29,22 @@ class GitHubService {
   /**
    * Initialize with API key
    */
-  setApiKey(key: string): void {
-    this.apiKey = key;
-    localStorage.setItem('github_api_key', key);
+  async setApiKey(key: string): Promise<void> {
+    const trimmed = key.trim();
+    this.apiKey = trimmed || null;
+    if (trimmed) {
+      await credentialService.setGithubApiKey(trimmed);
+      return;
+    }
+    await credentialService.clearGithubApiKey();
   }
 
   /**
    * Get stored API key
    */
-  getApiKey(): string | null {
+  async getApiKey(): Promise<string | null> {
     if (!this.apiKey) {
-      this.apiKey = localStorage.getItem('github_api_key');
+      this.apiKey = await credentialService.getGithubApiKey();
     }
     return this.apiKey;
   }
@@ -45,28 +52,28 @@ class GitHubService {
   /**
    * Clear API key
    */
-  clearApiKey(): void {
+  async clearApiKey(): Promise<void> {
     this.apiKey = null;
-    localStorage.removeItem('github_api_key');
+    await credentialService.clearGithubApiKey();
   }
 
   /**
    * Check if API key is set
    */
   isConfigured(): boolean {
-    return !!this.getApiKey();
+    return Boolean(this.apiKey || credentialService.hasGithubApiKey());
   }
 
   /**
    * Get headers for API requests
    */
-  private getHeaders(): HeadersInit {
+  private async getHeaders(): Promise<HeadersInit> {
     const headers: HeadersInit = {
       'Accept': 'application/vnd.github.v3+json',
       'Content-Type': 'application/json',
     };
 
-    const key = this.getApiKey();
+    const key = await this.getApiKey();
     if (key) {
       headers['Authorization'] = `token ${key}`;
     }
@@ -90,7 +97,7 @@ class GitHubService {
     try {
       const url = `${this.baseUrl}/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${ref}`;
       const response = await fetch(url, {
-        headers: this.getHeaders(),
+        headers: await this.getHeaders(),
       });
 
       if (!response.ok) {
@@ -138,7 +145,7 @@ class GitHubService {
     try {
       const response = await fetch(`${this.baseUrl}/gists`, {
         method: 'POST',
-        headers: this.getHeaders(),
+        headers: await this.getHeaders(),
         body: JSON.stringify({
           description,
           public: isPublic,

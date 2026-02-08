@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { MessageSquare, Gauge } from 'lucide-react';
+import { useBackendHealth } from '../hooks/useBackendHealth';
+import { backendHealthService } from '../services/backendHealth';
 
 interface Stats {
   cpuUsage: number;
@@ -25,20 +27,43 @@ const StatusBar: React.FC<StatusBarProps> = ({
   messageCount = 0
 }) => {
   const [stats, setStats] = useState<Stats | null>(null);
+  const { online: isBackendOnline } = useBackendHealth();
 
   useEffect(() => {
+    if (!isBackendOnline) {
+      setStats(null);
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let nextDelayMs = 2000;
+
     const fetchStats = async () => {
       try {
         const res = await fetch('http://localhost:3000/v1/stats');
         const data = await res.json();
+        if (cancelled) return;
         setStats(data);
-      } catch (e) { }
+        backendHealthService.reportRequestResult(true);
+        nextDelayMs = 2000;
+      } catch (e) {
+        backendHealthService.reportRequestResult(false);
+        // Back off when local backend is unavailable to avoid noisy retry storms.
+        nextDelayMs = Math.min(nextDelayMs * 2, 15000);
+      } finally {
+        if (!cancelled) {
+          timeoutId = setTimeout(fetchStats, nextDelayMs);
+        }
+      }
     };
 
     fetchStats();
-    const interval = setInterval(fetchStats, 2000);
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [isBackendOnline]);
 
   const contextPercentage = (contextWindowUsage / maxTokens) * 100;
   const isNearLimit = contextPercentage > 80;
@@ -47,7 +72,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
   if (!stats) return <div className="h-7 bg-slate-900 border-t border-slate-800"></div>;
 
   return (
-    <div className="h-8 bg-[#020617] border-t border-slate-800/50 text-slate-400 text-[10px] tracking-wide flex items-center px-4 gap-6 font-mono select-none z-20">
+    <div className="h-8 bg-slate-950 border-t border-slate-800/50 text-slate-400 text-[10px] tracking-wide flex items-center px-4 gap-6 font-mono select-none z-20">
       {/* Token Counter */}
       {tokenCount > 0 && (
         <div title="Total tokens in conversation" className="flex items-center gap-1.5">

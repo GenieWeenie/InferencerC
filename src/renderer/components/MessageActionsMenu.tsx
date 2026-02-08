@@ -53,7 +53,7 @@ const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
             {/* Trigger Button */}
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="w-6 h-6 bg-slate-700 hover:bg-slate-600 rounded-full text-white flex items-center justify-center shadow-lg cursor-pointer transition-colors"
+                className="touch-target touch-target-square bg-slate-700 hover:bg-slate-600 rounded-full text-white flex items-center justify-center shadow-lg cursor-pointer transition-colors"
                 title="Message actions"
             >
                 <MoreVertical size={12} />
@@ -72,7 +72,7 @@ const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
                         {/* Copy */}
                         <button
                             onClick={() => handleAction(onCopy)}
-                            className="w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 transition-colors text-slate-200 text-sm"
+                            className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 transition-colors text-slate-200 text-sm text-left"
                         >
                             <Copy size={14} className="text-blue-400" />
                             <span>Copy message</span>
@@ -82,7 +82,7 @@ const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
                         {messageRole === 'user' && onEdit && (
                             <button
                                 onClick={() => handleAction(onEdit)}
-                                className="w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 transition-colors text-slate-200 text-sm"
+                                className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 transition-colors text-slate-200 text-sm text-left"
                             >
                                 <Edit2 size={14} className="text-green-400" />
                                 <span>Edit message</span>
@@ -93,7 +93,7 @@ const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
                         {messageRole === 'assistant' && onRegenerate && (
                             <button
                                 onClick={() => handleAction(onRegenerate)}
-                                className="w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 transition-colors text-slate-200 text-sm"
+                                className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 transition-colors text-slate-200 text-sm text-left"
                             >
                                 <RotateCcw size={14} className="text-purple-400" />
                                 <span>Regenerate</span>
@@ -104,7 +104,7 @@ const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
                         {onBranch && (
                             <button
                                 onClick={() => handleAction(onBranch)}
-                                className="w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 transition-colors text-slate-200 text-sm"
+                                className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 transition-colors text-slate-200 text-sm text-left"
                             >
                                 <GitBranch size={14} className="text-yellow-400" />
                                 <span>Branch from here</span>
@@ -117,7 +117,7 @@ const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
                         {/* Delete from here */}
                         <button
                             onClick={() => handleAction(onDelete)}
-                            className="w-full px-3 py-2 flex items-center gap-2 hover:bg-red-500/20 transition-colors text-red-400 text-sm"
+                            className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-red-500/20 transition-colors text-red-400 text-sm text-left"
                         >
                             <Trash2 size={14} />
                             <span>Delete from here</span>

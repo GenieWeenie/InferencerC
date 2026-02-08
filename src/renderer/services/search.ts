@@ -12,6 +12,8 @@
 import { HistoryService } from './history';
 import { ChatSession } from '../../shared/types';
 import { SearchIndexService } from './searchIndex';
+import { autoTaggingService } from './autoTagging';
+import { workerManager } from './workerManager';
 
 export interface SearchResult {
     sessionId: string;
@@ -24,6 +26,7 @@ export interface SearchResult {
     matchEnd: number;
     relevanceScore: number;
     timestamp: number;
+    isInCollapsedSection?: boolean;
     context?: {
         before?: string;
         after?: string;
@@ -34,8 +37,11 @@ export interface SearchFilters {
     dateFrom?: Date;
     dateTo?: Date;
     model?: string;
+    tags?: string[];
     role?: 'user' | 'assistant' | 'all';
     sessionId?: string; // Search within specific session
+    useRegex?: boolean;
+    regexFlags?: string;
 }
 
 export interface SearchOptions {
@@ -103,7 +109,36 @@ export class SearchService {
             sessions = sessions.filter(s => s.modelId === filters.model);
         }
 
-        if (query.trim().length > 2) {
+        // Apply tag filter (any selected tag)
+        if (filters?.tags && filters.tags.length > 0) {
+            const selectedTags = new Set(filters.tags);
+            sessions = sessions.filter(session => {
+                const conversationTags = autoTaggingService.getTags(session.id)?.tags || [];
+                return conversationTags.some(tag => selectedTags.has(tag));
+            });
+        }
+
+        let regex: RegExp | null = null;
+        if (filters?.useRegex) {
+            try {
+                const flags = filters.regexFlags || (opts.caseSensitive ? 'g' : 'gi');
+                regex = new RegExp(query, flags);
+            } catch {
+                const endTime = performance.now();
+                return {
+                    results: [],
+                    stats: {
+                        totalResults: 0,
+                        sessionsSearched: sessions.length,
+                        messagesSearched: 0,
+                        searchTimeMs: Math.round(endTime - startTime),
+                        topKeywords: [],
+                    },
+                };
+            }
+        }
+
+        if (!regex && query.trim().length > 2) {
             const candidateIds = SearchIndexService.searchSessions(query);
             sessions = sessions.filter(s => candidateIds.has(s.id));
         }
@@ -126,7 +161,7 @@ export class SearchService {
             if (session.encrypted) continue; // Skip encrypted sessions
 
             // Search in session title
-            const titleMatch = this.matchText(session.title, queryLower, queryTerms, opts);
+            const titleMatch = this.matchText(session.title, queryLower, queryTerms, opts, regex);
             if (titleMatch) {
                 const titleScore = titleMatch.score * 1.5; // Boost title matches
 
@@ -168,7 +203,7 @@ export class SearchService {
                 const content = typeof msg.content === 'string' ? msg.content : '';
                 if (!content) continue;
 
-                const match = this.matchText(content, queryLower, queryTerms, opts);
+                const match = this.matchText(content, queryLower, queryTerms, opts, regex);
                 if (match) {
                     // Only add if score is high enough
                     if (results.length < maxHeapSize || match.score > minScoreInHeap) {
@@ -234,6 +269,67 @@ export class SearchService {
                 topKeywords,
             },
         };
+    }
+
+    /**
+     * Async search path backed by Web Worker for smoother UI.
+     * Falls back to sync search when regex mode is enabled.
+     */
+    static async searchAsync(
+        query: string,
+        filters?: SearchFilters,
+        options?: SearchOptions
+    ): Promise<{ results: SearchResult[]; stats: SearchStats }> {
+        if (filters?.useRegex) {
+            return this.search(query, filters, options);
+        }
+
+        const opts = {
+            maxResults: 50,
+            includeContext: true,
+            fuzzyMatch: true,
+            caseSensitive: false,
+            wholeWord: false,
+            ...options
+        };
+
+        let sessions = HistoryService.getAllSessions();
+
+        if (filters?.sessionId) {
+            sessions = sessions.filter(s => s.id === filters.sessionId);
+        }
+        if (filters?.dateFrom) {
+            const fromTime = filters.dateFrom.getTime();
+            sessions = sessions.filter(s => s.lastModified >= fromTime);
+        }
+        if (filters?.dateTo) {
+            const toTime = filters.dateTo.getTime();
+            sessions = sessions.filter(s => s.lastModified <= toTime);
+        }
+        if (filters?.model) {
+            sessions = sessions.filter(s => s.modelId === filters.model);
+        }
+        if (filters?.tags && filters.tags.length > 0) {
+            const selectedTags = new Set(filters.tags);
+            sessions = sessions.filter(session => {
+                const conversationTags = autoTaggingService.getTags(session.id)?.tags || [];
+                return conversationTags.some(tag => selectedTags.has(tag));
+            });
+        }
+
+        const fullSessions: ChatSession[] = sessions
+            .map(meta => HistoryService.getSession(meta.id))
+            .filter((session): session is ChatSession => Boolean(session && !session.encrypted));
+
+        const workerFilters = {
+            dateFrom: filters?.dateFrom?.getTime(),
+            dateTo: filters?.dateTo?.getTime(),
+            model: filters?.model,
+            role: filters?.role,
+            sessionId: filters?.sessionId,
+        };
+
+        return workerManager.search(fullSessions, query, workerFilters, opts);
     }
 
     /**
@@ -327,12 +423,32 @@ export class SearchService {
         text: string,
         queryLower: string,
         queryTerms: string[],
-        options: SearchOptions
+        options: SearchOptions,
+        regex: RegExp | null = null
     ): { matchedText: string; start: number; end: number; score: number } | null {
-        // Early exit for empty or very short text
-        if (!text || text.length < queryLower.length) return null;
+        // Early exit for empty text
+        if (!text) return null;
+        if (!regex && text.length < queryLower.length) return null;
 
         const textToSearch = options.caseSensitive ? text : text.toLowerCase();
+
+        // Regex match (highest priority when enabled)
+        if (regex) {
+            regex.lastIndex = 0;
+            const regexMatch = regex.exec(text);
+            regex.lastIndex = 0;
+            if (regexMatch && typeof regexMatch.index === 'number') {
+                const matchedText = regexMatch[0] || '';
+                const start = regexMatch.index;
+                const end = start + matchedText.length;
+                return {
+                    matchedText,
+                    start,
+                    end,
+                    score: 120 + matchedText.length,
+                };
+            }
+        }
 
         // Direct substring match (highest priority)
         const directIndex = textToSearch.indexOf(queryLower);

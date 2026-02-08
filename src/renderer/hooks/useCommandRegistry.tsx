@@ -41,6 +41,7 @@ import {
     Sparkles
 } from 'lucide-react';
 import { commandRegistry, Command } from '../lib/commandRegistry';
+import { pluginSystemService } from '../services/pluginSystem';
 
 interface UseCommandRegistryProps {
     // Navigation
@@ -600,9 +601,42 @@ export const useCommandRegistry = (props: UseCommandRegistryProps) => {
         // Register all commands
         commandRegistry.registerMany(commands);
 
+        let pluginCommandIds: string[] = [];
+        const syncPluginCommands = () => {
+            pluginCommandIds.forEach(commandId => commandRegistry.unregister(commandId));
+            pluginCommandIds = [];
+
+            const pluginCommands = pluginSystemService.getRegisteredCommands();
+            pluginCommands.forEach(pluginCommand => {
+                const commandId = `plugin.command.${pluginCommand.runtimeId}`;
+                pluginCommandIds.push(commandId);
+                commandRegistry.register({
+                    id: commandId,
+                    label: `${pluginCommand.command.label} (${pluginCommand.pluginName})`,
+                    description: pluginCommand.command.description || 'Plugin command',
+                    category: pluginCommand.command.category || 'Actions',
+                    keywords: [
+                        ...(pluginCommand.command.keywords || []),
+                        'plugin',
+                        pluginCommand.pluginName.toLowerCase(),
+                    ],
+                    action: async () => {
+                        await pluginSystemService.executeRegisteredCommand(pluginCommand.runtimeId);
+                    },
+                });
+            });
+        };
+
+        syncPluginCommands();
+        const unsubscribePluginEvents = pluginSystemService.subscribe(() => {
+            syncPluginCommands();
+        });
+
         // Cleanup on unmount
         return () => {
             commands.forEach(cmd => commandRegistry.unregister(cmd.id));
+            pluginCommandIds.forEach(commandId => commandRegistry.unregister(commandId));
+            unsubscribePluginEvents();
         };
     }, [
         props.setActiveTab,

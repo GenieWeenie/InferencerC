@@ -11,8 +11,7 @@ interface ComparisonGridProps {
     modelBName: string;
     onClose?: () => void;
     mcpAvailable?: boolean;
-    onInsertToFile?: (code: string, language: string) => void;
-    sessionId?: string;
+    onInsertToFile?: (code: string, language: string, filePath: string) => void;
 }
 
 /**
@@ -25,8 +24,7 @@ const ComparisonGrid: React.FC<ComparisonGridProps> = ({
     modelBName,
     onClose,
     mcpAvailable,
-    onInsertToFile,
-    sessionId
+    onInsertToFile
 }) => {
     const [isFullscreen, setIsFullscreen] = React.useState(false);
     const [showDiff, setShowDiff] = React.useState(false);
@@ -174,9 +172,9 @@ ${contentB}
             </div>
 
             {/* Comparison Content */}
-            <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
                 {/* Model A Column */}
-                <div className="flex-1 flex flex-col border-r border-slate-700 overflow-hidden">
+                <div className="flex-1 flex flex-col border-b border-slate-700 md:border-b-0 md:border-r overflow-hidden">
                     <div className="px-4 py-2 bg-blue-500/10 border-b border-blue-500/20">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
@@ -209,7 +207,6 @@ ${contentB}
                                 isUser={false}
                                 mcpAvailable={mcpAvailable}
                                 onInsertToFile={onInsertToFile}
-                                sessionId={sessionId}
                             />
                         )}
                     </div>
@@ -249,7 +246,6 @@ ${contentB}
                                 isUser={false}
                                 mcpAvailable={mcpAvailable}
                                 onInsertToFile={onInsertToFile}
-                                sessionId={sessionId}
                             />
                         )}
                     </div>

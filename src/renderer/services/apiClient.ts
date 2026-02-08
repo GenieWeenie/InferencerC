@@ -4,6 +4,8 @@
  * Centralized API client for making requests to inference servers
  */
 
+import { credentialService } from './credentials';
+
 export interface APIRequest {
     url: string;
     method: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -87,7 +89,7 @@ export class APIClientService {
     /**
      * Build chat completion request
      */
-    buildChatCompletionRequest(
+    async buildChatCompletionRequest(
         modelId: string,
         messages: Array<{ role: string; content: string }>,
         options?: {
@@ -97,8 +99,8 @@ export class APIClientService {
             stream?: boolean;
             responseFormat?: 'text' | 'json_object';
         }
-    ): APIRequest {
-        const openRouterApiKey = localStorage.getItem('openRouterApiKey');
+    ): Promise<APIRequest> {
+        const openRouterApiKey = await credentialService.getOpenRouterApiKey();
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         let url = 'http://localhost:3000/v1/chat/completions';
         let actualModelId = modelId;

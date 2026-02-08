@@ -1,6 +1,6 @@
 import React from 'react';
 import { Virtuoso } from 'react-virtuoso';
-import { Send, Clock, Plus, Trash2, X, Globe, Settings, Activity, AlertTriangle, ChevronRight, ChevronLeft, Check, AlertCircle, Brain, Users, ImageIcon, Plug, Wrench, Copy, Eraser, Download, Edit2, Search, ChevronUp, ChevronDown, Star, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, GitBranch, Network, HelpCircle, Maximize2, Minimize2, RefreshCw, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield } from 'lucide-react';
+import { Send, Clock, Plus, Trash2, X, Globe, Settings, Activity, AlertTriangle, ChevronRight, ChevronLeft, Check, AlertCircle, Brain, Users, ImageIcon, Plug, Wrench, Copy, Eraser, Download, Edit2, Search, ChevronUp, ChevronDown, Star, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, GitBranch, Network, HelpCircle, Maximize2, Minimize2, RefreshCw, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import MessageContent from '../components/MessageContent';
@@ -23,6 +23,7 @@ import { SmartSuggestionsPanel } from '../components/SmartSuggestionsPanel';
 import { ConversationRecommendationsPanel } from '../components/ConversationRecommendationsPanel';
 import { WorkflowsManager } from '../components/WorkflowsManager';
 import { APIPlayground } from '../components/APIPlayground';
+import { DeveloperDocumentationPanel } from '../components/DeveloperDocumentationPanel';
 import { PluginManager } from '../components/PluginManager';
 import { CodeIntegrationPanel } from '../components/CodeIntegrationPanel';
 import { WorkspaceViewsPanel } from '../components/WorkspaceViewsPanel';
@@ -30,19 +31,26 @@ import { InteractiveTutorial } from '../components/InteractiveTutorial';
 import { BCIPanel } from '../components/BCIPanel';
 import { MultiModalAIPanel } from '../components/MultiModalAIPanel';
 import { RealTimeCollaborationPanel } from '../components/RealTimeCollaborationPanel';
+import { CloudSyncPanel } from '../components/CloudSyncPanel';
+import { TeamWorkspacesPanel } from '../components/TeamWorkspacesPanel';
+import { EnterpriseCompliancePanel } from '../components/EnterpriseCompliancePanel';
 import { BlockchainPanel } from '../components/BlockchainPanel';
 import { AIAgentsPanel } from '../components/AIAgentsPanel';
 import { FederatedLearningPanel } from '../components/FederatedLearningPanel';
+import { DocumentChatPanel } from '../components/DocumentChatPanel';
 import { responsiveDesignService } from '../services/responsiveDesign';
 import { onboardingService } from '../services/onboarding';
 import { multiModalAIService } from '../services/multiModalAI';
 import { PerformanceMonitorOverlay } from '../components/PerformanceMonitorOverlay';
 import { crashRecoveryService } from '../services/crashRecovery';
+import { cloudSyncService, CloudSyncStatus } from '../services/cloudSync';
 const PromptManager = React.lazy(() => import('../components/PromptManager'));
 import SidebarHistory from '../components/SidebarHistory';
+import RecoveryDialog from '../components/RecoveryDialog';
 import { useChat } from '../hooks/useChat';
 import { usePrompts, PromptSnippet } from '../hooks/usePrompts';
 import { useConversationTree } from '../hooks/useConversationTree';
+import { useLongPress, usePinchZoom, useSwipeNavigation } from '../hooks/useGestures';
 import { calculateEntropy, compressImage } from '../lib/chatUtils';
 import { useMCP } from '../hooks/useMCP';
 import { analyticsService } from '../services/analytics';
@@ -57,8 +65,10 @@ import { calendarService } from '../services/calendar';
 import { autoCategorizationService } from '../services/autoCategorization';
 import { autoTaggingService } from '../services/autoTagging';
 import { workflowsService } from '../services/workflows';
+import { apiClientService } from '../services/apiClient';
 import { TemplateService, ConversationTemplate } from '../services/templates';
 import { PromptVariableService } from '../services/promptVariables';
+import { ContextManagementService } from '../services/contextManagement';
 import VariableInsertMenu from '../components/VariableInsertMenu';
 import { AVAILABLE_TOOLS } from '../lib/tools';
 import { RecoveryState } from '../../shared/types';
@@ -165,10 +175,15 @@ const Chat: React.FC = () => {
     }, [battleMode, availableModels, currentModel, secondaryModel, setSecondaryModel]);
 
     const { prompts } = usePrompts();
-    const { tools: mcpTools, connectedCount: mcpConnectedCount, isAvailable: mcpAvailable } = useMCP();
+    const {
+        tools: mcpTools,
+        connectedCount: mcpConnectedCount,
+        isAvailable: mcpAvailable,
+        executeTool: executeMcpTool,
+    } = useMCP();
     const [isDragging, setIsDragging] = React.useState(false);
     const [showInspector, setShowInspector] = React.useState(false);
-    const [activeTab, setActiveTab] = React.useState<'inspector' | 'controls' | 'prompts'>('controls');
+    const [activeTab, setActiveTab] = React.useState<'inspector' | 'controls' | 'prompts' | 'documents'>('controls');
     const [isEditingSystemPrompt, setIsEditingSystemPrompt] = React.useState(false);
     const [editingMessageIndex, setEditingMessageIndex] = React.useState<number | null>(null);
     const [editedMessageContent, setEditedMessageContent] = React.useState<string>('');
@@ -227,20 +242,30 @@ const Chat: React.FC = () => {
     const [showRecommendations, setShowRecommendations] = React.useState(false);
     const [showWorkflows, setShowWorkflows] = React.useState(false);
     const [showAPIPlayground, setShowAPIPlayground] = React.useState(false);
+    const [showDeveloperDocs, setShowDeveloperDocs] = React.useState(false);
     const [sidebarOpen, setSidebarOpen] = React.useState(false);
     const [showPluginManager, setShowPluginManager] = React.useState(false);
     const [showCodeIntegration, setShowCodeIntegration] = React.useState(false);
     const [selectedCode, setSelectedCode] = React.useState<{ code: string; language: string } | null>(null);
     const [showWorkspaceViews, setShowWorkspaceViews] = React.useState(false);
     const [responsiveConfig, setResponsiveConfig] = React.useState(responsiveDesignService.getConfig());
+    const isCompactViewport = responsiveConfig.isMobile || responsiveConfig.isTablet;
     const [showTutorial, setShowTutorial] = React.useState(false);
     const [currentTutorial, setCurrentTutorial] = React.useState<ReturnType<typeof onboardingService.getTutorials>[0] | null>(null);
     const [showBCI, setShowBCI] = React.useState(false);
     const [showMultiModal, setShowMultiModal] = React.useState(false);
     const [showCollaboration, setShowCollaboration] = React.useState(false);
+    const [showCloudSync, setShowCloudSync] = React.useState(false);
+    const [showTeamWorkspaces, setShowTeamWorkspaces] = React.useState(false);
+    const [showEnterpriseCompliance, setShowEnterpriseCompliance] = React.useState(false);
+    const [cloudSyncStatus, setCloudSyncStatus] = React.useState<CloudSyncStatus | null>(() => cloudSyncService.getSyncStatus());
+    const [isCloudSyncAuthenticated, setIsCloudSyncAuthenticated] = React.useState<boolean>(() => cloudSyncService.isAuthenticated());
     const [showBlockchain, setShowBlockchain] = React.useState(false);
     const [showAIAgents, setShowAIAgents] = React.useState(false);
     const [showFederatedLearning, setShowFederatedLearning] = React.useState(false);
+    const [excludedContextIndices, setExcludedContextIndices] = React.useState<Set<number>>(new Set());
+    const [autoSummarizeContext, setAutoSummarizeContext] = React.useState(true);
+    const contextWarningTriggered = React.useRef(false);
 
     // Recovery dialog state
     const [showRecoveryDialog, setShowRecoveryDialog] = React.useState(false);
@@ -251,6 +276,16 @@ const Chat: React.FC = () => {
 
     // Variable insert menu state
     const [showVariableMenu, setShowVariableMenu] = React.useState(false);
+    const messageListRef = React.useRef<HTMLDivElement | null>(null);
+    const longPressMenuRef = React.useRef<HTMLDivElement | null>(null);
+
+    const [conversationFontSize, setConversationFontSize] = React.useState<number>(() => {
+        const stored = Number(localStorage.getItem('chat_font_size'));
+        return Number.isFinite(stored) && stored > 0 ? stored : 16;
+    });
+    const [longPressMenu, setLongPressMenu] = React.useState<{ messageIndex: number; x: number; y: number } | null>(null);
+    const [swipeSessionIndicator, setSwipeSessionIndicator] = React.useState<'previous' | 'next' | null>(null);
+    const swipeSessionTimerRef = React.useRef<number | null>(null);
 
     // Initialize conversation tree (always initialize, will sync when enabled)
     const treeHook = useConversationTree();
@@ -262,6 +297,97 @@ const Chat: React.FC = () => {
         });
         return unsubscribe;
     }, []);
+
+    React.useEffect(() => {
+        const refreshCloudSyncStatus = () => {
+            setCloudSyncStatus(cloudSyncService.getSyncStatus());
+            setIsCloudSyncAuthenticated(cloudSyncService.isAuthenticated());
+        };
+
+        refreshCloudSyncStatus();
+        const interval = setInterval(refreshCloudSyncStatus, 5000);
+
+        window.addEventListener('focus', refreshCloudSyncStatus);
+        window.addEventListener('storage', refreshCloudSyncStatus);
+
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener('focus', refreshCloudSyncStatus);
+            window.removeEventListener('storage', refreshCloudSyncStatus);
+        };
+    }, []);
+
+    const cloudSyncBadge = React.useMemo(() => {
+        if (!isCloudSyncAuthenticated) {
+            return {
+                label: 'Cloud Off',
+                className: 'bg-slate-800 hover:bg-slate-700 text-slate-300',
+                title: 'Cloud sync is not authenticated',
+            };
+        }
+
+        if (!cloudSyncStatus?.lastSyncedAt) {
+            return {
+                label: 'Cloud Ready',
+                className: 'bg-cyan-900/40 hover:bg-cyan-800/40 text-cyan-300 border-cyan-700/60',
+                title: 'Cloud sync is authenticated and ready',
+            };
+        }
+
+        const ageMs = Date.now() - cloudSyncStatus.lastSyncedAt;
+        if (ageMs < 5 * 60 * 1000) {
+            return {
+                label: 'Cloud Synced',
+                className: 'bg-emerald-900/40 hover:bg-emerald-800/40 text-emerald-300 border-emerald-700/60',
+                title: `Last sync ${new Date(cloudSyncStatus.lastSyncedAt).toLocaleString()}`,
+            };
+        }
+
+        return {
+            label: 'Cloud Stale',
+            className: 'bg-amber-900/40 hover:bg-amber-800/40 text-amber-300 border-amber-700/60',
+            title: `Last sync ${new Date(cloudSyncStatus.lastSyncedAt).toLocaleString()}`,
+        };
+    }, [cloudSyncStatus, isCloudSyncAuthenticated]);
+
+    React.useEffect(() => {
+        if (isCompactViewport && showHistory) {
+            setShowHistory(false);
+        }
+    }, [isCompactViewport, setShowHistory, showHistory]);
+
+    // Context management state persistence (per session)
+    React.useEffect(() => {
+        if (!sessionId) {
+            setExcludedContextIndices(new Set());
+            return;
+        }
+
+        try {
+            const raw = localStorage.getItem(`context-exclusions-${sessionId}`);
+            if (!raw) {
+                setExcludedContextIndices(new Set());
+                return;
+            }
+            const parsed = JSON.parse(raw) as number[];
+            setExcludedContextIndices(new Set(parsed.filter(n => Number.isInteger(n) && n >= 0)));
+        } catch {
+            setExcludedContextIndices(new Set());
+        }
+    }, [sessionId]);
+
+    React.useEffect(() => {
+        if (!sessionId) return;
+        const safe = Array.from(excludedContextIndices).filter(index => index < history.length);
+        localStorage.setItem(`context-exclusions-${sessionId}`, JSON.stringify(safe));
+    }, [sessionId, excludedContextIndices, history.length]);
+
+    React.useEffect(() => {
+        setExcludedContextIndices(prev => {
+            const next = new Set(Array.from(prev).filter(index => index < history.length));
+            return next.size === prev.size ? prev : next;
+        });
+    }, [history.length]);
 
     // Check for onboarding on mount
     React.useEffect(() => {
@@ -454,6 +580,110 @@ const Chat: React.FC = () => {
         }
     };
 
+    const currentModelObj = React.useMemo(
+        () => availableModels.find(m => m.id === currentModel),
+        [availableModels, currentModel]
+    );
+    const contextWindowTokens = currentModelObj?.contextLength || 32768;
+    const excludedContextKey = React.useMemo(
+        () => Array.from(excludedContextIndices).sort((a, b) => a - b).join(','),
+        [excludedContextIndices]
+    );
+
+    const contextUsage = React.useMemo(() => {
+        return ContextManagementService.estimateUsage({
+            messages: history,
+            excludedIndices: excludedContextIndices,
+            systemPrompt,
+            currentInput: input,
+            reservedOutputTokens: maxTokens,
+            maxContextTokens: contextWindowTokens,
+        });
+    }, [history, excludedContextIndices, systemPrompt, input, maxTokens, contextWindowTokens, excludedContextKey]);
+
+    const trimSuggestions = React.useMemo(() => {
+        return ContextManagementService.suggestMessagesToTrim({
+            messages: history,
+            excludedIndices: excludedContextIndices,
+            targetFillRatio: 0.75,
+            usage: contextUsage,
+        });
+    }, [history, excludedContextIndices, contextUsage, excludedContextKey]);
+
+    const recentContextMessages = React.useMemo(() => {
+        const start = Math.max(0, history.length - 20);
+        return history.slice(start).map((message, offset) => ({
+            message,
+            index: start + offset,
+            included: !excludedContextIndices.has(start + offset),
+            estimatedTokens: ContextManagementService.estimateTokens(message.content || ''),
+        }));
+    }, [history, excludedContextIndices, excludedContextKey]);
+
+    React.useEffect(() => {
+        if (contextUsage.fillRatio >= 0.8 && !contextWarningTriggered.current) {
+            toast.warning(`Context window is ${(contextUsage.fillRatio * 100).toFixed(0)}% full. Consider trimming older messages.`);
+            contextWarningTriggered.current = true;
+        } else if (contextUsage.fillRatio < 0.75) {
+            contextWarningTriggered.current = false;
+        }
+    }, [contextUsage.fillRatio]);
+
+    const toggleMessageContextInclusion = React.useCallback((messageIndex: number) => {
+        setExcludedContextIndices(prev => {
+            const next = new Set(prev);
+            if (next.has(messageIndex)) {
+                next.delete(messageIndex);
+            } else {
+                next.add(messageIndex);
+            }
+            return next;
+        });
+    }, []);
+
+    const applyTrimSuggestions = React.useCallback((count: number = 3) => {
+        if (trimSuggestions.length === 0) return;
+        setExcludedContextIndices(prev => {
+            const next = new Set(prev);
+            trimSuggestions.slice(0, count).forEach(suggestion => next.add(suggestion.messageIndex));
+            return next;
+        });
+    }, [trimSuggestions]);
+
+    const buildContextSendOptions = React.useCallback((pendingInput: string) => {
+        let effectiveExcluded = new Set(excludedContextIndices);
+        let contextSummary: string | undefined;
+
+        const usageAtSend = ContextManagementService.estimateUsage({
+            messages: history,
+            excludedIndices: effectiveExcluded,
+            systemPrompt,
+            currentInput: pendingInput,
+            reservedOutputTokens: maxTokens,
+            maxContextTokens: contextWindowTokens,
+        });
+
+        if (autoSummarizeContext && usageAtSend.fillRatio >= 0.8) {
+            const plan = ContextManagementService.buildAutoSummaryPlan({
+                messages: history,
+                excludedIndices: effectiveExcluded,
+                keepRecentCount: 8,
+            });
+
+            if (plan && plan.indicesToExclude.length > 0) {
+                plan.indicesToExclude.forEach(index => effectiveExcluded.add(index));
+                contextSummary = plan.summary;
+                setExcludedContextIndices(new Set(effectiveExcluded));
+                toast.info(`Auto-summarized ${plan.indicesToExclude.length} older messages to fit context limits.`);
+            }
+        }
+
+        return {
+            excludedMessageIndices: Array.from(effectiveExcluded),
+            contextSummary,
+        };
+    }, [excludedContextIndices, history, systemPrompt, maxTokens, contextWindowTokens, autoSummarizeContext]);
+
     // Wrapper for sendMessage that processes variables and includes project context
     const sendMessageWithContext = React.useCallback(async () => {
         let textToSend = input;
@@ -488,16 +718,18 @@ const Chat: React.FC = () => {
             }
         }
 
+        const sendOptions = buildContextSendOptions(textToSend);
+
         if (hasChanges) {
             setInput(textToSend);
             // Allow state to update before sending
             setTimeout(() => {
-                sendMessage();
+                sendMessage(sendOptions);
             }, 100);
         } else {
-            sendMessage();
+            sendMessage(sendOptions);
         }
-    }, [input, projectContext, includeContextInMessages, sendMessage, currentModel, availableModels, sessionId, savedSessions, history]);
+    }, [input, projectContext, includeContextInMessages, sendMessage, currentModel, availableModels, sessionId, savedSessions, history, buildContextSendOptions]);
 
     // Project Context subscription
     React.useEffect(() => {
@@ -742,12 +974,107 @@ const Chat: React.FC = () => {
         }
     };
 
-    const handleInsertToFile = React.useCallback(async (code: string, language: string) => {
-        // TODO: Implement MCP file writing
-        // For now, just show a toast
-        toast.info('MCP file writing integration coming soon!');
-        console.log('Insert to file:', { code, language });
-    }, []);
+    const executeChatCompletion = React.useCallback(async (params: {
+        prompt: string;
+        systemPrompt?: string;
+        modelId?: string;
+        temperature?: number;
+        topP?: number;
+        maxTokens?: number;
+    }): Promise<{ content: string; tokensUsed?: number }> => {
+        const testMessages: Array<{ role: 'system' | 'user'; content: string }> = [];
+        if (params.systemPrompt) {
+            testMessages.push({ role: 'system', content: params.systemPrompt });
+        }
+        testMessages.push({ role: 'user', content: params.prompt });
+
+        const selectedModelId = params.modelId || currentModel || availableModels[0]?.id;
+        if (!selectedModelId) {
+            throw new Error('No model selected');
+        }
+
+        const selectedTemperature = params.temperature ?? temperature;
+        const selectedTopP = params.topP ?? topP;
+        const selectedMaxTokens = params.maxTokens ?? maxTokens;
+
+        const request = await apiClientService.buildChatCompletionRequest(
+            selectedModelId,
+            testMessages,
+            {
+                temperature: selectedTemperature,
+                topP: selectedTopP,
+                maxTokens: selectedMaxTokens,
+                stream: false,
+            }
+        );
+        const response = await apiClientService.makeRequest(request);
+
+        if (response.status < 200 || response.status >= 300) {
+            throw new Error(`API error (${response.status}): ${response.statusText}`);
+        }
+
+        const data = response.body as any;
+        const content = data?.choices?.[0]?.message?.content || '';
+        const tokensUsed = data?.usage?.total_tokens;
+
+        return { content, tokensUsed };
+    }, [availableModels, currentModel, maxTokens, temperature, topP]);
+
+    const handleInsertToFile = React.useCallback(async (code: string, language: string, filePath: string) => {
+        if (!mcpAvailable || mcpTools.length === 0) {
+            toast.error('No connected MCP tools available for file writing');
+            return;
+        }
+
+        const writeTool = mcpTools.find(tool => {
+            const name = tool.name.toLowerCase();
+            if (!name.includes('write')) return false;
+            if (!name.includes('file') && !name.includes('document')) return false;
+
+            const props = tool.inputSchema?.properties || {};
+            return (
+                Object.prototype.hasOwnProperty.call(props, 'path') ||
+                Object.prototype.hasOwnProperty.call(props, 'filePath') ||
+                Object.prototype.hasOwnProperty.call(props, 'filepath') ||
+                Object.prototype.hasOwnProperty.call(props, 'uri')
+            );
+        });
+
+        if (!writeTool) {
+            toast.error('No MCP write_file-compatible tool found');
+            return;
+        }
+
+        const props = writeTool.inputSchema?.properties || {};
+        const hasProp = (key: string) => Object.prototype.hasOwnProperty.call(props, key);
+        const args: Record<string, unknown> = {};
+
+        if (hasProp('path')) args.path = filePath;
+        else if (hasProp('filePath')) args.filePath = filePath;
+        else if (hasProp('filepath')) args.filepath = filePath;
+        else if (hasProp('uri')) args.uri = filePath;
+
+        if (hasProp('content')) args.content = code;
+        else if (hasProp('text')) args.text = code;
+        else args.content = code;
+
+        if (hasProp('language')) args.language = language;
+        if (hasProp('append')) args.append = false;
+
+        const result = await executeMcpTool({
+            id: crypto.randomUUID(),
+            name: writeTool.name,
+            arguments: args,
+            serverId: writeTool.serverId,
+        });
+
+        if (result.isError) {
+            toast.error(`MCP write failed: ${result.content}`);
+            return;
+        }
+
+        toast.success(`Inserted code into ${filePath}`);
+    }, [executeMcpTool, mcpAvailable, mcpTools]);
 
     const handleRateMessage = (index: number, rating: 'up' | 'down') => {
         setMessageRatings(prev => {
@@ -784,6 +1111,186 @@ const Chat: React.FC = () => {
             return newBookmarks;
         });
     };
+
+    const clampLongPressMenuPosition = React.useCallback((x: number, y: number) => {
+        const margin = 8;
+        const menuWidth = 240;
+        const menuHeight = 240;
+
+        return {
+            x: Math.max(margin, Math.min(x, window.innerWidth - menuWidth - margin)),
+            y: Math.max(margin, Math.min(y, window.innerHeight - menuHeight - margin)),
+        };
+    }, []);
+
+    const closeLongPressMenu = React.useCallback(() => {
+        setLongPressMenu(null);
+    }, []);
+
+    const handleLongPressAction = React.useCallback((action: 'copy' | 'bookmark' | 'edit' | 'regenerate' | 'branch' | 'delete') => {
+        if (!longPressMenu) return;
+
+        const index = longPressMenu.messageIndex;
+        const message = history[index];
+        if (!message) return;
+
+        switch (action) {
+            case 'copy':
+                navigator.clipboard.writeText(message.content || '');
+                toast.success('Copied to clipboard');
+                break;
+            case 'bookmark':
+                toggleBookmark(index);
+                break;
+            case 'edit':
+                if (message.role === 'user') {
+                    handleEditMessage(index);
+                }
+                break;
+            case 'regenerate':
+                if (message.role === 'assistant' && !message.isLoading) {
+                    handleRegenerateResponse(index);
+                }
+                break;
+            case 'branch':
+                handleBranchConversation(index);
+                break;
+            case 'delete':
+                deleteMessage(index);
+                break;
+            default:
+                break;
+        }
+
+        closeLongPressMenu();
+    }, [
+        closeLongPressMenu,
+        deleteMessage,
+        handleBranchConversation,
+        handleEditMessage,
+        handleRegenerateResponse,
+        history,
+        longPressMenu,
+        toggleBookmark,
+    ]);
+
+    usePinchZoom((event) => {
+        const targetNode = event.target as Node | null;
+        if (!targetNode || !messageListRef.current?.contains(targetNode)) {
+            return;
+        }
+
+        setConversationFontSize(prev => {
+            const next = Math.max(12, Math.min(28, prev + (event.delta * 8)));
+            return Number(next.toFixed(2));
+        });
+    }, history.length > 0);
+
+    useLongPress((event) => {
+        const targetElement = event.target instanceof Element ? event.target : null;
+        if (!targetElement) return;
+
+        const bubble = targetElement.closest('[data-message-bubble-index]') as HTMLElement | null;
+        if (!bubble || !messageListRef.current?.contains(bubble)) {
+            return;
+        }
+
+        const messageIndex = Number(bubble.dataset.messageBubbleIndex);
+        if (!Number.isInteger(messageIndex)) {
+            return;
+        }
+
+        const position = clampLongPressMenuPosition(event.x, event.y);
+        setLongPressMenu({
+            messageIndex,
+            x: position.x,
+            y: position.y,
+        });
+    }, history.length > 0);
+
+    React.useEffect(() => {
+        localStorage.setItem('chat_font_size', String(conversationFontSize));
+    }, [conversationFontSize]);
+
+    React.useEffect(() => {
+        if (!longPressMenu) {
+            return;
+        }
+
+        const handleDocumentClick = (event: MouseEvent | TouchEvent) => {
+            const target = event.target as Node | null;
+            if (!target) return;
+
+            if (longPressMenuRef.current && longPressMenuRef.current.contains(target)) {
+                return;
+            }
+
+            closeLongPressMenu();
+        };
+
+        const handleEscape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                closeLongPressMenu();
+            }
+        };
+
+        document.addEventListener('mousedown', handleDocumentClick);
+        document.addEventListener('touchstart', handleDocumentClick);
+        document.addEventListener('keydown', handleEscape);
+
+        return () => {
+            document.removeEventListener('mousedown', handleDocumentClick);
+            document.removeEventListener('touchstart', handleDocumentClick);
+            document.removeEventListener('keydown', handleEscape);
+        };
+    }, [closeLongPressMenu, longPressMenu]);
+
+    React.useEffect(() => {
+        return () => {
+            if (swipeSessionTimerRef.current !== null) {
+                window.clearTimeout(swipeSessionTimerRef.current);
+            }
+        };
+    }, []);
+
+    useSwipeNavigation((event) => {
+        const targetNode = event.target as Node | null;
+        if (!targetNode || !messageListRef.current?.contains(targetNode)) {
+            return;
+        }
+
+        if (event.direction !== 'left' && event.direction !== 'right') {
+            return;
+        }
+
+        if (savedSessions.length <= 1) {
+            return;
+        }
+
+        const currentIndex = savedSessions.findIndex(session => session.id === sessionId);
+        if (currentIndex === -1) {
+            return;
+        }
+
+        const nextIndex = event.direction === 'left'
+            ? Math.min(currentIndex + 1, savedSessions.length - 1)
+            : Math.max(currentIndex - 1, 0);
+
+        if (nextIndex === currentIndex) {
+            return;
+        }
+
+        loadSession(savedSessions[nextIndex].id);
+        setSwipeSessionIndicator(event.direction === 'left' ? 'next' : 'previous');
+
+        if (swipeSessionTimerRef.current !== null) {
+            window.clearTimeout(swipeSessionTimerRef.current);
+        }
+
+        swipeSessionTimerRef.current = window.setTimeout(() => {
+            setSwipeSessionIndicator(null);
+        }, 700);
+    }, history.length > 0 && savedSessions.length > 1);
 
     // Load bookmarks when session changes
     React.useEffect(() => {
@@ -985,12 +1492,13 @@ const Chat: React.FC = () => {
                         ? 'ring-1 ring-yellow-500/50'
                         : ''
                     } ${msg.role === 'user' ? 'bg-primary/20 text-white rounded-tr-sm border border-primary/20' : 'bg-slate-800/80 text-slate-200 rounded-tl-sm border border-slate-700/50 backdrop-blur-sm'}`}
-                style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+                data-message-bubble-index={index}
+                style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', fontSize: `${conversationFontSize}px`, maxWidth: isCompactViewport ? '95%' : '85%' }}>
                     {/* Message actions */}
                     <div className="absolute -top-2 -right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                         <button
                             onClick={() => toggleBookmark(index)}
-                            className={`w-6 h-6 rounded-full text-white flex items-center justify-center shadow-lg cursor-pointer transition-all ${bookmarkedMessages.has(index)
+                            className={`touch-target touch-target-square rounded-full text-white flex items-center justify-center shadow-lg cursor-pointer transition-all ${bookmarkedMessages.has(index)
                                 ? 'bg-yellow-500 hover:bg-yellow-600'
                                 : 'bg-slate-700 hover:bg-slate-600'
                                 }`}
@@ -1301,16 +1809,20 @@ const Chat: React.FC = () => {
         handleSaveEdit,
         selectChoice,
         toggleBookmark,
+        conversationFontSize,
+        isCompactViewport,
     ]);
+
+    const longPressMessage = longPressMenu ? history[longPressMenu.messageIndex] : null;
 
     return (
         <div className="flex h-full flex-row relative bg-background text-text font-body overflow-hidden min-w-0 max-w-full">
             {/* History Sidebar */}
             {showHistory && (
-                <div className="w-64 border-r border-slate-800 bg-slate-900/95 flex flex-col h-full absolute left-0 z-20 backdrop-blur-md shadow-2xl transition-all duration-300">
+                <div className={`${isCompactViewport ? 'w-[min(88vw,320px)]' : 'w-64'} border-r border-slate-800 bg-slate-900/95 flex flex-col h-full absolute left-0 z-20 backdrop-blur-md shadow-2xl transition-all duration-300`}>
                     <div className="p-4 border-b border-slate-800 font-bold flex justify-between items-center text-slate-200">
                         <span className="flex items-center gap-2"><Clock size={16} /> Recent Chats</span>
-                        <button onClick={() => setShowHistory(false)} className="hover:text-white text-slate-400 transition-colors"><X size={18} /></button>
+                        <button onClick={() => setShowHistory(false)} className="touch-target hover:text-white text-slate-400 transition-colors"><X size={18} /></button>
                     </div>
                     <SidebarHistory
                         sessions={savedSessions}
@@ -1325,11 +1837,11 @@ const Chat: React.FC = () => {
             )}
 
             {/* Main Chat Area */}
-            <div className={`flex-1 flex flex-col h-full relative transition-[margin] duration-300 min-w-0 overflow-hidden ${showHistory ? 'ml-64' : 'ml-0'}`}>
+            <div className={`flex-1 flex flex-col h-full relative transition-[margin] duration-300 min-w-0 overflow-hidden ${showHistory && !isCompactViewport ? 'ml-64' : 'ml-0'}`}>
                 {/* Top Header */}
                 <div className="px-4 py-2 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2 backdrop-blur-sm shadow-sm z-10 flex-wrap">
                     <button onClick={() => setShowHistory(!showHistory)} title="View History" className={`p-1.5 rounded-md transition-colors border border-slate-700 flex-shrink-0 ${showHistory ? 'bg-slate-800 text-white' : 'hover:bg-slate-800 text-slate-400'}`}>
-                        <Clock size={16} />
+                        {isCompactViewport ? <Menu size={16} /> : <Clock size={16} />}
                     </button>
                     <button onClick={createNewSession} title="New Chat" className="flex items-center gap-1.5 px-2.5 py-1.5 bg-gradient-to-r from-emerald-600 to-emerald-500 text-white rounded-md hover:brightness-110 transition-all shadow-md shadow-emerald-900/20 font-medium text-xs flex-shrink-0">
                         <Plus size={14} /> <span>New</span>
@@ -1368,6 +1880,13 @@ const Chat: React.FC = () => {
                         className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
                     >
                         <Code2 size={14} /> <span>API</span>
+                    </button>
+                    <button
+                        onClick={() => setShowDeveloperDocs(true)}
+                        title="Developer Documentation"
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
+                    >
+                        <HelpCircle size={14} /> <span>Docs</span>
                     </button>
                     <button
                         onClick={() => setShowPluginManager(true)}
@@ -1440,6 +1959,24 @@ const Chat: React.FC = () => {
                                     <Users size={14} /> <span>Real-Time Collaboration</span>
                                 </button>
                                 <button
+                                    onClick={() => setShowCloudSync(true)}
+                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700 text-slate-300 rounded text-sm text-left"
+                                >
+                                    <Cloud size={14} /> <span>Cloud Sync</span>
+                                </button>
+                                <button
+                                    onClick={() => setShowTeamWorkspaces(true)}
+                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700 text-slate-300 rounded text-sm text-left"
+                                >
+                                    <Shield size={14} /> <span>Team Workspaces</span>
+                                </button>
+                                <button
+                                    onClick={() => setShowEnterpriseCompliance(true)}
+                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700 text-slate-300 rounded text-sm text-left"
+                                >
+                                    <ClipboardList size={14} /> <span>Enterprise SSO & Audit</span>
+                                </button>
+                                <button
                                     onClick={() => setShowBlockchain(true)}
                                     className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700 text-slate-300 rounded text-sm text-left"
                                 >
@@ -1460,6 +1997,13 @@ const Chat: React.FC = () => {
                             </div>
                         </div>
                     </div>
+                    <button
+                        onClick={() => setShowCloudSync(true)}
+                        title={cloudSyncBadge.title}
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap ${cloudSyncBadge.className}`}
+                    >
+                        <Cloud size={14} /> <span>{cloudSyncBadge.label}</span>
+                    </button>
                     {history.length > 0 && (
                         <button
                             onClick={() => {
@@ -1869,8 +2413,38 @@ const Chat: React.FC = () => {
                     </div>
                 )}
 
+                {/* Context Window Usage */}
+                {history.length > 0 && (
+                    <div className="px-6 pb-2">
+                        <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2">
+                            <div className="flex items-center justify-between text-[11px] mb-2">
+                                <span className="text-slate-400 uppercase tracking-wider font-semibold">Context Window</span>
+                                <span className={`${contextUsage.warning ? 'text-amber-300' : 'text-slate-500'}`}>
+                                    {Math.min(100, Math.round(contextUsage.fillRatio * 100))}% • {contextUsage.totalTokens.toLocaleString()} / {contextUsage.maxContextTokens.toLocaleString()} tokens
+                                </span>
+                            </div>
+                            <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                                <div
+                                    className={`h-full transition-all duration-500 ${contextUsage.fillRatio >= 0.9 ? 'bg-red-500' : contextUsage.fillRatio >= 0.8 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                                    style={{ width: `${Math.min(100, contextUsage.fillRatio * 100)}%` }}
+                                />
+                            </div>
+                            {contextUsage.warning && (
+                                <div className="mt-2 text-[11px] text-amber-300">
+                                    Context is above 80%. Open Controls and use Context Optimizer to trim or auto-summarize.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {/* Messages List */}
-                <div className="flex-1 overflow-hidden bg-background relative min-w-0 max-w-full">
+                <div ref={messageListRef} className="flex-1 overflow-hidden bg-background relative min-w-0 max-w-full">
+                    {swipeSessionIndicator && (
+                        <div className="absolute top-3 right-3 z-20 px-2 py-1 rounded bg-primary/20 border border-primary/40 text-primary text-xs font-semibold">
+                            {swipeSessionIndicator === 'next' ? 'Swiped to next chat' : 'Swiped to previous chat'}
+                        </div>
+                    )}
                     {history.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-full max-w-2xl mx-auto p-8 text-center space-y-8 animate-in fade-in duration-700">
                             <div className="relative">
@@ -1942,8 +2516,70 @@ const Chat: React.FC = () => {
                     )}
                 </div>
 
+                <AnimatePresence>
+                    {longPressMenu && longPressMessage && (
+                        <motion.div
+                            ref={longPressMenuRef}
+                            initial={{ opacity: 0, scale: 0.95, y: 4 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: 4 }}
+                            transition={{ duration: 0.15 }}
+                            className="fixed z-40 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl min-w-[220px] overflow-hidden"
+                            style={{ left: longPressMenu.x, top: longPressMenu.y }}
+                        >
+                            <button
+                                onClick={() => handleLongPressAction('copy')}
+                                className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 text-slate-200 text-sm transition-colors"
+                            >
+                                <Copy size={14} className="text-blue-400" />
+                                <span>Copy message</span>
+                            </button>
+                            <button
+                                onClick={() => handleLongPressAction('bookmark')}
+                                className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 text-slate-200 text-sm transition-colors"
+                            >
+                                <Star size={14} className="text-yellow-400" />
+                                <span>{bookmarkedMessages.has(longPressMenu.messageIndex) ? 'Remove bookmark' : 'Bookmark message'}</span>
+                            </button>
+                            {longPressMessage.role === 'user' && (
+                                <button
+                                    onClick={() => handleLongPressAction('edit')}
+                                    className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 text-slate-200 text-sm transition-colors"
+                                >
+                                    <Edit2 size={14} className="text-green-400" />
+                                    <span>Edit message</span>
+                                </button>
+                            )}
+                            {longPressMessage.role === 'assistant' && !longPressMessage.isLoading && (
+                                <button
+                                    onClick={() => handleLongPressAction('regenerate')}
+                                    className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 text-slate-200 text-sm transition-colors"
+                                >
+                                    <RefreshCw size={14} className="text-purple-400" />
+                                    <span>Regenerate</span>
+                                </button>
+                            )}
+                            <button
+                                onClick={() => handleLongPressAction('branch')}
+                                className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 text-slate-200 text-sm transition-colors"
+                            >
+                                <GitBranch size={14} className="text-yellow-400" />
+                                <span>Branch from here</span>
+                            </button>
+                            <div className="border-t border-slate-700/50" />
+                            <button
+                                onClick={() => handleLongPressAction('delete')}
+                                className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-red-500/20 text-red-400 text-sm transition-colors"
+                            >
+                                <Trash2 size={14} />
+                                <span>Delete from here</span>
+                            </button>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
                 {/* Floating Input Area with Control Bar */}
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-full max-w-4xl px-4 z-20 min-w-0 overflow-x-hidden">
+                <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 w-full ${isCompactViewport ? 'max-w-full' : 'max-w-4xl'} px-4 z-20 min-w-0 overflow-x-hidden`}>
                     <div
                         onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
                         onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
@@ -2566,11 +3202,19 @@ const Chat: React.FC = () => {
 
             {/* Inspector / Sidebar */}
             {sidebarOpen && (
-                <div className="w-[420px] min-w-[420px] bg-slate-950/50 border-1 border-slate-800 flex flex-col h-full border-l backdrop-blur-xl relative">
+                <>
+                {isCompactViewport && (
+                    <div
+                        className="absolute inset-0 bg-black/40 z-20"
+                        onClick={() => setSidebarOpen(false)}
+                    />
+                )}
+                <div className={`${isCompactViewport ? 'absolute inset-y-0 right-0 z-30 w-[92vw] max-w-[420px]' : 'w-[420px] min-w-[420px]'} bg-slate-950/50 border-1 border-slate-800 flex flex-col h-full border-l backdrop-blur-xl relative`}>
                 <div className="flex border-b border-slate-800 relative">
                     <button onClick={() => setActiveTab('inspector')} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'inspector' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Inspector</button>
                     <button onClick={() => setActiveTab('controls')} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'controls' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Controls</button>
                     <button onClick={() => setActiveTab('prompts')} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'prompts' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Prompts</button>
+                    <button onClick={() => setActiveTab('documents')} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'documents' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Docs</button>
                     <button
                         onClick={() => setSidebarOpen(false)}
                         className="absolute top-2 right-2 p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition-colors"
@@ -2740,6 +3384,95 @@ const Chat: React.FC = () => {
                                 </div>
                             </div>
 
+                            {/* Context Management */}
+                            <div className="pb-4 border-b border-slate-800 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Clock size={16} className={contextUsage.warning ? "text-amber-400" : "text-slate-400"} />
+                                        <div className="flex flex-col">
+                                            <label className="text-sm font-medium text-slate-300">Context Optimizer</label>
+                                            <span className="text-[10px] text-slate-500">
+                                                {Math.round(contextUsage.fillRatio * 100)}% of {contextUsage.maxContextTokens.toLocaleString()} tokens used
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => setAutoSummarizeContext(prev => !prev)}
+                                        className={`relative w-11 h-6 rounded-full transition-colors ${autoSummarizeContext ? 'bg-primary' : 'bg-slate-700'}`}
+                                        title="Auto-summarize old messages when context is near full"
+                                    >
+                                        <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${autoSummarizeContext ? 'translate-x-5' : 'translate-x-0'}`} />
+                                    </button>
+                                </div>
+
+                                <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                                    <div
+                                        className={`h-full transition-all ${contextUsage.fillRatio >= 0.9 ? 'bg-red-500' : contextUsage.fillRatio >= 0.8 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                                        style={{ width: `${Math.min(100, contextUsage.fillRatio * 100)}%` }}
+                                    />
+                                </div>
+
+                                <div className="text-[10px] text-slate-500">
+                                    Input: {contextUsage.inputTokens.toLocaleString()} • Reserved output: {contextUsage.reservedOutputTokens.toLocaleString()}
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => applyTrimSuggestions(3)}
+                                        disabled={trimSuggestions.length === 0}
+                                        className="px-2 py-1 text-[10px] rounded bg-slate-800 border border-slate-700 text-slate-300 disabled:opacity-40"
+                                    >
+                                        Apply Suggested Trim
+                                    </button>
+                                    <button
+                                        onClick={() => setExcludedContextIndices(new Set())}
+                                        className="px-2 py-1 text-[10px] rounded bg-slate-800 border border-slate-700 text-slate-300"
+                                    >
+                                        Include All
+                                    </button>
+                                </div>
+
+                                {trimSuggestions.length > 0 && (
+                                    <div className="space-y-1">
+                                        {trimSuggestions.slice(0, 3).map(suggestion => (
+                                            <div key={`trim-${suggestion.messageIndex}`} className="flex items-start justify-between gap-2 p-2 rounded bg-slate-900 border border-slate-700/50">
+                                                <div className="min-w-0">
+                                                    <div className="text-[10px] text-slate-300">
+                                                        #{suggestion.messageIndex + 1} ({suggestion.role}) • save ~{suggestion.estimatedTokenSavings} tokens
+                                                    </div>
+                                                    <div className="text-[10px] text-slate-500 truncate">{suggestion.preview}</div>
+                                                </div>
+                                                <button
+                                                    onClick={() => setExcludedContextIndices(prev => new Set(prev).add(suggestion.messageIndex))}
+                                                    className="px-2 py-1 text-[10px] rounded bg-slate-800 hover:bg-slate-700 text-slate-200"
+                                                >
+                                                    Exclude
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {recentContextMessages.length > 0 && (
+                                    <div className="space-y-1 max-h-44 overflow-y-auto custom-scrollbar pr-1">
+                                        {recentContextMessages.map(item => (
+                                            <label key={`ctx-${item.index}`} className="flex items-center justify-between gap-2 p-1.5 rounded hover:bg-slate-900/60">
+                                                <span className="text-[10px] text-slate-400 truncate">
+                                                    #{item.index + 1} {item.message.role} • ~{item.estimatedTokens}t
+                                                </span>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={item.included}
+                                                    onChange={() => toggleMessageContextInclusion(item.index)}
+                                                    className="rounded border-slate-600 bg-slate-800"
+                                                    title="Include this message in model context"
+                                                />
+                                            </label>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
                             <div className="space-y-2"><div className="flex justify-between text-sm"><label className="text-slate-400">Batch Size</label><span className="font-mono text-primary">{batchSize}</span></div><input type="range" min="1" max="5" value={batchSize} onChange={e => setBatchSize(parseInt(e.target.value))} className="w-full accent-primary h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer" /></div>
                             <div className="space-y-2"><div className="flex justify-between text-sm"><label className="text-slate-400">Temperature</label><span className="font-mono text-primary">{temperature}</span></div><input type="range" min="0" max="2" step="0.1" value={temperature} onChange={e => setTemperature(parseFloat(e.target.value))} className="w-full accent-primary h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer" /></div>
                             <div className="space-y-2"><div className="flex justify-between text-sm"><label className="text-slate-400">Top P</label><span className="font-mono text-primary">{topP}</span></div><input type="range" min="0" max="1" step="0.05" value={topP} onChange={e => setTopP(parseFloat(e.target.value))} className="w-full accent-primary h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer" /></div>
@@ -2783,6 +3516,10 @@ const Chat: React.FC = () => {
                     <React.Suspense fallback={<div className="p-6 text-slate-500 animate-pulse">Loading Library...</div>}>
                         <PromptManager />
                     </React.Suspense>
+                )}
+
+                {activeTab === 'documents' && (
+                    <DocumentChatPanel />
                 )}
 
                 {activeTab === 'inspector' && (
@@ -2851,6 +3588,7 @@ const Chat: React.FC = () => {
                     </div>
                 )}
                 </div>
+                </>
             )}
 
             {/* Sidebar Toggle Button (when closed) */}
@@ -2905,6 +3643,8 @@ const Chat: React.FC = () => {
             <GlobalSearchDialog
                 isOpen={showGlobalSearch}
                 onClose={() => setShowGlobalSearch(false)}
+                currentSessionId={sessionId}
+                currentSessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Current Conversation'}
                 onNavigateToMessage={(targetSessionId, messageIndex) => {
                     // If different session, load it first
                     if (targetSessionId !== sessionId) {
@@ -2968,121 +3708,14 @@ const Chat: React.FC = () => {
                 isOpen={showABTesting}
                 onClose={() => setShowABTesting(false)}
                 onExecutePrompt={async (prompt, systemPrompt, modelId, temperature, topP, maxTokens) => {
-                    // Create a temporary message array for the test
-                    const testMessages: any[] = [];
-                    if (systemPrompt) {
-                        testMessages.push({ role: 'system', content: systemPrompt });
-                    }
-                    testMessages.push({ role: 'user', content: prompt });
-
-                    // Use the current model or the specified one
-                    const testModelId = modelId || currentModel || availableModels[0]?.id;
-                    const testTemperature = temperature ?? 0.7;
-                    const testTopP = topP ?? 1.0;
-                    const testMaxTokens = maxTokens ?? 2000;
-
-                    // Execute the prompt using the chat hook's internal method
-                    // We'll need to create a wrapper that calls the API directly
-                    try {
-                        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-                        let url = 'http://localhost:3000/v1/chat/completions';
-                        let actualModelId = testModelId;
-
-                        if (testModelId.startsWith('openrouter/') && openRouterApiKey) {
-                            url = 'https://openrouter.ai/api/v1/chat/completions';
-                            actualModelId = testModelId.replace('openrouter/', '');
-                            headers['Authorization'] = `Bearer ${openRouterApiKey}`;
-                            headers['HTTP-Referer'] = 'http://localhost:5173';
-                            headers['X-Title'] = 'WinInferencer';
-                        }
-
-                        const response = await fetch(url, {
-                            method: 'POST',
-                            headers,
-                            body: JSON.stringify({
-                                model: actualModelId,
-                                messages: testMessages,
-                                temperature: testTemperature,
-                                top_p: testTopP,
-                                max_tokens: testMaxTokens,
-                                stream: false,
-                            }),
-                        });
-
-                        if (!response.ok) {
-                            throw new Error(`API error: ${response.statusText}`);
-                        }
-
-                        const data = await response.json();
-                        const content = data.choices?.[0]?.message?.content || '';
-                        const tokensUsed = data.usage?.total_tokens;
-
-                        return { content, tokensUsed };
-                    } catch (error) {
-                        throw error;
-                    }
-                }}
-                currentInput={input}
-                currentContext={history}
-            />
-
-            {/* A/B Testing Panel */}
-            <ABTestingPanel
-                isOpen={showABTesting}
-                onClose={() => setShowABTesting(false)}
-                onExecutePrompt={async (prompt, systemPrompt, modelId, temperature, topP, maxTokens) => {
-                    // Create a temporary message array for the test
-                    const testMessages: any[] = [];
-                    if (systemPrompt) {
-                        testMessages.push({ role: 'system', content: systemPrompt });
-                    }
-                    testMessages.push({ role: 'user', content: prompt });
-
-                    // Use the current model or the specified one
-                    const testModelId = modelId || currentModel || availableModels[0]?.id;
-                    const testTemperature = temperature ?? 0.7;
-                    const testTopP = topP ?? 1.0;
-                    const testMaxTokens = maxTokens ?? 2000;
-
-                    // Execute the prompt using the API directly
-                    try {
-                        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-                        let url = 'http://localhost:3000/v1/chat/completions';
-                        let actualModelId = testModelId;
-
-                        if (testModelId.startsWith('openrouter/') && openRouterApiKey) {
-                            url = 'https://openrouter.ai/api/v1/chat/completions';
-                            actualModelId = testModelId.replace('openrouter/', '');
-                            headers['Authorization'] = `Bearer ${openRouterApiKey}`;
-                            headers['HTTP-Referer'] = 'http://localhost:5173';
-                            headers['X-Title'] = 'WinInferencer';
-                        }
-
-                        const response = await fetch(url, {
-                            method: 'POST',
-                            headers,
-                            body: JSON.stringify({
-                                model: actualModelId,
-                                messages: testMessages,
-                                temperature: testTemperature,
-                                top_p: testTopP,
-                                max_tokens: testMaxTokens,
-                                stream: false,
-                            }),
-                        });
-
-                        if (!response.ok) {
-                            throw new Error(`API error: ${response.statusText}`);
-                        }
-
-                        const data = await response.json();
-                        const content = data.choices?.[0]?.message?.content || '';
-                        const tokensUsed = data.usage?.total_tokens;
-
-                        return { content, tokensUsed };
-                    } catch (error) {
-                        throw error;
-                    }
+                    return executeChatCompletion({
+                        prompt,
+                        systemPrompt,
+                        modelId,
+                        temperature,
+                        topP,
+                        maxTokens,
+                    });
                 }}
                 currentInput={input}
                 currentContext={history}
@@ -3135,6 +3768,16 @@ const Chat: React.FC = () => {
                 onClose={() => setShowAPIPlayground(false)}
             />
 
+            {/* Developer Documentation */}
+            <DeveloperDocumentationPanel
+                isOpen={showDeveloperDocs}
+                onClose={() => setShowDeveloperDocs(false)}
+                onOpenAPIPlayground={() => {
+                    setShowDeveloperDocs(false);
+                    setShowAPIPlayground(true);
+                }}
+            />
+
             {/* Plugin Manager */}
             <PluginManager
                 isOpen={showPluginManager}
@@ -3152,38 +3795,11 @@ const Chat: React.FC = () => {
                 language={selectedCode?.language || 'javascript'}
                 conversationHistory={history}
                 onExecutePrompt={async (prompt, systemPrompt) => {
-                    // Execute prompt using current model
-                    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-                    let url = 'http://localhost:3000/v1/chat/completions';
-                    let actualModelId = currentModel;
-                    const openRouterApiKey = localStorage.getItem('openRouterApiKey');
-
-                    if (currentModel.startsWith('openrouter/') && openRouterApiKey) {
-                        url = 'https://openrouter.ai/api/v1/chat/completions';
-                        actualModelId = currentModel.replace('openrouter/', '');
-                        headers['Authorization'] = `Bearer ${openRouterApiKey}`;
-                        headers['HTTP-Referer'] = 'http://localhost:5173';
-                        headers['X-Title'] = 'WinInferencer';
-                    }
-
-                    const response = await fetch(url, {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify({
-                            model: actualModelId,
-                            messages: [
-                                ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
-                                { role: 'user', content: prompt },
-                            ],
-                            temperature,
-                            top_p: topP,
-                            max_tokens: maxTokens,
-                            stream: false,
-                        }),
+                    const result = await executeChatCompletion({
+                        prompt,
+                        systemPrompt,
                     });
-
-                    const data = await response.json();
-                    return { content: data.choices?.[0]?.message?.content || ''                     };
+                    return { content: result.content };
                 }}
             />
 
@@ -3239,37 +3855,11 @@ const Chat: React.FC = () => {
                     const response = await multiModalAIService.sendMultiModalRequest(
                         { text, media },
                         async (prompt, systemPrompt) => {
-                            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-                            let url = 'http://localhost:3000/v1/chat/completions';
-                            let actualModelId = currentModel;
-                            const openRouterApiKey = localStorage.getItem('openRouterApiKey');
-
-                            if (currentModel.startsWith('openrouter/') && openRouterApiKey) {
-                                url = 'https://openrouter.ai/api/v1/chat/completions';
-                                actualModelId = currentModel.replace('openrouter/', '');
-                                headers['Authorization'] = `Bearer ${openRouterApiKey}`;
-                                headers['HTTP-Referer'] = 'http://localhost:5173';
-                                headers['X-Title'] = 'WinInferencer';
-                            }
-
-                            const response = await fetch(url, {
-                                method: 'POST',
-                                headers,
-                                body: JSON.stringify({
-                                    model: actualModelId,
-                                    messages: [
-                                        ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
-                                        { role: 'user', content: prompt },
-                                    ],
-                                    temperature,
-                                    top_p: topP,
-                                    max_tokens: maxTokens,
-                                    stream: false,
-                                }),
+                            const result = await executeChatCompletion({
+                                prompt,
+                                systemPrompt,
                             });
-
-                            const data = await response.json();
-                            return { content: data.choices?.[0]?.message?.content || '' };
+                            return { content: result.content };
                         }
                     );
                     // Add response to conversation
@@ -3287,6 +3877,23 @@ const Chat: React.FC = () => {
                 onClose={() => setShowCollaboration(false)}
             />
 
+            <CloudSyncPanel
+                isOpen={showCloudSync}
+                onClose={() => setShowCloudSync(false)}
+            />
+
+            <TeamWorkspacesPanel
+                isOpen={showTeamWorkspaces}
+                onClose={() => setShowTeamWorkspaces(false)}
+                availableModels={availableModels}
+                conversations={savedSessions}
+            />
+
+            <EnterpriseCompliancePanel
+                isOpen={showEnterpriseCompliance}
+                onClose={() => setShowEnterpriseCompliance(false)}
+            />
+
             {/* Blockchain Integration */}
             <BlockchainPanel
                 isOpen={showBlockchain}
@@ -3300,37 +3907,11 @@ const Chat: React.FC = () => {
                 isOpen={showAIAgents}
                 onClose={() => setShowAIAgents(false)}
                 onExecutePrompt={async (prompt, systemPrompt) => {
-                    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-                    let url = 'http://localhost:3000/v1/chat/completions';
-                    let actualModelId = currentModel;
-                    const openRouterApiKey = localStorage.getItem('openRouterApiKey');
-
-                    if (currentModel.startsWith('openrouter/') && openRouterApiKey) {
-                        url = 'https://openrouter.ai/api/v1/chat/completions';
-                        actualModelId = currentModel.replace('openrouter/', '');
-                        headers['Authorization'] = `Bearer ${openRouterApiKey}`;
-                        headers['HTTP-Referer'] = 'http://localhost:5173';
-                        headers['X-Title'] = 'WinInferencer';
-                    }
-
-                    const response = await fetch(url, {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify({
-                            model: actualModelId,
-                            messages: [
-                                ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
-                                { role: 'user', content: prompt },
-                            ],
-                            temperature,
-                            top_p: topP,
-                            max_tokens: maxTokens,
-                            stream: false,
-                        }),
+                    const result = await executeChatCompletion({
+                        prompt,
+                        systemPrompt,
                     });
-
-                    const data = await response.json();
-                    return { content: data.choices?.[0]?.message?.content || '' };
+                    return { content: result.content };
                 }}
             />
 

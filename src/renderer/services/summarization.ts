@@ -10,6 +10,7 @@
  */
 
 import { ChatMessage } from '../../shared/types';
+import { credentialService } from './credentials';
 
 export interface ConversationSummary {
     id: string;
@@ -154,7 +155,7 @@ ${conversationText}`;
             let actualModelId = modelId;
             const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
-            const openRouterApiKey = localStorage.getItem('openRouterApiKey');
+            const openRouterApiKey = await credentialService.getOpenRouterApiKey();
             if (modelId.startsWith('openrouter/') && openRouterApiKey) {
                 url = 'https://openrouter.ai/api/v1/chat/completions';
                 actualModelId = modelId.replace('openrouter/', '');

@@ -3,6 +3,8 @@ import { Model } from '../../shared/types';
 import { HistoryService } from '../services/history';
 import { Search, Download, Upload, FileText, HardDrive, Cpu, X, Check, AlertCircle, Loader2, Database, Heart, Tag } from 'lucide-react';
 import ProgressBar from '../components/ProgressBar';
+import { useBackendHealth } from '../hooks/useBackendHealth';
+import { backendHealthService } from '../services/backendHealth';
 
 interface SearchResult {
   id: string;
@@ -34,6 +36,7 @@ const Models: React.FC = () => {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [activeDownloads, setActiveDownloads] = useState<DownloadStatus[]>([]);
+  const { online: isBackendOnline } = useBackendHealth();
 
   // Modal State
   const [selectedRepo, setSelectedRepo] = useState<SearchResult | null>(null);
@@ -43,12 +46,23 @@ const Models: React.FC = () => {
   // For file import
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Initial Fetch
+  // Initial Fetch / recovery refresh
   useEffect(() => {
+    if (!isBackendOnline) {
+      setLocalModels([]);
+      setActiveDownloads([]);
+      return;
+    }
     refreshModels();
-    const interval = setInterval(fetchDownloads, 1000);
+    fetchDownloads();
+  }, [isBackendOnline]);
+
+  useEffect(() => {
+    if (!isBackendOnline) return;
+    const pollIntervalMs = activeDownloads.length > 0 ? 1000 : 5000;
+    const interval = setInterval(fetchDownloads, pollIntervalMs);
     return () => clearInterval(interval);
-  }, []);
+  }, [activeDownloads.length, isBackendOnline]);
 
   // Export chat history
   const handleExportHistory = () => {
@@ -75,17 +89,31 @@ const Models: React.FC = () => {
   };
 
   const refreshModels = () => {
+    if (!isBackendOnline) return;
     fetch('http://localhost:3000/v1/models')
       .then(res => res.json())
-      .then(data => setLocalModels(data.data))
-      .catch(console.error);
+      .then(data => {
+        setLocalModels(Array.isArray(data?.data) ? data.data : []);
+        backendHealthService.reportRequestResult(true);
+      })
+      .catch(() => {
+        setLocalModels([]);
+        backendHealthService.reportRequestResult(false);
+      });
   };
 
   const fetchDownloads = () => {
+    if (!isBackendOnline) return;
     fetch('http://localhost:3000/v1/downloads')
       .then(res => res.json())
-      .then(data => setActiveDownloads(data))
-      .catch(console.error);
+      .then(data => {
+        setActiveDownloads(Array.isArray(data) ? data : []);
+        backendHealthService.reportRequestResult(true);
+      })
+      .catch(() => {
+        setActiveDownloads([]);
+        backendHealthService.reportRequestResult(false);
+      });
   };
 
   const handleSearch = async () => {
@@ -189,6 +217,12 @@ const Models: React.FC = () => {
           />
         </div>
       </div>
+
+      {!isBackendOnline && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-amber-200">
+          Local model backend is offline at <code className="text-amber-100">http://localhost:3000</code>. Start the backend to browse installed models and downloads.
+        </div>
+      )}
 
       {/* Active Downloads Section */}
       {activeDownloads.length > 0 && (
