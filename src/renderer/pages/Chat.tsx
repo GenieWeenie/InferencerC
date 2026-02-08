@@ -5,10 +5,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { LogEntry } from '../components/RequestResponseLog';
 import { responsiveDesignService } from '../services/responsiveDesign';
 import type { Tutorial } from '../services/onboarding';
-import { multiModalAIService } from '../services/multiModalAI';
 import { PerformanceMonitorOverlay } from '../components/PerformanceMonitorOverlay';
 import { crashRecoveryService } from '../services/crashRecovery';
-import { cloudSyncService, CloudSyncStatus } from '../services/cloudSync';
+import type { CloudSyncStatus } from '../services/cloudSync';
 const PromptManager = React.lazy(() => import('../components/PromptManager'));
 import { useChat } from '../hooks/useChat';
 import { usePrompts, PromptSnippet } from '../hooks/usePrompts';
@@ -19,10 +18,6 @@ import { useMCP } from '../hooks/useMCP';
 import { readAnalyticsUsageStats, UsageStatsRecord } from '../services/analyticsStore';
 import { projectContextService, ProjectContext } from '../services/projectContext';
 import { HistoryService } from '../services/history';
-import { autoCategorizationService } from '../services/autoCategorization';
-import { autoTaggingService } from '../services/autoTagging';
-import { workflowsService } from '../services/workflows';
-import { apiClientService } from '../services/apiClient';
 import { activityLogService } from '../services/activityLog';
 import { TemplateService, ConversationTemplate } from '../services/templates';
 import { PromptVariableService } from '../services/promptVariables';
@@ -119,10 +114,65 @@ const CHAT_DEV_MONITORS_ENABLED_KEY = 'chat_dev_monitors_enabled_v1';
 const ONBOARDING_COMPLETED_KEY = 'onboarding_completed';
 
 type OnboardingServiceModule = typeof import('../services/onboarding');
+type CloudSyncService = typeof import('../services/cloudSync')['cloudSyncService'];
+type MultiModalAIService = typeof import('../services/multiModalAI')['multiModalAIService'];
+type AutoCategorizationService = typeof import('../services/autoCategorization')['autoCategorizationService'];
+type AutoTaggingService = typeof import('../services/autoTagging')['autoTaggingService'];
+type WorkflowsService = typeof import('../services/workflows')['workflowsService'];
+type ApiClientService = typeof import('../services/apiClient')['apiClientService'];
+
+let cloudSyncServicePromise: Promise<CloudSyncService> | null = null;
+let multiModalAIServicePromise: Promise<MultiModalAIService> | null = null;
+let autoCategorizationServicePromise: Promise<AutoCategorizationService> | null = null;
+let autoTaggingServicePromise: Promise<AutoTaggingService> | null = null;
+let workflowsServicePromise: Promise<WorkflowsService> | null = null;
+let apiClientServicePromise: Promise<ApiClientService> | null = null;
 
 const loadOnboardingService = async () => {
     const onboardingModule: OnboardingServiceModule = await import('../services/onboarding');
     return onboardingModule.onboardingService;
+};
+
+const loadCloudSyncService = async (): Promise<CloudSyncService> => {
+    if (!cloudSyncServicePromise) {
+        cloudSyncServicePromise = import('../services/cloudSync').then((mod) => mod.cloudSyncService);
+    }
+    return cloudSyncServicePromise;
+};
+
+const loadMultiModalAIService = async (): Promise<MultiModalAIService> => {
+    if (!multiModalAIServicePromise) {
+        multiModalAIServicePromise = import('../services/multiModalAI').then((mod) => mod.multiModalAIService);
+    }
+    return multiModalAIServicePromise;
+};
+
+const loadAutoCategorizationService = async (): Promise<AutoCategorizationService> => {
+    if (!autoCategorizationServicePromise) {
+        autoCategorizationServicePromise = import('../services/autoCategorization').then((mod) => mod.autoCategorizationService);
+    }
+    return autoCategorizationServicePromise;
+};
+
+const loadAutoTaggingService = async (): Promise<AutoTaggingService> => {
+    if (!autoTaggingServicePromise) {
+        autoTaggingServicePromise = import('../services/autoTagging').then((mod) => mod.autoTaggingService);
+    }
+    return autoTaggingServicePromise;
+};
+
+const loadWorkflowsService = async (): Promise<WorkflowsService> => {
+    if (!workflowsServicePromise) {
+        workflowsServicePromise = import('../services/workflows').then((mod) => mod.workflowsService);
+    }
+    return workflowsServicePromise;
+};
+
+const loadApiClientService = async (): Promise<ApiClientService> => {
+    if (!apiClientServicePromise) {
+        apiClientServicePromise = import('../services/apiClient').then((mod) => mod.apiClientService);
+    }
+    return apiClientServicePromise;
 };
 
 type ChatPerfMode = 'single' | 'battle';
@@ -377,8 +427,8 @@ const Chat: React.FC = () => {
     const [showCloudSync, setShowCloudSync] = React.useState(false);
     const [showTeamWorkspaces, setShowTeamWorkspaces] = React.useState(false);
     const [showEnterpriseCompliance, setShowEnterpriseCompliance] = React.useState(false);
-    const [cloudSyncStatus, setCloudSyncStatus] = React.useState<CloudSyncStatus | null>(() => cloudSyncService.getSyncStatus());
-    const [isCloudSyncAuthenticated, setIsCloudSyncAuthenticated] = React.useState<boolean>(() => cloudSyncService.isAuthenticated());
+    const [cloudSyncStatus, setCloudSyncStatus] = React.useState<CloudSyncStatus | null>(null);
+    const [isCloudSyncAuthenticated, setIsCloudSyncAuthenticated] = React.useState<boolean>(false);
     const [showBlockchain, setShowBlockchain] = React.useState(false);
     const [showAIAgents, setShowAIAgents] = React.useState(false);
     const [showFederatedLearning, setShowFederatedLearning] = React.useState(false);
@@ -429,21 +479,37 @@ const Chat: React.FC = () => {
     }, []);
 
     React.useEffect(() => {
-        const refreshCloudSyncStatus = () => {
-            setCloudSyncStatus(cloudSyncService.getSyncStatus());
-            setIsCloudSyncAuthenticated(cloudSyncService.isAuthenticated());
+        let cancelled = false;
+
+        const refreshCloudSyncStatus = async () => {
+            try {
+                const cloudSyncService = await loadCloudSyncService();
+                if (cancelled) return;
+                setCloudSyncStatus(cloudSyncService.getSyncStatus());
+                setIsCloudSyncAuthenticated(cloudSyncService.isAuthenticated());
+            } catch {
+                if (cancelled) return;
+                setCloudSyncStatus(null);
+                setIsCloudSyncAuthenticated(false);
+            }
         };
 
-        refreshCloudSyncStatus();
-        const interval = setInterval(refreshCloudSyncStatus, 5000);
+        void refreshCloudSyncStatus();
+        const interval = setInterval(() => {
+            void refreshCloudSyncStatus();
+        }, 5000);
 
-        window.addEventListener('focus', refreshCloudSyncStatus);
-        window.addEventListener('storage', refreshCloudSyncStatus);
+        const handleRefresh = () => {
+            void refreshCloudSyncStatus();
+        };
+        window.addEventListener('focus', handleRefresh);
+        window.addEventListener('storage', handleRefresh);
 
         return () => {
+            cancelled = true;
             clearInterval(interval);
-            window.removeEventListener('focus', refreshCloudSyncStatus);
-            window.removeEventListener('storage', refreshCloudSyncStatus);
+            window.removeEventListener('focus', handleRefresh);
+            window.removeEventListener('storage', handleRefresh);
         };
     }, []);
 
@@ -1353,11 +1419,15 @@ const Chat: React.FC = () => {
         if (history.length > 0 && sessionId) {
             // Auto-categorize after 3+ messages
             if (history.length >= 3) {
-                autoCategorizationService.categorizeConversation(sessionId).catch(console.error);
+                void loadAutoCategorizationService()
+                    .then((service) => service.categorizeConversation(sessionId))
+                    .catch(console.error);
             }
             // Auto-tag after 2+ messages
             if (history.length >= 2) {
-                autoTaggingService.tagConversation(sessionId).catch(console.error);
+                void loadAutoTaggingService()
+                    .then((service) => service.tagConversation(sessionId))
+                    .catch(console.error);
             }
         }
     }, [history.length, sessionId]);
@@ -1367,11 +1437,13 @@ const Chat: React.FC = () => {
         if (history.length > 0) {
             const lastMessage = history[history.length - 1];
             if (lastMessage?.role === 'user' && lastMessage.content) {
-                workflowsService.checkWorkflows(
-                    lastMessage.content,
-                    history,
-                    currentModel
-                ).catch(console.error);
+                void loadWorkflowsService()
+                    .then((service) => service.checkWorkflows(
+                        lastMessage.content,
+                        history,
+                        currentModel
+                    ))
+                    .catch(console.error);
             }
         }
     }, [history.length, currentModel]);
@@ -1603,6 +1675,7 @@ const Chat: React.FC = () => {
         const selectedTemperature = params.temperature ?? temperature;
         const selectedTopP = params.topP ?? topP;
         const selectedMaxTokens = params.maxTokens ?? maxTokens;
+        const apiClientService = await loadApiClientService();
 
         const request = await apiClientService.buildChatCompletionRequest(
             selectedModelId,
@@ -4794,6 +4867,7 @@ const Chat: React.FC = () => {
                         onClose={() => setShowMultiModal(false)}
                         onSend={async (media, text) => {
                             // Process multi-modal request
+                            const multiModalAIService = await loadMultiModalAIService();
                             const response = await multiModalAIService.sendMultiModalRequest(
                                 { text, media },
                                 async (prompt, systemPrompt) => {
