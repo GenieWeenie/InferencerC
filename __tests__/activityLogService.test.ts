@@ -38,6 +38,7 @@ describe('activityLogService', () => {
 
   test('returns empty entries by default', () => {
     expect(activityLogService.getEntries()).toEqual([]);
+    expect(activityLogService.getEntryCount()).toBe(0);
   });
 
   test('appends and persists valid log entries', () => {
@@ -55,6 +56,7 @@ describe('activityLogService', () => {
     expect(saved).toHaveLength(1);
     expect(saved[0].id).toBe('entry-1');
     expect(saved[0].model).toBe('local/test-model');
+    expect(activityLogService.getEntryCount()).toBe(1);
   });
 
   test('keeps only the latest 200 entries', () => {
@@ -72,6 +74,7 @@ describe('activityLogService', () => {
     expect(saved).toHaveLength(200);
     expect(saved[0].id).toBe('entry-5');
     expect(saved[199].id).toBe('entry-204');
+    expect(activityLogService.getEntryCount()).toBe(200);
   });
 
   test('clear removes all saved entries', () => {
@@ -86,5 +89,35 @@ describe('activityLogService', () => {
     expect(activityLogService.getEntries()).toHaveLength(1);
     activityLogService.clear();
     expect(activityLogService.getEntries()).toHaveLength(0);
+    expect(activityLogService.getEntryCount()).toBe(0);
+  });
+
+  test('getEntryCount falls back to entries when count metadata is missing', () => {
+    const entries: ApiActivityLogEntry[] = [
+      {
+        id: 'entry-fallback-1',
+        timestamp: 1,
+        type: 'request',
+        model: 'local/test-model',
+      },
+      {
+        id: 'entry-fallback-2',
+        timestamp: 2,
+        type: 'response',
+        model: 'local/test-model',
+      },
+    ];
+
+    localStorageMock.setItem('api_activity_log_entries', JSON.stringify(entries));
+    localStorageMock.removeItem('api_activity_log_count');
+
+    expect(activityLogService.getEntryCount()).toBe(2);
+  });
+
+  test('getEntryCount ignores invalid persisted count values', () => {
+    localStorageMock.setItem('api_activity_log_count', 'not-a-number');
+    localStorageMock.setItem('api_activity_log_entries', JSON.stringify([]));
+
+    expect(activityLogService.getEntryCount()).toBe(0);
   });
 });

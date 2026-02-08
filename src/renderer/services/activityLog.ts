@@ -10,6 +10,7 @@ export interface ApiActivityLogEntry {
 }
 
 const ACTIVITY_LOG_KEY = 'api_activity_log_entries';
+const ACTIVITY_LOG_COUNT_KEY = 'api_activity_log_count';
 const MAX_ACTIVITY_LOG_ENTRIES = 200;
 
 export class ActivityLogService {
@@ -31,9 +32,29 @@ export class ActivityLogService {
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      return parsed.filter(this.isValidEntry);
+      const validEntries = parsed.filter(this.isValidEntry);
+      this.saveCount(validEntries.length);
+      return validEntries;
     } catch {
       return [];
+    }
+  }
+
+  getEntryCount(): number {
+    try {
+      if (typeof localStorage === 'undefined') return 0;
+      const rawCount = localStorage.getItem(ACTIVITY_LOG_COUNT_KEY);
+      if (rawCount !== null) {
+        const parsedCount = Number(rawCount);
+        if (Number.isInteger(parsedCount) && parsedCount >= 0) {
+          return parsedCount;
+        }
+      }
+      const fallbackCount = this.getEntries().length;
+      this.saveCount(fallbackCount);
+      return fallbackCount;
+    } catch {
+      return 0;
     }
   }
 
@@ -48,6 +69,7 @@ export class ActivityLogService {
     try {
       if (typeof localStorage === 'undefined') return;
       localStorage.removeItem(ACTIVITY_LOG_KEY);
+      localStorage.removeItem(ACTIVITY_LOG_COUNT_KEY);
     } catch {
       // ignore storage errors
     }
@@ -57,6 +79,16 @@ export class ActivityLogService {
     try {
       if (typeof localStorage === 'undefined') return;
       localStorage.setItem(ACTIVITY_LOG_KEY, JSON.stringify(entries));
+      this.saveCount(entries.length);
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  private saveCount(count: number): void {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      localStorage.setItem(ACTIVITY_LOG_COUNT_KEY, String(Math.max(0, count)));
     } catch {
       // ignore storage errors
     }

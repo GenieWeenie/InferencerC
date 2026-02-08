@@ -75,6 +75,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 6: split chat display helpers into `chatDisplayUtils` to keep non-renderer chat utility paths lighter.
    - Pass 7: remove ineffective dynamic imports in `useChat` for services already loaded elsewhere.
    - Pass 8: add explicit Vite vendor `manualChunks` to break oversized renderer bundles and improve cacheability.
+   - Pass 9: defer full API activity-log hydration until log panel open; keep instant badge count via lightweight metadata.
 
 ## Release Checklist for v3.1.x
 

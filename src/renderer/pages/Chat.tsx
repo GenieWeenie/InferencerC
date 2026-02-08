@@ -1,5 +1,5 @@
 import React from 'react';
-import { Send, Clock, Plus, Trash2, X, Globe, Settings, Activity, AlertTriangle, ChevronRight, ChevronLeft, Check, AlertCircle, Brain, Users, ImageIcon, Plug, Wrench, Copy, Eraser, Download, Edit2, Search, ChevronUp, ChevronDown, Star, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, GitBranch, Network, HelpCircle, Maximize2, Minimize2, RefreshCw, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
+import { Send, Clock, Plus, Trash2, X, Globe, Settings, Activity, AlertTriangle, ChevronRight, Check, AlertCircle, Brain, Users, ImageIcon, Plug, Wrench, Copy, Eraser, Download, Edit2, Search, ChevronUp, ChevronDown, Star, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, GitBranch, Network, HelpCircle, Maximize2, Minimize2, RefreshCw, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { LogEntry } from '../components/RequestResponseLog';
@@ -279,7 +279,9 @@ const MessageSkeleton: React.FC<{ isUser?: boolean }> = ({ isUser = false }) => 
 
 const Chat: React.FC = () => {
     // API logs state (defined before useChat so it can be passed as callback)
-    const [apiLogs, setApiLogs] = React.useState<LogEntry[]>(() => activityLogService.getEntries());
+    const [apiLogs, setApiLogs] = React.useState<LogEntry[]>([]);
+    const [apiLogCount, setApiLogCount] = React.useState<number>(() => activityLogService.getEntryCount());
+    const [hasHydratedApiLogs, setHasHydratedApiLogs] = React.useState(false);
 
     const [streamingEnabled, setStreamingEnabled] = React.useState(true);
     const [isLoadingSessions, setIsLoadingSessions] = React.useState(true);
@@ -287,6 +289,7 @@ const Chat: React.FC = () => {
 
     const handleApiLog = React.useCallback((log: LogEntry) => {
         const next = activityLogService.append(log);
+        setApiLogCount(next.length);
         setApiLogs(next);
     }, []);
 
@@ -664,6 +667,12 @@ const Chat: React.FC = () => {
             document.removeEventListener('keydown', handleEscape);
         };
     }, [showDiagnosticsPanel]);
+
+    React.useEffect(() => {
+        if (!showRequestLog || hasHydratedApiLogs) return;
+        setApiLogs(activityLogService.getEntries());
+        setHasHydratedApiLogs(true);
+    }, [showRequestLog, hasHydratedApiLogs]);
 
     React.useEffect(() => {
         localStorage.setItem('chat_show_bottom_controls', showBottomControls ? '1' : '0');
@@ -3103,9 +3112,9 @@ const Chat: React.FC = () => {
                         className={`p-1.5 rounded-md transition-colors border border-slate-700 relative flex-shrink-0 ${showRequestLog ? 'bg-slate-800 text-white' : 'hover:bg-slate-800 text-slate-400'}`}
                     >
                         <FileText size={14} />
-                        {apiLogs.length > 0 && (
+                        {apiLogCount > 0 && (
                             <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-primary text-white text-[8px] font-bold rounded-full flex items-center justify-center">
-                                {apiLogs.length > 9 ? '9+' : apiLogs.length}
+                                {apiLogCount > 9 ? '9+' : apiLogCount}
                             </span>
                         )}
                     </button>
@@ -4716,6 +4725,8 @@ const Chat: React.FC = () => {
                         onClear={() => {
                             activityLogService.clear();
                             setApiLogs([]);
+                            setApiLogCount(0);
+                            setHasHydratedApiLogs(true);
                         }}
                     />
                 </React.Suspense>
