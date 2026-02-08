@@ -1,7 +1,25 @@
 import { ChatSession } from '../../shared/types';
 import { HistoryService } from './history';
 import { TemplateService } from './templates';
-import { enterpriseComplianceService } from './enterpriseCompliance';
+
+type EnterpriseComplianceService = typeof import('./enterpriseCompliance')['enterpriseComplianceService'];
+
+let enterpriseComplianceServicePromise: Promise<EnterpriseComplianceService> | null = null;
+
+const loadEnterpriseComplianceService = async (): Promise<EnterpriseComplianceService> => {
+    if (!enterpriseComplianceServicePromise) {
+        enterpriseComplianceServicePromise = import('./enterpriseCompliance').then((mod) => mod.enterpriseComplianceService);
+    }
+    return enterpriseComplianceServicePromise;
+};
+
+const logComplianceEvent = (event: any): void => {
+    void loadEnterpriseComplianceService()
+        .then((service) => service.logEvent(event))
+        .catch(() => {
+            // Non-blocking compliance logging.
+        });
+};
 
 interface CloudSyncAuthResponse {
     token: string;
@@ -236,7 +254,7 @@ class CloudSyncService {
             this.config.encryptionSalt = result.encryptionSalt;
             this.saveConfig();
 
-            enterpriseComplianceService.logEvent({
+            logComplianceEvent({
                 category: 'cloudsync.auth',
                 action: 'register',
                 result: 'success',
@@ -248,7 +266,7 @@ class CloudSyncService {
 
             return result;
         } catch (error: any) {
-            enterpriseComplianceService.logEvent({
+            logComplianceEvent({
                 category: 'cloudsync.auth',
                 action: 'register',
                 result: 'failure',
@@ -272,7 +290,7 @@ class CloudSyncService {
             this.config.encryptionSalt = result.encryptionSalt;
             this.saveConfig();
 
-            enterpriseComplianceService.logEvent({
+            logComplianceEvent({
                 category: 'cloudsync.auth',
                 action: 'login',
                 result: 'success',
@@ -284,7 +302,7 @@ class CloudSyncService {
 
             return result;
         } catch (error: any) {
-            enterpriseComplianceService.logEvent({
+            logComplianceEvent({
                 category: 'cloudsync.auth',
                 action: 'login',
                 result: 'failure',
@@ -306,7 +324,7 @@ class CloudSyncService {
         this.config.encryptionSalt = undefined;
         this.cachedPassphrase = null;
         this.saveConfig();
-        enterpriseComplianceService.logEvent({
+        logComplianceEvent({
             category: 'cloudsync.auth',
             action: 'logout',
             result: 'info',
@@ -320,7 +338,7 @@ class CloudSyncService {
         }
         try {
             const profile = await this.request<CloudSyncProfileResponse>('/v1/cloud-sync/profile', undefined, true);
-            enterpriseComplianceService.logEvent({
+            logComplianceEvent({
                 category: 'cloudsync.profile',
                 action: 'read',
                 result: 'success',
@@ -330,7 +348,7 @@ class CloudSyncService {
             });
             return profile;
         } catch (error: any) {
-            enterpriseComplianceService.logEvent({
+            logComplianceEvent({
                 category: 'cloudsync.profile',
                 action: 'read',
                 result: 'failure',
@@ -734,7 +752,7 @@ class CloudSyncService {
             syncedAt: state.lastSyncedAt,
         };
 
-        enterpriseComplianceService.logEvent({
+        logComplianceEvent({
             category: 'cloudsync.sync',
             action: 'sync_now',
             result: 'success',

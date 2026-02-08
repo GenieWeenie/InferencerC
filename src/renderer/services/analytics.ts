@@ -1,7 +1,6 @@
-import { UsageStats } from '../components/AnalyticsDashboard';
 import { privacyService } from './privacy';
+import { clearAnalyticsUsageStats, readAnalyticsUsageStats, UsageStatsRecord, writeAnalyticsUsageStats } from './analyticsStore';
 
-const ANALYTICS_KEY = 'inferencer-analytics';
 const MAX_HISTORY_DAYS = 30;
 
 export class AnalyticsService {
@@ -29,7 +28,7 @@ export class AnalyticsService {
         const today = new Date().toISOString().split('T')[0];
         const stats = this.getUsageStats();
 
-        const newStat: UsageStats = {
+        const newStat: UsageStatsRecord = {
             date: today,
             tokenCount,
             messageCount: 1,
@@ -50,29 +49,18 @@ export class AnalyticsService {
     }
 
     // Get all usage stats
-    getUsageStats(): UsageStats[] {
-        try {
-            const data = localStorage.getItem(ANALYTICS_KEY);
-            if (!data) return [];
-            return JSON.parse(data);
-        } catch (error) {
-            console.error('Failed to load analytics:', error);
-            return [];
-        }
+    getUsageStats(): UsageStatsRecord[] {
+        return readAnalyticsUsageStats();
     }
 
     // Save usage stats
-    private saveUsageStats(stats: UsageStats[]): void {
-        try {
-            localStorage.setItem(ANALYTICS_KEY, JSON.stringify(stats));
-        } catch (error) {
-            console.error('Failed to save analytics:', error);
-        }
+    private saveUsageStats(stats: UsageStatsRecord[]): void {
+        writeAnalyticsUsageStats(stats);
     }
 
     // Clear all analytics
     clearAnalytics(): void {
-        localStorage.removeItem(ANALYTICS_KEY);
+        clearAnalyticsUsageStats();
     }
 
     // Get stats summary

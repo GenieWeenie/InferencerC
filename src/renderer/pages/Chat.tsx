@@ -16,7 +16,7 @@ import { useConversationTree } from '../hooks/useConversationTree';
 import { useLongPress, usePinchZoom, useSwipeNavigation } from '../hooks/useGestures';
 import { calculateEntropy, compressImage } from '../lib/chatUtils';
 import { useMCP } from '../hooks/useMCP';
-import { analyticsService } from '../services/analytics';
+import { readAnalyticsUsageStats, UsageStatsRecord } from '../services/analyticsStore';
 import { projectContextService, ProjectContext } from '../services/projectContext';
 import { HistoryService } from '../services/history';
 import { autoCategorizationService } from '../services/autoCategorization';
@@ -327,7 +327,7 @@ const Chat: React.FC = () => {
     const [messageRatings, setMessageRatings] = React.useState<Record<number, 'up' | 'down'>>({});
     const [jsonMode, setJsonMode] = React.useState(false);
     const [showAnalytics, setShowAnalytics] = React.useState(false);
-    const [usageStats, setUsageStats] = React.useState(analyticsService.getUsageStats());
+    const [usageStats, setUsageStats] = React.useState<UsageStatsRecord[]>(() => readAnalyticsUsageStats());
     const [comparisonIndex, setComparisonIndex] = React.useState<number | null>(null);
     const [projectContext, setProjectContext] = React.useState<ProjectContext | null>(null);
     const [projectContextFeatureEnabled, setProjectContextFeatureEnabled] = React.useState(false);
@@ -3972,7 +3972,7 @@ const Chat: React.FC = () => {
                             <button
                                 onClick={() => {
                                     setShowAnalytics(true);
-                                    setUsageStats(analyticsService.getUsageStats());
+                                    setUsageStats(readAnalyticsUsageStats());
                                 }}
                                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white"
                                 title="View usage analytics and statistics"

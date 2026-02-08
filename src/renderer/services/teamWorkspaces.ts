@@ -1,7 +1,17 @@
 import { Model } from '../../shared/types';
-import { analyticsService } from './analytics';
+import { readAnalyticsUsageStats } from './analyticsStore';
 import { TemplateService, ConversationTemplate } from './templates';
-import { enterpriseComplianceService } from './enterpriseCompliance';
+
+type EnterpriseComplianceService = typeof import('./enterpriseCompliance')['enterpriseComplianceService'];
+
+let enterpriseComplianceServicePromise: Promise<EnterpriseComplianceService> | null = null;
+
+const loadEnterpriseComplianceService = async (): Promise<EnterpriseComplianceService> => {
+    if (!enterpriseComplianceServicePromise) {
+        enterpriseComplianceServicePromise = import('./enterpriseCompliance').then((mod) => mod.enterpriseComplianceService);
+    }
+    return enterpriseComplianceServicePromise;
+};
 
 export type WorkspaceRole = 'admin' | 'member' | 'viewer';
 
@@ -64,6 +74,14 @@ const DEFAULT_IDENTITY_NAME = 'Workspace User';
 
 class TeamWorkspacesService {
     private listeners = new Set<() => void>();
+
+    private logComplianceEvent(event: any): void {
+        void loadEnterpriseComplianceService()
+            .then((service) => service.logEvent(event))
+            .catch(() => {
+                // Non-blocking compliance logging.
+            });
+    }
 
     subscribe(listener: () => void): () => void {
         this.listeners.add(listener);
@@ -163,7 +181,7 @@ class TeamWorkspacesService {
     setActiveWorkspace(workspaceId: string | null): void {
         if (!workspaceId) {
             localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
-            enterpriseComplianceService.logEvent({
+            this.logComplianceEvent({
                 category: 'workspace.selection',
                 action: 'cleared',
                 result: 'info',
@@ -174,7 +192,7 @@ class TeamWorkspacesService {
         }
 
         localStorage.setItem(ACTIVE_WORKSPACE_KEY, workspaceId);
-        enterpriseComplianceService.logEvent({
+        this.logComplianceEvent({
             category: 'workspace.selection',
             action: 'set_active',
             result: 'info',
@@ -257,7 +275,7 @@ class TeamWorkspacesService {
         this.setActiveWorkspace(workspace.id);
         this.notify();
 
-        enterpriseComplianceService.logEvent({
+        this.logComplianceEvent({
             category: 'workspace.management',
             action: 'workspace_created',
             result: 'success',
@@ -304,7 +322,7 @@ class TeamWorkspacesService {
 
         workspace.invites = [...workspace.invites, invite];
         this.saveWorkspace(workspace);
-        enterpriseComplianceService.logEvent({
+        this.logComplianceEvent({
             category: 'workspace.invites',
             action: 'invite_created',
             result: 'success',
@@ -362,7 +380,7 @@ class TeamWorkspacesService {
         this.setActiveWorkspace(workspace.id);
         this.notify();
 
-        enterpriseComplianceService.logEvent({
+        this.logComplianceEvent({
             category: 'workspace.invites',
             action: 'invite_accepted',
             result: 'success',
@@ -401,7 +419,7 @@ class TeamWorkspacesService {
 
         target.role = role;
         const updated = this.saveWorkspace(workspace);
-        enterpriseComplianceService.logEvent({
+        this.logComplianceEvent({
             category: 'workspace.members',
             action: 'role_updated',
             result: 'success',
@@ -428,7 +446,7 @@ class TeamWorkspacesService {
 
         workspace.members = workspace.members.filter(member => member.id !== memberId);
         const updated = this.saveWorkspace(workspace);
-        enterpriseComplianceService.logEvent({
+        this.logComplianceEvent({
             category: 'workspace.members',
             action: 'member_removed',
             result: 'success',
@@ -452,7 +470,7 @@ class TeamWorkspacesService {
 
         workspace.sharedTemplateIds = Array.from(valid);
         const updated = this.saveWorkspace(workspace);
-        enterpriseComplianceService.logEvent({
+        this.logComplianceEvent({
             category: 'workspace.templates',
             action: 'shared_templates_updated',
             result: 'success',
@@ -478,7 +496,7 @@ class TeamWorkspacesService {
 
         workspace.conversationIds = Array.from(new Set(conversationIds.map(id => id.trim()).filter(Boolean)));
         const updated = this.saveWorkspace(workspace);
-        enterpriseComplianceService.logEvent({
+        this.logComplianceEvent({
             category: 'workspace.conversations',
             action: 'collection_updated',
             result: 'success',
@@ -505,7 +523,7 @@ class TeamWorkspacesService {
         };
 
         const updated = this.saveWorkspace(workspace);
-        enterpriseComplianceService.logEvent({
+        this.logComplianceEvent({
             category: 'workspace.policy',
             action: 'model_policy_updated',
             result: 'success',
@@ -560,7 +578,7 @@ class TeamWorkspacesService {
     getWorkspaceUsageSummary(workspaceId: string): WorkspaceUsageSummary {
         const workspace = this.requireWorkspace(workspaceId);
         const sessionIdSet = new Set(workspace.conversationIds);
-        const stats = analyticsService.getUsageStats()
+        const stats = readAnalyticsUsageStats()
             .filter(entry => sessionIdSet.size > 0 && sessionIdSet.has(entry.sessionId));
 
         const totalTokens = stats.reduce((sum, entry) => sum + entry.tokenCount, 0);
