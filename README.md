@@ -231,6 +231,23 @@ A premium, commercial-grade AI chat application built with Electron, React, and 
 
 ---
 
+## 📚 Developer Documentation
+
+Feature 15 documentation is available in two places:
+
+- In-app: click `Docs` in the Chat header to open the Developer Documentation Hub (includes an API playground launcher)
+- Markdown guides:
+  - `docs/API_REFERENCE.md`
+  - `docs/INTEGRATION_GUIDES.md`
+  - `docs/PLUGIN_DEVELOPMENT_TUTORIAL.md`
+  - `docs/TROUBLESHOOTING.md`
+
+Sample plugin package:
+
+- `examples/plugins/sample-hello-plugin`
+
+---
+
 ## 🛠️ Installation
 
 ### Prerequisites
@@ -258,6 +275,12 @@ npm run dev
 ```bash
 # Build the application
 npm run build
+
+# Local mac build (unsigned, stable for local packaging)
+npm run build:mac
+
+# Signed mac release build (for CI/release runners with signing secrets)
+npm run release:mac:signed
 ```
 
 ---
@@ -402,8 +425,8 @@ src/
 
 ## 🗺️ Roadmap
 
-- **[IMPLEMENTATION_PLAN_V3.md](./IMPLEMENTATION_PLAN_V3.md)** — Completed features (v3.0)
-- **[IMPLEMENTATION_PLAN_V4.md](./IMPLEMENTATION_PLAN_V4.md)** — Next level roadmap (v4.0+)
+- **[IMPLEMENTATION_PLAN_V3.md](./docs/project-history/IMPLEMENTATION_PLAN_V3.md)** — Completed features (v3.0)
+- **[IMPLEMENTATION_PLAN_V4.md](./docs/project-history/IMPLEMENTATION_PLAN_V4.md)** — Next level roadmap (v4.0+)
 
 ### Version History
 

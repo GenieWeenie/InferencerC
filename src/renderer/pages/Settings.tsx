@@ -21,7 +21,9 @@ import { apiAccessService } from '../services/apiAccess';
 import { ConversationAnalyticsDashboard } from '../components/ConversationAnalyticsDashboard';
 import { AccessibilitySettingsContent } from '../components/AccessibilitySettingsContent';
 import { InteractiveTutorial } from '../components/InteractiveTutorial';
+import { PluginManager } from '../components/PluginManager';
 import { onboardingService } from '../services/onboarding';
+import { credentialService } from '../services/credentials';
 
 interface ModelEndpoint {
     id: string;
@@ -62,10 +64,11 @@ const Settings: React.FC = () => {
     });
 
     // Active Tab
-    const [activeTab, setActiveTab] = useState<'api' | 'endpoints' | 'presets' | 'usage' | 'mcp' | 'downloader' | 'appearance' | 'webhooks' | 'privacy' | 'analytics' | 'integrations' | 'accessibility' | 'onboarding'>('api');
+    const [activeTab, setActiveTab] = useState<'api' | 'endpoints' | 'presets' | 'usage' | 'mcp' | 'downloader' | 'appearance' | 'webhooks' | 'privacy' | 'analytics' | 'integrations' | 'accessibility' | 'onboarding' | 'plugins'>('api');
     
     // Conversation Analytics
     const [showAnalytics, setShowAnalytics] = useState(false);
+    const [showPluginManager, setShowPluginManager] = useState(false);
     
     // Privacy & Security
     const [privacyMode, setPrivacyMode] = useState(false);
@@ -98,14 +101,25 @@ const Settings: React.FC = () => {
 
     useEffect(() => {
         // Load saved data
-        const key = localStorage.getItem('openRouterApiKey');
-        if (key) setOpenRouterKey(key);
-        
-        const ghKey = localStorage.getItem('github_api_key');
-        if (ghKey) setGithubKey(ghKey);
-        
-        const nKey = localStorage.getItem('notion_api_key');
-        if (nKey) setNotionKey(nKey);
+        let isMounted = true;
+        const loadCredentials = async () => {
+            try {
+                const [key, ghKey, nKey] = await Promise.all([
+                    credentialService.getOpenRouterApiKey(),
+                    credentialService.getGithubApiKey(),
+                    credentialService.getNotionApiKey(),
+                ]);
+
+                if (!isMounted) return;
+                if (key) setOpenRouterKey(key);
+                if (ghKey) setGithubKey(ghKey);
+                if (nKey) setNotionKey(nKey);
+            } catch (error) {
+                console.error('Failed to load saved credentials:', error);
+            }
+        };
+
+        void loadCredentials();
         
         const nDbId = localStorage.getItem('notion_database_id');
         if (nDbId) setNotionDatabaseId(nDbId);
@@ -158,27 +172,34 @@ const Settings: React.FC = () => {
         themeService.subscribe(handleThemeChange);
         
         return () => {
+            isMounted = false;
             themeService.unsubscribe(handleThemeChange);
         };
     }, []);
 
-    const saveOpenRouterKey = () => {
-        localStorage.setItem('openRouterApiKey', openRouterKey);
-        toast.success('OpenRouter API key saved!');
+    const saveOpenRouterKey = async () => {
+        if (!openRouterKey.trim()) {
+            await credentialService.clearOpenRouterApiKey();
+            toast.success('OpenRouter API key cleared');
+            return;
+        }
+
+        await credentialService.setOpenRouterApiKey(openRouterKey);
+        toast.success('OpenRouter API key saved securely');
     };
 
-    const saveGithubKey = () => {
-        githubService.setApiKey(githubKey);
-        toast.success('GitHub API key saved!');
+    const saveGithubKey = async () => {
+        await githubService.setApiKey(githubKey);
+        toast.success(githubKey.trim() ? 'GitHub API key saved securely' : 'GitHub API key cleared');
     };
 
-    const saveNotionConfig = () => {
+    const saveNotionConfig = async () => {
         if (!notionKey || !notionDatabaseId) {
             toast.error('Both API key and Database ID are required');
             return;
         }
-        notionService.setConfig(notionKey, notionDatabaseId);
-        toast.success('Notion configuration saved!');
+        await notionService.setConfig(notionKey, notionDatabaseId);
+        toast.success('Notion configuration saved securely');
     };
 
     // Endpoint Management
@@ -277,6 +298,7 @@ const Settings: React.FC = () => {
                 <TabButton id="webhooks" label="Webhooks" icon={Activity} />
                 <TabButton id="privacy" label="Privacy & Security" icon={Shield} />
                 <TabButton id="analytics" label="Analytics" icon={BarChart3} />
+                <TabButton id="plugins" label="Plugins" icon={Plug} />
                 <TabButton id="integrations" label="Integrations" icon={Plug} />
                 <TabButton id="accessibility" label="Accessibility" icon={Eye} />
                 <TabButton id="onboarding" label="Onboarding" icon={GraduationCap} />
@@ -285,6 +307,31 @@ const Settings: React.FC = () => {
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                {activeTab === 'plugins' && (
+                    <div className="max-w-3xl space-y-6 animate-in fade-in slide-in-from-right-2">
+                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg">
+                            <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                                <Plug className="text-primary" size={22} />
+                                Plugin System
+                            </h3>
+                            <p className="text-slate-400 mb-4">
+                                Install and manage plugins that add command palette actions, custom export formats, and UI extensions.
+                            </p>
+                            <div className="flex flex-wrap items-center gap-3">
+                                <button
+                                    onClick={() => setShowPluginManager(true)}
+                                    className="px-4 py-2 bg-primary text-slate-900 font-semibold rounded-lg hover:brightness-110 transition-all"
+                                >
+                                    Open Plugin Manager
+                                </button>
+                                <span className="text-xs text-slate-500">
+                                    Plugin API docs: <code>docs/project-history/PLUGIN_API.md</code>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* API Keys Tab */}
                 {activeTab === 'api' && (
                     <div className="max-w-2xl space-y-6 animate-in fade-in slide-in-from-right-2">
@@ -1631,6 +1678,7 @@ const IntegrationsTab: React.FC = () => {
                     </button>
                 </div>
             </div>
+            <PluginManager isOpen={showPluginManager} onClose={() => setShowPluginManager(false)} />
         </div>
     );
 };

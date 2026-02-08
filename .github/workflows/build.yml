@@ -21,16 +21,40 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 18
+          node-version: 20
 
       - name: Install Dependencies
-        run: npm install
+        run: npm ci
 
-      # - name: Run Tests
-      #   run: npm test
+      - name: Run Tests
+        run: npm test -- --runInBand
 
-      - name: Build Electron App
-        run: npm run build
+      - name: Build Windows Release
+        if: matrix.os == 'windows-latest'
+        run: npm run build:win
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Linux Release
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run build:linux
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build macOS Release (Signed)
+        if: matrix.os == 'macos-latest' && secrets.CSC_LINK != ''
+        run: npm run release:mac:signed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Build macOS Release (Unsigned Fallback)
+        if: matrix.os == 'macos-latest' && secrets.CSC_LINK == ''
+        run: npm run build:mac
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

@@ -7,3 +7,7 @@ dist/
 .auto-claude-status
 .auto-claude-security.json
 logs/
+output/
+.playwright-cli/
+dev-server.log
+test_output.txt
