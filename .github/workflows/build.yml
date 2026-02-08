@@ -1,47 +1,54 @@
-name: Build/Release
+name: Release Matrix
 
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ${{ matrix.os }}
-
     strategy:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
 
     steps:
-      - name: Check out Git repository
-        uses: actions/checkout@v3
+      - name: Check out repository
+        uses: actions/checkout@v4
 
-      - name: Install Node.js
-        uses: actions/setup-node@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: npm ci
 
-      - name: Run Tests
+      - name: Run tests
         run: npm test -- --runInBand
 
-      - name: Build Windows Release
+      - name: Build Windows release
         if: matrix.os == 'windows-latest'
         run: npm run build:win
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Linux Release
+      - name: Build Linux release
         if: matrix.os == 'ubuntu-latest'
         run: npm run build:linux
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build macOS Release (Signed)
+      - name: Build macOS release (signed)
         if: matrix.os == 'macos-latest' && secrets.CSC_LINK != ''
         run: npm run release:mac:signed
         env:
@@ -52,16 +59,17 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-      - name: Build macOS Release (Unsigned Fallback)
+      - name: Build macOS release (unsigned fallback)
         if: matrix.os == 'macos-latest' && secrets.CSC_LINK == ''
         run: npm run build:mac
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Release (Windows/Linux/Mac)
-        uses: softprops/action-gh-release@v1
+      - name: Publish GitHub release assets
         if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
         with:
+          fail_on_unmatched_files: false
           files: |
             dist/*.exe
             dist/*.dmg

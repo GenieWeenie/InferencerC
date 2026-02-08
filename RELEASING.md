@@ -28,10 +28,12 @@ Required environment variables/secrets:
 ## GitHub Actions workflow
 
 - Main release matrix: `.github/workflows/build.yml`
+  - Triggers on release tags (`v*`) or manual dispatch
   - Uses signed mac build when `CSC_LINK` is configured
   - Falls back to unsigned mac build when signing secrets are absent
 - Dedicated signed mac workflow: `.github/workflows/release-mac-signed.yml`
-  - Trigger manually (`workflow_dispatch`) or by tag (`v*`)
+  - Trigger manually (`workflow_dispatch`) only
+  - Skips automatically when required Apple/signing secrets are not configured
 
 ## Short Release Checklist
 
