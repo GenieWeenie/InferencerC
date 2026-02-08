@@ -1,17 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { ChatResponse, Message, TokenLogprob, Model, ChatMessage, ChatSession, ToolCall } from '../../shared/types';
 import { HistoryService } from '../services/history';
 import { simulateLogprobs, detectIntent, findBestModelForIntent } from '../lib/chatUtils';
 import { AVAILABLE_TOOLS } from '../lib/tools';
-import { analyticsService } from '../services/analytics';
-import { webhookService } from '../services/webhooks';
-import { performanceService } from '../services/performance';
 import { crashRecoveryService } from '../services/crashRecovery';
-import { teamWorkspacesService } from '../services/teamWorkspaces';
-import { enterpriseComplianceService } from '../services/enterpriseCompliance';
-import { credentialService } from '../services/credentials';
-import { backendHealthService } from '../services/backendHealth';
 
 export interface ApiLogCallback {
     (log: {
@@ -31,6 +24,71 @@ export interface SelectedTokenContext {
     messageIndex: number;
     tokenIndex: number;
 }
+
+type AnalyticsService = typeof import('../services/analytics')['analyticsService'];
+type WebhookService = typeof import('../services/webhooks')['webhookService'];
+type PerformanceService = typeof import('../services/performance')['performanceService'];
+type TeamWorkspacesService = typeof import('../services/teamWorkspaces')['teamWorkspacesService'];
+type EnterpriseComplianceService = typeof import('../services/enterpriseCompliance')['enterpriseComplianceService'];
+type CredentialService = typeof import('../services/credentials')['credentialService'];
+type BackendHealthService = typeof import('../services/backendHealth')['backendHealthService'];
+
+let analyticsServicePromise: Promise<AnalyticsService> | null = null;
+let webhookServicePromise: Promise<WebhookService> | null = null;
+let performanceServicePromise: Promise<PerformanceService> | null = null;
+let teamWorkspacesServicePromise: Promise<TeamWorkspacesService> | null = null;
+let enterpriseComplianceServicePromise: Promise<EnterpriseComplianceService> | null = null;
+let credentialServicePromise: Promise<CredentialService> | null = null;
+let backendHealthServicePromise: Promise<BackendHealthService> | null = null;
+
+const loadAnalyticsService = async (): Promise<AnalyticsService> => {
+    if (!analyticsServicePromise) {
+        analyticsServicePromise = import('../services/analytics').then((mod) => mod.analyticsService);
+    }
+    return analyticsServicePromise;
+};
+
+const loadWebhookService = async (): Promise<WebhookService> => {
+    if (!webhookServicePromise) {
+        webhookServicePromise = import('../services/webhooks').then((mod) => mod.webhookService);
+    }
+    return webhookServicePromise;
+};
+
+const loadPerformanceService = async (): Promise<PerformanceService> => {
+    if (!performanceServicePromise) {
+        performanceServicePromise = import('../services/performance').then((mod) => mod.performanceService);
+    }
+    return performanceServicePromise;
+};
+
+const loadTeamWorkspacesService = async (): Promise<TeamWorkspacesService> => {
+    if (!teamWorkspacesServicePromise) {
+        teamWorkspacesServicePromise = import('../services/teamWorkspaces').then((mod) => mod.teamWorkspacesService);
+    }
+    return teamWorkspacesServicePromise;
+};
+
+const loadEnterpriseComplianceService = async (): Promise<EnterpriseComplianceService> => {
+    if (!enterpriseComplianceServicePromise) {
+        enterpriseComplianceServicePromise = import('../services/enterpriseCompliance').then((mod) => mod.enterpriseComplianceService);
+    }
+    return enterpriseComplianceServicePromise;
+};
+
+const loadCredentialService = async (): Promise<CredentialService> => {
+    if (!credentialServicePromise) {
+        credentialServicePromise = import('../services/credentials').then((mod) => mod.credentialService);
+    }
+    return credentialServicePromise;
+};
+
+const loadBackendHealthService = async (): Promise<BackendHealthService> => {
+    if (!backendHealthServicePromise) {
+        backendHealthServicePromise = import('../services/backendHealth').then((mod) => mod.backendHealthService);
+    }
+    return backendHealthServicePromise;
+};
 
 export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = true) => {
     // Logic State
@@ -75,11 +133,55 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
     const [openRouterApiKey, setOpenRouterApiKey] = useState<string | null>(null);
 
+    const logComplianceEvent = useCallback((event: any) => {
+        void loadEnterpriseComplianceService()
+            .then((service) => service.logEvent(event))
+            .catch(() => {
+                // Non-blocking telemetry/compliance logging.
+            });
+    }, []);
+
+    const reportPerformanceLatency = useCallback((latencyMs: number) => {
+        void loadPerformanceService()
+            .then((service) => service.reportLatency(latencyMs))
+            .catch(() => {
+                // Non-blocking diagnostics.
+            });
+    }, []);
+
+    const trackAnalyticsMessage = useCallback((session: string, model: string, tokenEstimate: number) => {
+        void loadAnalyticsService()
+            .then((service) => service.trackMessage(session, model, tokenEstimate))
+            .catch(() => {
+                // Non-blocking analytics.
+            });
+    }, []);
+
+    const triggerConversationCompleteWebhooks = useCallback((payload: {
+        sessionId: string;
+        sessionTitle: string;
+        modelId: string;
+        messageCount: number;
+        messages: ChatMessage[];
+        metadata: {
+            temperature?: number;
+            topP?: number;
+            maxTokens?: number;
+        };
+    }) => {
+        void loadWebhookService()
+            .then((service) => service.triggerWebhooks('conversation_complete', payload))
+            .catch(() => {
+                // Non-blocking webhooks.
+            });
+    }, []);
+
     useEffect(() => {
         let isMounted = true;
 
         const refreshOpenRouterKey = async () => {
             try {
+                const credentialService = await loadCredentialService();
                 const key = await credentialService.getOpenRouterApiKey();
                 if (isMounted) {
                     setOpenRouterApiKey(key);
@@ -141,6 +243,11 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         let isInitialLoad = true;
 
         const fetchModels = async () => {
+            const [backendHealthService, teamWorkspacesService] = await Promise.all([
+                loadBackendHealthService(),
+                loadTeamWorkspacesService(),
+            ]);
+
             let models: Model[] = [];
             let localStatus: 'online' | 'offline' = backendHealthService.isOnline() ? 'online' : 'offline';
             let remoteStatus: 'online' | 'offline' | 'none' = openRouterApiKey ? 'offline' : 'none';
@@ -421,7 +528,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             setInput('');
         }
 
-        enterpriseComplianceService.logEvent({
+        logComplianceEvent({
             category: 'chat.session',
             action: 'created',
             result: 'success',
@@ -507,7 +614,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                 setInput('');
             }
 
-            enterpriseComplianceService.logEvent({
+            logComplianceEvent({
                 category: 'chat.session',
                 action: 'loaded',
                 result: 'success',
@@ -525,7 +632,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         HistoryService.deleteSession(id);
         setSavedSessions(HistoryService.getAllSessions());
         if (id === sessionId) createNewSession();
-        enterpriseComplianceService.logEvent({
+        logComplianceEvent({
             category: 'chat.session',
             action: 'deleted',
             result: 'success',
@@ -596,7 +703,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const content = `[CONTEXT FROM WEB: ${url}]\n\n${data.content}`;
             setHistory(prev => [...prev, { role: 'user', content }]);
             toast.success("Web content added to conversation context.");
-            enterpriseComplianceService.logEvent({
+            logComplianceEvent({
                 category: 'chat.tools',
                 action: 'web_fetch.completed',
                 result: 'success',
@@ -605,7 +712,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             });
         } catch (err: any) {
             toast.error(err.message);
-            enterpriseComplianceService.logEvent({
+            logComplianceEvent({
                 category: 'chat.tools',
                 action: 'web_fetch.failed',
                 result: 'failure',
@@ -818,7 +925,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             });
 
             // Report TTFB Latency
-            performanceService.reportLatency(Date.now() - startTime);
+            reportPerformanceLatency(Date.now() - startTime);
 
             if (!res.ok) throw new Error(`Server error: ${res.status}`);
 
@@ -909,9 +1016,9 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
             // Track analytics - estimate token count (rough: ~4 chars per token)
             const estimatedTokens = Math.ceil(fullContent.length / 4);
-            analyticsService.trackMessage(sessionId, modelId, estimatedTokens);
+            trackAnalyticsMessage(sessionId, modelId, estimatedTokens);
 
-            enterpriseComplianceService.logEvent({
+            logComplianceEvent({
                 category: 'chat.message',
                 action: 'generation.completed',
                 result: 'success',
@@ -929,7 +1036,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             // Get current session for webhook payload
             const currentSession = HistoryService.getSession(sessionId);
             if (currentSession) {
-                webhookService.triggerWebhooks('conversation_complete', {
+                triggerConversationCompleteWebhooks({
                     sessionId,
                     sessionTitle: currentSession.title,
                     modelId: modelId,
@@ -990,7 +1097,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
             updateMessageContent(targetIndex, `Error: ${errorMsg}`, false);
             toast.error(errorMsg);
-            enterpriseComplianceService.logEvent({
+            logComplianceEvent({
                 category: 'chat.message',
                 action: 'generation.failed',
                 result: 'failure',
@@ -1024,7 +1131,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             return newHistory;
         });
         toast.info("Generation stopped.");
-        enterpriseComplianceService.logEvent({
+        logComplianceEvent({
             category: 'chat.message',
             action: 'generation.stopped',
             result: 'info',
@@ -1074,7 +1181,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                 // Or change it? Changing it feels better for continuity.
                 setCurrentModel(best);
                 toast.info(`Auto-routed to ${best} (${intent})`);
-                enterpriseComplianceService.logEvent({
+                logComplianceEvent({
                     category: 'chat.routing',
                     action: 'auto_route.selected',
                     result: 'info',
@@ -1089,7 +1196,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             }
         }
 
-        enterpriseComplianceService.logEvent({
+        logComplianceEvent({
             category: 'chat.message',
             action: 'send.requested',
             result: 'info',
@@ -1292,7 +1399,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         renameSession: (id: string, newTitle: string) => {
             HistoryService.renameSession(id, newTitle);
             setSavedSessions(HistoryService.getAllSessions());
-            enterpriseComplianceService.logEvent({
+            logComplianceEvent({
                 category: 'chat.session',
                 action: 'renamed',
                 result: 'success',
@@ -1304,7 +1411,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         togglePinSession: (id: string) => {
             HistoryService.togglePinSession(id);
             setSavedSessions(HistoryService.getAllSessions());
-            enterpriseComplianceService.logEvent({
+            logComplianceEvent({
                 category: 'chat.session',
                 action: 'pin_toggled',
                 result: 'success',
