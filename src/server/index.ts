@@ -7,6 +7,8 @@ import { ModelManager } from './services/downloader';
 import { ConfigService } from './services/config';
 import { StatsService } from './services/stats';
 import { WebService } from './services/web';
+import { CollaborationService } from './services/collaboration';
+import { CloudSyncService } from './services/cloudSync';
 import { ChatRequest, ModelRuntimeAdapter } from '../shared/types';
 import { logger } from './services/logger';
 
@@ -30,6 +32,8 @@ const configService = new ConfigService();
 const modelManager = new ModelManager(configService);
 const statsService = new StatsService();
 const webService = new WebService();
+const collaborationService = new CollaborationService();
+const cloudSyncService = new CloudSyncService();
 
 // Adapters
 const mockAdapter = new MockAdapter();
@@ -181,6 +185,272 @@ app.post('/v1/tools/web-fetch', async (req, res) => {
     res.json({ content });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Cloud Sync Routes ---
+
+const parseBearerToken = (authorizationHeader: string | undefined): string | null => {
+  if (!authorizationHeader) return null;
+  const [type, token] = authorizationHeader.split(' ');
+  if (type?.toLowerCase() !== 'bearer' || !token) return null;
+  return token.trim();
+};
+
+const authenticateCloudSync = (authorizationHeader: string | undefined): { accountId: string } => {
+  const token = parseBearerToken(authorizationHeader);
+  if (!token) {
+    throw new Error('Unauthorized');
+  }
+  const account = cloudSyncService.authenticate(token);
+  return { accountId: account.id };
+};
+
+app.post('/v1/cloud-sync/register', (req, res) => {
+  try {
+    const email = String(req.body?.email || '');
+    const password = String(req.body?.password || '');
+    const result = cloudSyncService.register(email, password);
+    res.json(result);
+  } catch (error: any) {
+    const message = error?.message || 'Registration failed';
+    const status = message.includes('exists') ? 409 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post('/v1/cloud-sync/login', (req, res) => {
+  try {
+    const email = String(req.body?.email || '');
+    const password = String(req.body?.password || '');
+    const result = cloudSyncService.login(email, password);
+    res.json(result);
+  } catch (error: any) {
+    const message = error?.message || 'Login failed';
+    const status = message.includes('credentials') ? 401 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post('/v1/cloud-sync/logout', (req, res) => {
+  try {
+    const token = parseBearerToken(req.headers.authorization);
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    cloudSyncService.logout(token);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(400).json({ error: error?.message || 'Logout failed' });
+  }
+});
+
+app.get('/v1/cloud-sync/profile', (req, res) => {
+  try {
+    const auth = authenticateCloudSync(req.headers.authorization);
+    const profile = cloudSyncService.getProfile(auth.accountId);
+    res.json(profile);
+  } catch (error: any) {
+    const message = error?.message || 'Unauthorized';
+    const status = message.includes('Unauthorized') ? 401 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post('/v1/cloud-sync/sync', (req, res) => {
+  try {
+    const auth = authenticateCloudSync(req.headers.authorization);
+    const response = cloudSyncService.sync(auth.accountId, req.body || {});
+    res.json(response);
+  } catch (error: any) {
+    const message = error?.message || 'Sync failed';
+    const status = message.includes('Unauthorized') ? 401 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
+// --- Collaboration Routes ---
+
+app.post('/v1/collaboration/sessions', (req, res) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    const hostName = String(req.body?.hostName || '').trim();
+    if (!name) {
+      return res.status(400).json({ error: 'Session name is required' });
+    }
+
+    const created = collaborationService.createSession(name, hostName || 'Host');
+    res.json(created);
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || 'Failed to create session' });
+  }
+});
+
+app.post('/v1/collaboration/sessions/:sessionId/join', (req, res) => {
+  try {
+    const sessionId = String(req.params.sessionId || '');
+    const name = String(req.body?.name || '').trim();
+    const joined = collaborationService.joinSession(sessionId, name || 'Participant');
+    res.json(joined);
+  } catch (error: any) {
+    const message = error?.message || 'Failed to join session';
+    const status = message.includes('not found') ? 404 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post('/v1/collaboration/sessions/:sessionId/leave', (req, res) => {
+  try {
+    const sessionId = String(req.params.sessionId || '');
+    const participantId = String(req.body?.participantId || '');
+    if (!participantId) {
+      return res.status(400).json({ error: 'participantId is required' });
+    }
+    const session = collaborationService.leaveSession(sessionId, participantId);
+    res.json({ session });
+  } catch (error: any) {
+    const message = error?.message || 'Failed to leave session';
+    const status = message.includes('not found') ? 404 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.get('/v1/collaboration/sessions/:sessionId', (req, res) => {
+  try {
+    const sessionId = String(req.params.sessionId || '');
+    const participantId = typeof req.query.participantId === 'string'
+      ? req.query.participantId
+      : undefined;
+    const session = collaborationService.getSession(sessionId, participantId);
+    res.json({ session });
+  } catch (error: any) {
+    const message = error?.message || 'Failed to load session';
+    const status = message.includes('not found') ? 404 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.get('/v1/collaboration/sessions/:sessionId/events', async (req, res) => {
+  try {
+    const sessionId = String(req.params.sessionId || '');
+    const participantId = String(req.query.participantId || '');
+    const sinceRaw = Number(req.query.since);
+    const timeoutRaw = Number(req.query.timeoutMs);
+
+    if (!participantId) {
+      return res.status(400).json({ error: 'participantId is required' });
+    }
+
+    const since = Number.isFinite(sinceRaw) && sinceRaw >= 0 ? sinceRaw : 0;
+    const timeoutMs = Number.isFinite(timeoutRaw) && timeoutRaw > 0
+      ? timeoutRaw
+      : 25000;
+
+    const payload = await collaborationService.pollEvents(
+      sessionId,
+      participantId,
+      since,
+      timeoutMs
+    );
+    res.json(payload);
+  } catch (error: any) {
+    const message = error?.message || 'Failed to poll events';
+    const status = message.includes('not found') ? 404 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post('/v1/collaboration/sessions/:sessionId/presence', (req, res) => {
+  try {
+    const sessionId = String(req.params.sessionId || '');
+    const participantId = String(req.body?.participantId || '');
+    if (!participantId) {
+      return res.status(400).json({ error: 'participantId is required' });
+    }
+
+    const isTyping = req.body?.isTyping;
+    const cursor = req.body?.cursorPosition;
+    const session = collaborationService.updatePresence(sessionId, participantId, {
+      isTyping: typeof isTyping === 'boolean' ? isTyping : undefined,
+      cursorPosition: cursor && typeof cursor === 'object'
+        ? {
+          line: Number(cursor.line) || 1,
+          column: Number(cursor.column) || 1,
+        }
+        : undefined,
+    });
+
+    res.json({ session });
+  } catch (error: any) {
+    const message = error?.message || 'Failed to update presence';
+    const status = message.includes('not found') ? 404 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post('/v1/collaboration/sessions/:sessionId/messages', (req, res) => {
+  try {
+    const sessionId = String(req.params.sessionId || '');
+    const participantId = String(req.body?.participantId || '');
+    const content = String(req.body?.content || '').trim();
+
+    if (!participantId || !content) {
+      return res.status(400).json({ error: 'participantId and content are required' });
+    }
+
+    const message = collaborationService.addMessage(sessionId, participantId, content);
+    res.json({ message });
+  } catch (error: any) {
+    const message = error?.message || 'Failed to add message';
+    const status = message.includes('not found') ? 404 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.put('/v1/collaboration/sessions/:sessionId/messages/:messageId', (req, res) => {
+  try {
+    const sessionId = String(req.params.sessionId || '');
+    const messageId = String(req.params.messageId || '');
+    const participantId = String(req.body?.participantId || '');
+    const content = String(req.body?.content || '').trim();
+    const baseVersion = Number(req.body?.baseVersion);
+
+    if (!participantId || !content || !Number.isFinite(baseVersion)) {
+      return res.status(400).json({ error: 'participantId, content, and baseVersion are required' });
+    }
+
+    const result = collaborationService.editMessage(
+      sessionId,
+      participantId,
+      messageId,
+      content,
+      baseVersion
+    );
+
+    res.json(result);
+  } catch (error: any) {
+    const message = error?.message || 'Failed to edit message';
+    const status = message.includes('not found') ? 404 : 400;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post('/v1/collaboration/sessions/:sessionId/participants/:participantId/kick', (req, res) => {
+  try {
+    const sessionId = String(req.params.sessionId || '');
+    const targetId = String(req.params.participantId || '');
+    const requesterId = String(req.body?.requesterId || '');
+
+    if (!requesterId || !targetId) {
+      return res.status(400).json({ error: 'requesterId and target participantId are required' });
+    }
+
+    const session = collaborationService.kickParticipant(sessionId, requesterId, targetId);
+    res.json({ session });
+  } catch (error: any) {
+    const message = error?.message || 'Failed to remove participant';
+    const status = message.includes('Only the host') ? 403 : message.includes('not found') ? 404 : 400;
+    res.status(status).json({ error: message });
   }
 });
 

@@ -44,4 +44,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveRecoveryState: (state: RecoveryState) => ipcRenderer.invoke('save-recovery-state', state),
   getRecoveryState: () => ipcRenderer.invoke('get-recovery-state'),
   clearRecoveryState: () => ipcRenderer.invoke('clear-recovery-state'),
+
+  // Secure storage APIs
+  secureStorageIsAvailable: () => ipcRenderer.invoke('secure-storage:is-available'),
+  secureStorageSetItem: (key: string, value: string) => ipcRenderer.invoke('secure-storage:set-item', key, value),
+  secureStorageGetItem: (key: string) => ipcRenderer.invoke('secure-storage:get-item', key),
+  secureStorageRemoveItem: (key: string) => ipcRenderer.invoke('secure-storage:remove-item', key),
+
+  // Backend health probe
+  checkBackendHealth: () => ipcRenderer.invoke('backend-health:check'),
 });

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, screen } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, screen, safeStorage } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'path';
 import fs from 'fs';
@@ -75,6 +75,30 @@ ipcMain.handle('quit-and-install', () => {
 
 // Recovery State IPC Handlers
 const RECOVERY_STATE_PATH = path.join(app.getPath('userData'), 'recovery-state.json');
+const getSecureStoragePath = () => path.join(app.getPath('userData'), 'secure-storage.json');
+
+const loadSecureStorage = (): Record<string, string> => {
+  try {
+    const storePath = getSecureStoragePath();
+    if (!fs.existsSync(storePath)) {
+      return {};
+    }
+    const raw = fs.readFileSync(storePath, 'utf-8');
+    return JSON.parse(raw) as Record<string, string>;
+  } catch (error) {
+    console.error('Failed to load secure storage file:', error);
+    return {};
+  }
+};
+
+const saveSecureStorage = (store: Record<string, string>): void => {
+  try {
+    const storePath = getSecureStoragePath();
+    fs.writeFileSync(storePath, JSON.stringify(store));
+  } catch (error) {
+    console.error('Failed to save secure storage file:', error);
+  }
+};
 
 ipcMain.handle('save-recovery-state', async (event, state: any) => {
   try {
@@ -108,6 +132,71 @@ ipcMain.handle('clear-recovery-state', async () => {
   } catch (error: any) {
     console.error('Failed to clear recovery state:', error);
     return { success: false, error: error.message };
+  }
+});
+
+// Backend health probe for renderer processes (avoids renderer-side network noise)
+ipcMain.handle('backend-health:check', async () => {
+  try {
+    const response = await fetch('http://localhost:3000/v1/models', {
+      signal: AbortSignal.timeout(2500),
+    });
+    return { online: response.ok };
+  } catch {
+    return { online: false };
+  }
+});
+
+// Secure credential storage IPC handlers
+ipcMain.handle('secure-storage:is-available', () => {
+  return safeStorage.isEncryptionAvailable();
+});
+
+ipcMain.handle('secure-storage:set-item', async (_event, key: string, value: string) => {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) {
+      return { success: false, error: 'Secure storage is not available on this system' };
+    }
+
+    const encrypted = safeStorage.encryptString(value);
+    const store = loadSecureStorage();
+    store[key] = encrypted.toString('base64');
+    saveSecureStorage(store);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to store secret' };
+  }
+});
+
+ipcMain.handle('secure-storage:get-item', async (_event, key: string) => {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) {
+      return { success: false, error: 'Secure storage is not available on this system', value: null };
+    }
+
+    const store = loadSecureStorage();
+    const encoded = store[key];
+    if (!encoded) {
+      return { success: true, value: null };
+    }
+
+    const decrypted = safeStorage.decryptString(Buffer.from(encoded, 'base64'));
+    return { success: true, value: decrypted };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to load secret', value: null };
+  }
+});
+
+ipcMain.handle('secure-storage:remove-item', async (_event, key: string) => {
+  try {
+    const store = loadSecureStorage();
+    if (Object.prototype.hasOwnProperty.call(store, key)) {
+      delete store[key];
+      saveSecureStorage(store);
+    }
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to remove secret' };
   }
 });
 
