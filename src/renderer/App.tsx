@@ -69,6 +69,7 @@ const App: React.FC = () => {
   const { isOpen: isShortcutEditorOpen, toggle: toggleShortcutEditor, close: closeShortcutEditor } = useShortcutEditor();
 
   const [showPerformance, setShowPerformance] = useState(false);
+  const [commandRegistryEnabled, setCommandRegistryEnabled] = useState(false);
   const [mountNonCriticalManagers, setMountNonCriticalManagers] = useState(false);
   const [isContextualHelpEnabled] = useState(() => {
     try {
@@ -113,6 +114,38 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    if (commandRegistryEnabled || isOpen) {
+      if (!commandRegistryEnabled) {
+        setCommandRegistryEnabled(true);
+      }
+      return;
+    }
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let idleId: number | null = null;
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+
+    const enableRegistry = () => setCommandRegistryEnabled(true);
+    if (idleWindow.requestIdleCallback) {
+      idleId = idleWindow.requestIdleCallback(enableRegistry, { timeout: 2000 });
+    } else {
+      timeoutId = setTimeout(enableRegistry, 500);
+    }
+
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      if (idleId !== null && idleWindow.cancelIdleCallback) {
+        idleWindow.cancelIdleCallback(idleId);
+      }
+    };
+  }, [commandRegistryEnabled, isOpen]);
+
+  useEffect(() => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let idleId: number | null = null;
     const idleWindow = window as Window & {
@@ -138,7 +171,9 @@ const App: React.FC = () => {
   }, []);
 
   // Register commands
+  const shouldEnableCommandRegistry = commandRegistryEnabled || isOpen;
   useCommandRegistry({
+    enabled: shouldEnableCommandRegistry,
     setActiveTab,
     toggleShortcuts: toggleShortcutEditor,
     togglePerformanceMonitor: () => setShowPerformance(prev => !prev),

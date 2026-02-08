@@ -41,9 +41,11 @@ import {
     Sparkles
 } from 'lucide-react';
 import { commandRegistry, Command } from '../lib/commandRegistry';
-import { pluginSystemService } from '../services/pluginSystem';
+
+type PluginSystemServiceModule = typeof import('../services/pluginSystem');
 
 interface UseCommandRegistryProps {
+    enabled?: boolean;
     // Navigation
     setActiveTab?: (tab: 'chat' | 'models' | 'settings') => void;
     togglePerformanceMonitor?: () => void;
@@ -111,7 +113,13 @@ interface UseCommandRegistryProps {
 }
 
 export const useCommandRegistry = (props: UseCommandRegistryProps) => {
+    const { enabled = true } = props;
+
     useEffect(() => {
+        if (!enabled) {
+            return;
+        }
+
         const commands: Command[] = [];
 
         // === NAVIGATION COMMANDS ===
@@ -601,8 +609,11 @@ export const useCommandRegistry = (props: UseCommandRegistryProps) => {
         // Register all commands
         commandRegistry.registerMany(commands);
 
+        let cancelled = false;
         let pluginCommandIds: string[] = [];
-        const syncPluginCommands = () => {
+        let unsubscribePluginEvents = () => {};
+
+        const syncPluginCommands = (pluginSystemService: PluginSystemServiceModule['pluginSystemService']) => {
             pluginCommandIds.forEach(commandId => commandRegistry.unregister(commandId));
             pluginCommandIds = [];
 
@@ -625,20 +636,27 @@ export const useCommandRegistry = (props: UseCommandRegistryProps) => {
                     },
                 });
             });
+
         };
 
-        syncPluginCommands();
-        const unsubscribePluginEvents = pluginSystemService.subscribe(() => {
-            syncPluginCommands();
-        });
+        void (async () => {
+            const { pluginSystemService } = await import('../services/pluginSystem');
+            if (cancelled) return;
+
+            const sync = () => syncPluginCommands(pluginSystemService);
+            sync();
+            unsubscribePluginEvents = pluginSystemService.subscribe(sync);
+        })();
 
         // Cleanup on unmount
         return () => {
+            cancelled = true;
             commands.forEach(cmd => commandRegistry.unregister(cmd.id));
             pluginCommandIds.forEach(commandId => commandRegistry.unregister(commandId));
             unsubscribePluginEvents();
         };
     }, [
+        enabled,
         props.setActiveTab,
         props.createNewSession,
         props.clearChat,
