@@ -1,0 +1,39 @@
+{
+  "id": "sample.hello-plugin",
+  "name": "Hello Plugin",
+  "version": "1.0.0",
+  "description": "Adds a sample command and export format for plugin tutorials.",
+  "author": "InferencerC Docs",
+  "entryPoint": "index.js",
+  "apiVersion": "1.0.0",
+  "permissions": [
+    { "type": "storage" }
+  ],
+  "commands": [
+    {
+      "id": "hello-command",
+      "label": "Say Hello",
+      "description": "Shows a sample greeting notification",
+      "category": "Actions",
+      "keywords": ["hello", "sample", "plugin"]
+    }
+  ],
+  "exportFormats": [
+    {
+      "id": "hello-jsonl",
+      "label": "Hello JSONL",
+      "description": "Exports each message as a JSONL record",
+      "fileExtension": "jsonl",
+      "mimeType": "application/x-ndjson",
+      "strategy": "jsonl"
+    }
+  ],
+  "uiExtensions": [
+    {
+      "id": "hello-settings",
+      "type": "settings-section",
+      "title": "Hello Plugin Settings",
+      "description": "Sample settings extension surface"
+    }
+  ]
+}
