@@ -74,6 +74,8 @@ import { AVAILABLE_TOOLS } from '../lib/tools';
 import { RecoveryState } from '../../shared/types';
 import SkeletonLoader from '../components/SkeletonLoader';
 
+const RECOVERY_CLEAN_EXIT_KEY = 'app_recovery_clean_exit';
+
 // Message skeleton component for loading states
 const MessageSkeleton: React.FC<{ isUser?: boolean }> = ({ isUser = false }) => {
     return (
@@ -401,14 +403,46 @@ const Chat: React.FC = () => {
         }
     }, []);
 
+    const markRecoveryExitClean = React.useCallback(() => {
+        try {
+            localStorage.setItem(RECOVERY_CLEAN_EXIT_KEY, 'true');
+        } catch {
+            // Ignore storage failures; recovery still works best-effort.
+        }
+    }, []);
+
     // Check for crash recovery state on mount
     React.useEffect(() => {
+        let hadUncleanExit = false;
+        try {
+            hadUncleanExit = localStorage.getItem(RECOVERY_CLEAN_EXIT_KEY) === 'false';
+        } catch {
+            hadUncleanExit = false;
+        }
+
         const savedRecoveryState = crashRecoveryService.getRecoveryState();
-        if (savedRecoveryState) {
+        if (savedRecoveryState && hadUncleanExit) {
             setRecoveryState(savedRecoveryState);
             setShowRecoveryDialog(true);
         }
+
+        // Mark current app run as active; if it crashes before clean shutdown,
+        // this flag remains false and recovery will be offered next launch.
+        try {
+            localStorage.setItem(RECOVERY_CLEAN_EXIT_KEY, 'false');
+        } catch {
+            // Ignore storage failures; recovery still works best-effort.
+        }
     }, []);
+
+    // Mark intentional navigation/unload as clean so tab switches don't trigger recovery.
+    React.useEffect(() => {
+        window.addEventListener('beforeunload', markRecoveryExitClean);
+        return () => {
+            markRecoveryExitClean();
+            window.removeEventListener('beforeunload', markRecoveryExitClean);
+        };
+    }, [markRecoveryExitClean]);
 
     // Recovery dialog handlers
     const handleRestoreSession = () => {
@@ -424,12 +458,14 @@ const Chat: React.FC = () => {
 
         // Clear recovery state
         HistoryService.clearRecoveryState();
+        markRecoveryExitClean();
         setShowRecoveryDialog(false);
         setRecoveryState(null);
     };
 
     const handleDismissRecovery = () => {
         HistoryService.clearRecoveryState();
+        markRecoveryExitClean();
         setShowRecoveryDialog(false);
         setRecoveryState(null);
     };
