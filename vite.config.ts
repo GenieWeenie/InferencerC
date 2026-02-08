@@ -11,6 +11,40 @@ export default defineConfig({
   build: {
     outDir: '../../dist/renderer',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+
+          if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) {
+            return 'vendor-react';
+          }
+          if (id.includes('/framer-motion/')) {
+            return 'vendor-motion';
+          }
+          if (id.includes('/lucide-react/')) {
+            return 'vendor-icons';
+          }
+          if (
+            id.includes('/react-markdown/') ||
+            id.includes('/remark-') ||
+            id.includes('/rehype-') ||
+            id.includes('/unified/') ||
+            id.includes('/micromark/') ||
+            id.includes('/hast-util-') ||
+            id.includes('/mdast-util-')
+          ) {
+            return 'vendor-markdown';
+          }
+          if (id.includes('/katex/')) {
+            return 'vendor-katex';
+          }
+          if (id.includes('/jspdf/')) {
+            return 'vendor-jspdf';
+          }
+        },
+      },
+    },
   },
   resolve: {
     alias: {

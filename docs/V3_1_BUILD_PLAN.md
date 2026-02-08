@@ -74,6 +74,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 5: chat message rendering/actions moved to lazy chunks (loads on first real message).
    - Pass 6: split chat display helpers into `chatDisplayUtils` to keep non-renderer chat utility paths lighter.
    - Pass 7: remove ineffective dynamic imports in `useChat` for services already loaded elsewhere.
+   - Pass 8: add explicit Vite vendor `manualChunks` to break oversized renderer bundles and improve cacheability.
 
 ## Release Checklist for v3.1.x
 
