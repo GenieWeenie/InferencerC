@@ -1,5 +1,4 @@
 import React from 'react';
-import { Virtuoso } from 'react-virtuoso';
 import { Send, Clock, Plus, Trash2, X, Globe, Settings, Activity, AlertTriangle, ChevronRight, ChevronLeft, Check, AlertCircle, Brain, Users, ImageIcon, Plug, Wrench, Copy, Eraser, Download, Edit2, Search, ChevronUp, ChevronDown, Star, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, GitBranch, Network, HelpCircle, Maximize2, Minimize2, RefreshCw, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -268,6 +267,7 @@ const Chat: React.FC = () => {
     const [currentSearchIndex, setCurrentSearchIndex] = React.useState(0);
     const [showSearchResultsList, setShowSearchResultsList] = React.useState(false);
     const virtuosoRef = React.useRef<any>(null);
+    const [VirtuosoComponent, setVirtuosoComponent] = React.useState<any>(null);
 
     // FPS monitoring refs
     const fpsFrameCount = React.useRef(0);
@@ -494,6 +494,26 @@ const Chat: React.FC = () => {
             setShowVariableMenu(false);
         }
     }, [showBottomControls]);
+
+    React.useEffect(() => {
+        const shouldLoadVirtuoso =
+            history.length > 0 || (showSearchResultsList && searchResults.length > 0);
+        if (!shouldLoadVirtuoso || VirtuosoComponent) return;
+
+        let cancelled = false;
+        import('react-virtuoso')
+            .then((mod) => {
+                if (cancelled) return;
+                setVirtuosoComponent(() => mod.Virtuoso);
+            })
+            .catch(() => {
+                // Keep fallback UI if loading fails; app remains usable.
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [history.length, showSearchResultsList, searchResults.length, VirtuosoComponent]);
 
     React.useEffect(() => {
         try {
@@ -2944,51 +2964,57 @@ const Chat: React.FC = () => {
                                             className="border-t border-slate-800 bg-slate-900 overflow-hidden"
                                         >
                                             <div className="max-h-80 overflow-y-auto">
-                                                <Virtuoso
-                                                    style={{ height: Math.min(searchResults.length * 60, 320) }}
-                                                    totalCount={searchResults.length}
-                                                    itemContent={(index) => {
-                                                        const messageIndex = searchResults[index];
-                                                        const message = history[messageIndex];
-                                                        const isActive = index === currentSearchIndex;
-                                                        const preview = message.content ?
-                                                            message.content.substring(0, 100) + (message.content.length > 100 ? '...' : '') :
-                                                            '';
+                                                {VirtuosoComponent ? (
+                                                    <VirtuosoComponent
+                                                        style={{ height: Math.min(searchResults.length * 60, 320) }}
+                                                        totalCount={searchResults.length}
+                                                        itemContent={(index: number) => {
+                                                            const messageIndex = searchResults[index];
+                                                            const message = history[messageIndex];
+                                                            const isActive = index === currentSearchIndex;
+                                                            const preview = message.content ?
+                                                                message.content.substring(0, 100) + (message.content.length > 100 ? '...' : '') :
+                                                                '';
 
-                                                        return (
-                                                            <button
-                                                                onClick={() => navigateToSearchResult(index)}
-                                                                className={`w-full text-left px-6 py-3 hover:bg-slate-800 transition-colors border-b border-slate-800/50 ${
-                                                                    isActive ? 'bg-primary/10 border-l-2 border-l-primary' : ''
-                                                                }`}
-                                                            >
-                                                                <div className="flex items-start gap-3">
-                                                                    <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-xs text-slate-400">
-                                                                        {index + 1}
-                                                                    </div>
-                                                                    <div className="flex-1 min-w-0">
-                                                                        <div className="flex items-center gap-2 mb-1">
-                                                                            <span className={`text-xs font-semibold ${
-                                                                                message.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
-                                                                            }`}>
-                                                                                {message.role === 'user' ? 'You' : 'Assistant'}
-                                                                            </span>
-                                                                            <span className="text-xs text-slate-500">
-                                                                                Message #{messageIndex + 1}
-                                                                            </span>
+                                                            return (
+                                                                <button
+                                                                    onClick={() => navigateToSearchResult(index)}
+                                                                    className={`w-full text-left px-6 py-3 hover:bg-slate-800 transition-colors border-b border-slate-800/50 ${
+                                                                        isActive ? 'bg-primary/10 border-l-2 border-l-primary' : ''
+                                                                    }`}
+                                                                >
+                                                                    <div className="flex items-start gap-3">
+                                                                        <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-xs text-slate-400">
+                                                                            {index + 1}
                                                                         </div>
-                                                                        <p className="text-sm text-slate-300 truncate">
-                                                                            {preview}
-                                                                        </p>
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <div className="flex items-center gap-2 mb-1">
+                                                                                <span className={`text-xs font-semibold ${
+                                                                                    message.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
+                                                                                }`}>
+                                                                                    {message.role === 'user' ? 'You' : 'Assistant'}
+                                                                                </span>
+                                                                                <span className="text-xs text-slate-500">
+                                                                                    Message #{messageIndex + 1}
+                                                                                </span>
+                                                                            </div>
+                                                                            <p className="text-sm text-slate-300 truncate">
+                                                                                {preview}
+                                                                            </p>
+                                                                        </div>
+                                                                        {isActive && (
+                                                                            <Check size={16} className="text-primary flex-shrink-0 mt-1" />
+                                                                        )}
                                                                     </div>
-                                                                    {isActive && (
-                                                                        <Check size={16} className="text-primary flex-shrink-0 mt-1" />
-                                                                    )}
-                                                                </div>
-                                                            </button>
-                                                        );
-                                                    }}
-                                                />
+                                                                </button>
+                                                            );
+                                                        }}
+                                                    />
+                                                ) : (
+                                                    <div className="h-24 flex items-center justify-center text-xs text-slate-500">
+                                                        Loading search results...
+                                                    </div>
+                                                )}
                                             </div>
                                         </motion.div>
                                     )}
@@ -3112,8 +3138,8 @@ const Chat: React.FC = () => {
                                 ))}
                             </div>
                         </div>
-                    ) : (
-                        <Virtuoso
+                    ) : VirtuosoComponent ? (
+                        <VirtuosoComponent
                             ref={virtuosoRef}
                             style={{ height: '100%', width: '100%' }}
                             data={isLoadingMessages ? Array(6).fill(null) : history}
@@ -3138,12 +3164,16 @@ const Chat: React.FC = () => {
                             className="custom-scrollbar px-6"
                             totalCount={isLoadingMessages ? 6 : history.length}
                             initialTopMostItemIndex={isLoadingMessages ? 0 : history.length - 1}
-                            computeItemKey={(index, item) => isLoadingMessages ? `skeleton-${index}` : `${index}-${item.role}`}
+                            computeItemKey={(index: number, item: any) => isLoadingMessages ? `skeleton-${index}` : `${index}-${item.role}`}
                             itemContent={renderItemContent}
                             components={{
                                 Footer: () => <div className={showBottomControls ? 'h-48' : 'h-28'} />
                             }}
                         />
+                    ) : (
+                        <div className="h-full flex items-center justify-center text-sm text-slate-500">
+                            Loading conversation...
+                        </div>
                     )}
                 </div>
 
