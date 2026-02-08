@@ -15,6 +15,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.join(__dirname, 'src'),
+      // We use jsPDF direct text APIs, not jsPDF.html().
+      // Stub these optional plugin deps so they don't bloat the renderer bundle.
+      html2canvas: path.join(__dirname, 'src/renderer/lib/stubs/html2canvas.ts'),
+      dompurify: path.join(__dirname, 'src/renderer/lib/stubs/dompurify.ts'),
     },
   },
   server: {
