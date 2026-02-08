@@ -62,7 +62,7 @@ export const DEFAULT_SHORTCUTS: KeyboardShortcut[] = [
         label: 'View Keyboard Shortcuts',
         description: 'View all available keyboard shortcuts',
         category: 'Navigation',
-        defaultKeys: ['Ctrl', 'K'],
+        defaultKeys: ['Ctrl', '/'],
         enabled: true,
     },
     {
@@ -250,9 +250,56 @@ export class KeyboardShortcutsManager {
 
             if (stored) {
                 const parsed = JSON.parse(stored) as KeyboardShortcut[];
-                parsed.forEach(shortcut => {
-                    this.shortcuts.set(shortcut.id, shortcut);
+                const defaultsById = new Map(DEFAULT_SHORTCUTS.map(shortcut => [shortcut.id, shortcut]));
+                const storedById = new Map<string, KeyboardShortcut>();
+
+                if (Array.isArray(parsed)) {
+                    parsed.forEach(shortcut => {
+                        if (shortcut && typeof shortcut.id === 'string') {
+                            storedById.set(shortcut.id, shortcut);
+                        }
+                    });
+                }
+
+                // Merge stored shortcuts with latest defaults so default key updates
+                // (and conflict fixes) propagate without removing user custom overrides.
+                DEFAULT_SHORTCUTS.forEach(defaultShortcut => {
+                    const storedShortcut = storedById.get(defaultShortcut.id);
+                    if (!storedShortcut) {
+                        this.shortcuts.set(defaultShortcut.id, { ...defaultShortcut });
+                        return;
+                    }
+
+                    const isChord = storedShortcut.isChord ?? defaultShortcut.isChord ?? false;
+                    const merged: KeyboardShortcut = {
+                        ...defaultShortcut,
+                        enabled: storedShortcut.enabled ?? defaultShortcut.enabled,
+                        isChord,
+                    };
+
+                    if (isChord) {
+                        if (Array.isArray(storedShortcut.customChord) && storedShortcut.customChord.length > 0) {
+                            merged.customChord = storedShortcut.customChord;
+                        }
+                    } else if (Array.isArray(storedShortcut.customKeys) && storedShortcut.customKeys.length > 0) {
+                        merged.customKeys = storedShortcut.customKeys;
+                    }
+
+                    this.shortcuts.set(merged.id, merged);
                 });
+
+                // Preserve any non-default shortcuts that may have been imported.
+                storedById.forEach((shortcut, id) => {
+                    if (!defaultsById.has(id)) {
+                        this.shortcuts.set(id, shortcut);
+                    }
+                });
+
+                // Persist normalized structure back to storage after migration.
+                localStorage.setItem(
+                    KeyboardShortcutsManager.STORAGE_KEY,
+                    JSON.stringify(Array.from(this.shortcuts.values()))
+                );
             } else {
                 // Use defaults
                 DEFAULT_SHORTCUTS.forEach(shortcut => {

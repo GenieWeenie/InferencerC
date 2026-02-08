@@ -2482,7 +2482,7 @@ const Chat: React.FC = () => {
                         </div>
                     )}
                     {history.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full max-w-2xl mx-auto p-8 text-center space-y-8 animate-in fade-in duration-700">
+                        <div className="flex flex-col items-center justify-start h-full max-w-2xl mx-auto px-8 pt-16 pb-72 md:pb-80 text-center space-y-8 animate-in fade-in duration-700">
                             <div className="relative">
                                 <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-primary/20 to-blue-500/10 flex items-center justify-center shadow-inner">
                                     <Brain size={48} className="text-primary animate-pulse" />
