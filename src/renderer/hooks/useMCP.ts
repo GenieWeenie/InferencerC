@@ -1,30 +1,117 @@
-import { useState, useEffect, useCallback } from 'react';
-import { mcpClient, MCPTool, MCPToolCall, MCPToolResult } from '../services/mcp';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { MCPTool, MCPToolCall, MCPToolResult } from '../services/mcp';
+
+type MCPClient = typeof import('../services/mcp')['mcpClient'];
+
+interface UseMCPOptions {
+    enabled?: boolean;
+    deferUntilIdle?: boolean;
+}
 
 /**
  * Hook for integrating MCP tools into the chat experience
  */
-export const useMCP = () => {
+export const useMCP = (options: UseMCPOptions = {}) => {
+    const { enabled = true, deferUntilIdle = true } = options;
+
     const [tools, setTools] = useState<MCPTool[]>([]);
     const [connectedCount, setConnectedCount] = useState(0);
     const [isExecutingTool, setIsExecutingTool] = useState(false);
     const [lastToolResult, setLastToolResult] = useState<MCPToolResult | null>(null);
 
-    // Subscribe to MCP client updates
+    const clientRef = useRef<MCPClient | null>(null);
+    const loadPromiseRef = useRef<Promise<MCPClient> | null>(null);
+    const unsubscribeRef = useRef<(() => void) | null>(null);
+
+    const updateFromClient = useCallback(() => {
+        const client = clientRef.current;
+        if (!client) {
+            setTools([]);
+            setConnectedCount(0);
+            return;
+        }
+        setTools(client.getTools());
+        setConnectedCount(client.getConnectedCount());
+    }, []);
+
+    const attachClient = useCallback((client: MCPClient) => {
+        clientRef.current = client;
+        if (!unsubscribeRef.current) {
+            unsubscribeRef.current = client.subscribe(updateFromClient);
+        }
+        updateFromClient();
+    }, [updateFromClient]);
+
+    const ensureClientLoaded = useCallback(async (): Promise<MCPClient> => {
+        if (clientRef.current) {
+            return clientRef.current;
+        }
+
+        if (!loadPromiseRef.current) {
+            loadPromiseRef.current = import('../services/mcp')
+                .then((mod) => {
+                    attachClient(mod.mcpClient);
+                    return mod.mcpClient;
+                })
+                .catch((error) => {
+                    loadPromiseRef.current = null;
+                    throw error;
+                });
+        }
+
+        return loadPromiseRef.current;
+    }, [attachClient]);
+
     useEffect(() => {
-        const update = () => {
-            setTools(mcpClient.getTools());
-            setConnectedCount(mcpClient.getConnectedCount());
+        if (!enabled) {
+            setTools([]);
+            setConnectedCount(0);
+            return;
+        }
+
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let idleId: number | null = null;
+        const idleWindow = window as Window & {
+            requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+            cancelIdleCallback?: (handle: number) => void;
         };
-        update();
-        return mcpClient.subscribe(update);
+
+        const loadClient = () => {
+            void ensureClientLoaded().catch((error) => {
+                console.warn('Failed to initialize MCP client:', error);
+            });
+        };
+
+        if (!deferUntilIdle) {
+            loadClient();
+        } else if (idleWindow.requestIdleCallback) {
+            idleId = idleWindow.requestIdleCallback(loadClient, { timeout: 1800 });
+        } else {
+            timeoutId = setTimeout(loadClient, 400);
+        }
+
+        return () => {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+            if (idleId !== null && idleWindow.cancelIdleCallback) {
+                idleWindow.cancelIdleCallback(idleId);
+            }
+        };
+    }, [enabled, deferUntilIdle, ensureClientLoaded]);
+
+    useEffect(() => {
+        return () => {
+            unsubscribeRef.current?.();
+            unsubscribeRef.current = null;
+        };
     }, []);
 
     /**
      * Get tools formatted for OpenAI API
      */
     const getToolsForAPI = useCallback(() => {
-        return mcpClient.getToolsForAPI();
+        return clientRef.current?.getToolsForAPI() || [];
     }, []);
 
     /**
@@ -34,7 +121,6 @@ export const useMCP = () => {
     const parseToolCalls = useCallback((content: string): MCPToolCall[] => {
         const toolCalls: MCPToolCall[] = [];
 
-        // Try to parse XML-style tool calls: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
         const xmlPattern = /<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g;
         let match;
 
@@ -42,13 +128,13 @@ export const useMCP = () => {
             try {
                 const parsed = JSON.parse(match[1]);
                 if (parsed.name) {
-                    const tool = mcpClient.getTools().find(t => t.name === parsed.name);
+                    const tool = tools.find((t) => t.name === parsed.name);
                     if (tool) {
                         toolCalls.push({
                             id: crypto.randomUUID(),
                             name: parsed.name,
                             arguments: parsed.arguments || {},
-                            serverId: tool.serverId
+                            serverId: tool.serverId,
                         });
                     }
                 }
@@ -57,20 +143,19 @@ export const useMCP = () => {
             }
         }
 
-        // Also try function call format: ```tool\n{"name": "...", ...}\n```
         const codeBlockPattern = /```(?:tool|function)\s*\n(\{[\s\S]*?\})\s*\n```/g;
 
         while ((match = codeBlockPattern.exec(content)) !== null) {
             try {
                 const parsed = JSON.parse(match[1]);
                 if (parsed.name) {
-                    const tool = mcpClient.getTools().find(t => t.name === parsed.name);
+                    const tool = tools.find((t) => t.name === parsed.name);
                     if (tool) {
                         toolCalls.push({
                             id: crypto.randomUUID(),
                             name: parsed.name,
                             arguments: parsed.arguments || parsed.parameters || {},
-                            serverId: tool.serverId
+                            serverId: tool.serverId,
                         });
                     }
                 }
@@ -80,7 +165,7 @@ export const useMCP = () => {
         }
 
         return toolCalls;
-    }, []);
+    }, [tools]);
 
     /**
      * Execute a tool call and return the result
@@ -88,13 +173,14 @@ export const useMCP = () => {
     const executeTool = useCallback(async (toolCall: MCPToolCall): Promise<MCPToolResult> => {
         setIsExecutingTool(true);
         try {
-            const result = await mcpClient.executeTool(toolCall);
+            const client = await ensureClientLoaded();
+            const result = await client.executeTool(toolCall);
             setLastToolResult(result);
             return result;
         } finally {
             setIsExecutingTool(false);
         }
-    }, []);
+    }, [ensureClientLoaded]);
 
     /**
      * Execute multiple tool calls in sequence
@@ -116,7 +202,7 @@ export const useMCP = () => {
     const formatToolResults = useCallback((results: MCPToolResult[]): string => {
         if (results.length === 0) return '';
 
-        return results.map(r => {
+        return results.map((r) => {
             const status = r.isError ? '❌ Error' : '✅ Success';
             return `<tool_result id="${r.toolCallId}" status="${status}">\n${r.content}\n</tool_result>`;
         }).join('\n\n');
@@ -128,7 +214,7 @@ export const useMCP = () => {
     const getToolSystemPrompt = useCallback((): string => {
         if (tools.length === 0) return '';
 
-        const toolDescriptions = tools.map(t => {
+        const toolDescriptions = tools.map((t) => {
             let desc = `- **${t.name}**: ${t.description || 'No description'}`;
             if (t.inputSchema?.properties) {
                 const params = Object.entries(t.inputSchema.properties)
@@ -155,9 +241,6 @@ When you use a tool, wait for the result before continuing. The result will be p
 `;
     }, [tools]);
 
-    /**
-     * Check if MCP is available (any servers connected)
-     */
     const isAvailable = connectedCount > 0;
 
     return {
@@ -171,7 +254,7 @@ When you use a tool, wait for the result before continuing. The result will be p
         executeTool,
         executeToolCalls,
         formatToolResults,
-        getToolSystemPrompt
+        getToolSystemPrompt,
     };
 };
 
