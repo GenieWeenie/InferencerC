@@ -1,12 +1,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Copy, Check, Play, X, FileText, Save, PlayCircle, Github } from 'lucide-react';
-import 'katex/dist/katex.min.css';
 import ArtifactPreview from './ArtifactPreview';
 import StreamingIndicator from './StreamingIndicator';
 import { toast } from 'sonner';
@@ -34,6 +29,16 @@ const COMMON_LANGUAGES = [
     'markdown', 'bash', 'shell', 'powershell', 'dockerfile', 'makefile', 'cmake',
     'diff', 'git', 'nginx', 'apache', 'graphql', 'vue', 'svelte', 'angular'
 ];
+
+interface MathPluginBundle {
+    remarkMath: any;
+    rehypeKatex: any;
+}
+
+interface SyntaxHighlighterBundle {
+    component: any;
+    style: any;
+}
 
 const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAvailable, onInsertToFile, isStreaming, isLazyLoaded = false, onLoadContent, messageIndex }) => {
     const [displayContent, setDisplayContent] = React.useState(content);
@@ -93,6 +98,82 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
     const [codeBlockLanguages, setCodeBlockLanguages] = React.useState<Record<string, string>>({});
     const [executingCode, setExecutingCode] = React.useState<string | null>(null);
     const [executionResults, setExecutionResults] = React.useState<Record<string, { output: string; success: boolean }>>({});
+    const [mathPlugins, setMathPlugins] = React.useState<MathPluginBundle | null>(null);
+    const [syntaxHighlighterBundle, setSyntaxHighlighterBundle] = React.useState<SyntaxHighlighterBundle | null>(null);
+
+    const contentWithoutThinking = React.useMemo(() => {
+        if (!displayContent.trim().startsWith('<thinking>')) return displayContent;
+        const parts = displayContent.split('</thinking>');
+        return parts.length > 1 ? parts.slice(1).join('</thinking>').trim() : '';
+    }, [displayContent]);
+    const hasMathSyntax = React.useMemo(
+        () => /(\$\$[\s\S]*?\$\$|\\\(|\\\[|\$[^$\n]+\$)/.test(contentWithoutThinking),
+        [contentWithoutThinking]
+    );
+    const hasCodeBlocks = React.useMemo(
+        () => /```[\s\S]*?```/.test(contentWithoutThinking),
+        [contentWithoutThinking]
+    );
+
+    React.useEffect(() => {
+        if (!hasMathSyntax || mathPlugins) return;
+        let cancelled = false;
+
+        (async () => {
+            const [remarkMathModule, rehypeKatexModule] = await Promise.all([
+                import('remark-math'),
+                import('rehype-katex'),
+                import('katex/dist/katex.min.css'),
+            ]);
+
+            if (!cancelled) {
+                setMathPlugins({
+                    remarkMath: remarkMathModule.default,
+                    rehypeKatex: rehypeKatexModule.default,
+                });
+            }
+        })().catch((error) => {
+            console.error('Failed to load math rendering modules:', error);
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [hasMathSyntax, mathPlugins]);
+
+    React.useEffect(() => {
+        if (!hasCodeBlocks || syntaxHighlighterBundle) return;
+        let cancelled = false;
+
+        (async () => {
+            const [syntaxHighlighterModule, syntaxThemeModule] = await Promise.all([
+                import('react-syntax-highlighter'),
+                import('react-syntax-highlighter/dist/esm/styles/prism'),
+            ]);
+
+            if (!cancelled) {
+                setSyntaxHighlighterBundle({
+                    component: syntaxHighlighterModule.Prism,
+                    style: syntaxThemeModule.vscDarkPlus,
+                });
+            }
+        })().catch((error) => {
+            console.error('Failed to load syntax highlighting modules:', error);
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [hasCodeBlocks, syntaxHighlighterBundle]);
+
+    const remarkPlugins = React.useMemo(() => {
+        const plugins: any[] = [remarkGfm];
+        if (mathPlugins) plugins.push(mathPlugins.remarkMath);
+        return plugins;
+    }, [mathPlugins]);
+    const rehypePlugins = React.useMemo(() => {
+        return mathPlugins ? [mathPlugins.rehypeKatex] : [];
+    }, [mathPlugins]);
 
     const handleCopy = (code: string) => {
         navigator.clipboard.writeText(code);
@@ -266,8 +347,8 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                 </details>
             )}
             <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkMath]}
-                rehypePlugins={[rehypeKatex]}
+                remarkPlugins={remarkPlugins}
+                rehypePlugins={rehypePlugins}
                 components={{
                     code({ node, inline, className, children, ...props }: any) {
                         const match = /language-(\w+)/.exec(className || '');
@@ -275,6 +356,7 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                         const isBlock = !inline && (match || codeString.includes('\n'));
                         const codeHash = codeString.substring(0, 50); // Use first 50 chars as hash
                         const detectedLanguage = match ? match[1] : 'text';
+                        const SyntaxHighlighterComponent = syntaxHighlighterBundle?.component;
                         // Use custom language if set, otherwise use detected
                         const language = codeBlockLanguages[codeHash] || detectedLanguage;
                         const isPreviewable = PREVIEWABLE_LANGUAGES.includes(language.toLowerCase());
@@ -389,19 +471,25 @@ const MessageContent: React.FC<MessageContentProps> = ({ content, isUser, mcpAva
                                     </div>
                                 </div>
                                 <div className="relative">
-                                    <SyntaxHighlighter
-                                        {...props}
-                                        style={vscDarkPlus}
-                                        language={language}
-                                        PreTag="div"
-                                        customStyle={{ margin: 0, borderRadius: 0, padding: '1.25rem', overflowX: 'auto', background: 'transparent', fontSize: '13px', lineHeight: '1.5' }}
-                                        wrapLines={true}
-                                        wrapLongLines={true}
-                                        showLineNumbers={true}
-                                        lineNumberStyle={{ minWidth: '2em', paddingRight: '1em', color: '#525252', textAlign: 'right' }}
-                                    >
-                                        {codeString}
-                                    </SyntaxHighlighter>
+                                    {SyntaxHighlighterComponent ? (
+                                        <SyntaxHighlighterComponent
+                                            {...props}
+                                            style={syntaxHighlighterBundle.style}
+                                            language={language}
+                                            PreTag="div"
+                                            customStyle={{ margin: 0, borderRadius: 0, padding: '1.25rem', overflowX: 'auto', background: 'transparent', fontSize: '13px', lineHeight: '1.5' }}
+                                            wrapLines={true}
+                                            wrapLongLines={true}
+                                            showLineNumbers={true}
+                                            lineNumberStyle={{ minWidth: '2em', paddingRight: '1em', color: '#525252', textAlign: 'right' }}
+                                        >
+                                            {codeString}
+                                        </SyntaxHighlighterComponent>
+                                    ) : (
+                                        <pre className="m-0 p-5 overflow-x-auto bg-transparent text-slate-100 text-[13px] leading-relaxed whitespace-pre-wrap break-words custom-scrollbar">
+                                            <code className="font-mono">{codeString}</code>
+                                        </pre>
+                                    )}
                                 </div>
                                 {/* Execution Results */}
                                 {executionResults[codeHash] && (

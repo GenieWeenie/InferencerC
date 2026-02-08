@@ -257,6 +257,9 @@ const Chat: React.FC = () => {
     const [bookmarkedMessages, setBookmarkedMessages] = React.useState<Set<number>>(new Set());
     const [showRequestLog, setShowRequestLog] = React.useState(false);
     const [showDiagnosticsPanel, setShowDiagnosticsPanel] = React.useState(false);
+    const [hasCompletedLaunchChecklist, setHasCompletedLaunchChecklist] = React.useState<boolean>(() => {
+        return localStorage.getItem('chat_launch_checklist_completed') === '1';
+    });
     const [showBottomControls, setShowBottomControls] = React.useState<boolean>(() => {
         const stored = localStorage.getItem('chat_show_bottom_controls');
         return stored !== '0';
@@ -760,6 +763,7 @@ const Chat: React.FC = () => {
     ]), [providerReady, connectionStatus.local, connectionStatus.remote, modelReady, currentModelObj, currentModel, promptReady]);
     const readinessCompletedCount = readinessSteps.filter(step => step.complete).length;
     const launchChecklistComplete = readinessCompletedCount === readinessSteps.length;
+    const shouldShowLaunchChecklist = !hasCompletedLaunchChecklist && !launchChecklistComplete;
     const diagnosticsStatus = React.useMemo(() => {
         if (!providerReady) {
             return {
@@ -788,6 +792,12 @@ const Chat: React.FC = () => {
             className: 'text-emerald-300 border-emerald-700/70 bg-emerald-900/20',
         };
     }, [providerReady, modelReady, history.length, promptReady]);
+    React.useEffect(() => {
+        if (!launchChecklistComplete || hasCompletedLaunchChecklist) return;
+        setHasCompletedLaunchChecklist(true);
+        localStorage.setItem('chat_launch_checklist_completed', '1');
+    }, [launchChecklistComplete, hasCompletedLaunchChecklist]);
+
     const updateDiagnosticsPanelPosition = React.useCallback(() => {
         const trigger = diagnosticsButtonRef.current;
         if (!trigger) return;
@@ -2815,13 +2825,13 @@ const Chat: React.FC = () => {
                             <div className="space-y-2">
                                 <h2 className="text-2xl font-heading font-bold text-white tracking-tight">How can I help you today?</h2>
                                 <p className="text-slate-500 text-sm max-w-sm mx-auto leading-relaxed">
-                                    {launchChecklistComplete
+                                    {(launchChecklistComplete || hasCompletedLaunchChecklist)
                                         ? 'InferencerC 3.1 is ready. Send your first prompt.'
                                         : 'InferencerC 3.1 is focused on speed-to-success. Finish the quick launch checklist, then send.'}
                                 </p>
                             </div>
 
-                            {!launchChecklistComplete && (
+                            {shouldShowLaunchChecklist && (
                                 <div className="w-full max-w-xl text-left bg-slate-900/60 border border-slate-800 rounded-2xl p-4 space-y-3">
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
