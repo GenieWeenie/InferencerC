@@ -48,19 +48,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build macOS release (signed)
-        if: matrix.os == 'macos-latest' && secrets.CSC_LINK != ''
-        run: npm run release:mac:signed
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
       - name: Build macOS release (unsigned fallback)
-        if: matrix.os == 'macos-latest' && secrets.CSC_LINK == ''
+        if: matrix.os == 'macos-latest'
         run: npm run build:mac
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

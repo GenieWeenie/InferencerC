@@ -5,7 +5,6 @@ on:
 
 jobs:
   mac-signed-release:
-    if: ${{ secrets.CSC_LINK != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
     runs-on: macos-latest
     steps:
       - name: Check out repository

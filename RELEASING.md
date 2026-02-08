@@ -29,11 +29,10 @@ Required environment variables/secrets:
 
 - Main release matrix: `.github/workflows/build.yml`
   - Triggers on release tags (`v*`) or manual dispatch
-  - Uses signed mac build when `CSC_LINK` is configured
-  - Falls back to unsigned mac build when signing secrets are absent
+  - Builds unsigned mac artifacts in matrix mode for reliability
 - Dedicated signed mac workflow: `.github/workflows/release-mac-signed.yml`
   - Trigger manually (`workflow_dispatch`) only
-  - Skips automatically when required Apple/signing secrets are not configured
+  - Use this only when Apple/signing secrets are configured
 
 ## Short Release Checklist
 
