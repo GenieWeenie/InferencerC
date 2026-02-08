@@ -444,7 +444,13 @@ Use Git tags and GitHub Releases for version-by-version details.
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome.
+
+Use the safe PR flow documented in `CONTRIBUTING.md`:
+
+- Branch from `master`
+- Open PR back to `master`
+- Wait for `CI / validate` to pass before merge
 
 ---
 

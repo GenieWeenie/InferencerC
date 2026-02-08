@@ -35,12 +35,11 @@ Required environment variables/secrets:
 
 ## Short Release Checklist
 
-1. Pull latest `master` and verify clean git state
-2. Run validation:
+1. Ensure all feature/fix work merged via Pull Request into `master`
+2. Pull latest `master` and verify clean git state
+3. Run validation:
    - `npm test -- --runInBand`
    - `npm run clean:workspace`
-3. Push code changes:
-   - `git push origin master`
 4. Create and push release tag:
    - `git tag vX.Y.Z`
    - `git push origin vX.Y.Z`
