@@ -115,15 +115,20 @@ describe('testDataGenerator', () => {
         });
 
         it('should include generation time for assistant messages', () => {
-            const messages = generateLargeConversation({ messageCount: 20 });
-            const assistantMessages = messages.filter(m => m.role === 'assistant');
-            const withGenTime = assistantMessages.filter(m => m.generationTime !== undefined);
+            const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
+            try {
+                const messages = generateLargeConversation({ messageCount: 20 });
+                const assistantMessages = messages.filter(m => m.role === 'assistant');
+                const withGenTime = assistantMessages.filter(m => m.generationTime !== undefined);
 
-            expect(withGenTime.length).toBeGreaterThan(0);
-            withGenTime.forEach(msg => {
-                expect(msg.generationTime).toBeGreaterThan(0);
-                expect(msg.generationTime).toBeLessThan(10000);
-            });
+                expect(withGenTime.length).toBeGreaterThan(0);
+                withGenTime.forEach(msg => {
+                    expect(msg.generationTime).toBeGreaterThan(0);
+                    expect(msg.generationTime).toBeLessThan(10000);
+                });
+            } finally {
+                randomSpy.mockRestore();
+            }
         });
     });
 
