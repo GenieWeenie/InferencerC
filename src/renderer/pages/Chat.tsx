@@ -121,6 +121,30 @@ const FederatedLearningPanel = React.lazy(() =>
 );
 
 const RECOVERY_CLEAN_EXIT_KEY = 'app_recovery_clean_exit';
+const CHAT_PERF_HISTORY_KEY = 'chat_message_perf_benchmarks_v1';
+
+type ChatPerfMode = 'single' | 'battle';
+
+interface ChatPerfSample {
+    timestamp: number;
+    modelId: string;
+    mode: ChatPerfMode;
+    inputChars: number;
+    inputToRenderMs: number;
+    inputToFirstTokenMs: number | null;
+}
+
+interface PendingChatPerfBenchmark {
+    startedAt: number;
+    baselineHistoryLength: number;
+    assistantTargets: number[];
+    initialContentLengthByTarget: Record<number, number>;
+    modelId: string;
+    mode: ChatPerfMode;
+    inputChars: number;
+    inputToRenderMs?: number;
+    inputToFirstTokenMs?: number;
+}
 
 // Message skeleton component for loading states
 const MessageSkeleton: React.FC<{ isUser?: boolean }> = ({ isUser = false }) => {
@@ -260,6 +284,27 @@ const Chat: React.FC = () => {
     const [hasCompletedLaunchChecklist, setHasCompletedLaunchChecklist] = React.useState<boolean>(() => {
         return localStorage.getItem('chat_launch_checklist_completed') === '1';
     });
+    const [recentPerfBenchmarks, setRecentPerfBenchmarks] = React.useState<ChatPerfSample[]>(() => {
+        try {
+            const raw = localStorage.getItem(CHAT_PERF_HISTORY_KEY);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw) as ChatPerfSample[];
+            if (!Array.isArray(parsed)) return [];
+            return parsed
+                .filter((item) =>
+                    item &&
+                    Number.isFinite(item.timestamp) &&
+                    typeof item.modelId === 'string' &&
+                    (item.mode === 'single' || item.mode === 'battle') &&
+                    Number.isFinite(item.inputChars) &&
+                    Number.isFinite(item.inputToRenderMs)
+                )
+                .slice(0, 5);
+        } catch {
+            return [];
+        }
+    });
+    const [activePerfBenchmark, setActivePerfBenchmark] = React.useState<PendingChatPerfBenchmark | null>(null);
     const [showBottomControls, setShowBottomControls] = React.useState<boolean>(() => {
         const stored = localStorage.getItem('chat_show_bottom_controls');
         return stored !== '0';
@@ -339,6 +384,7 @@ const Chat: React.FC = () => {
     const diagnosticsPanelRef = React.useRef<HTMLDivElement | null>(null);
     const diagnosticsButtonRef = React.useRef<HTMLButtonElement | null>(null);
     const diagnosticsPopoverRef = React.useRef<HTMLDivElement | null>(null);
+    const pendingPerfBenchmarkRef = React.useRef<PendingChatPerfBenchmark | null>(null);
 
     const [conversationFontSize, setConversationFontSize] = React.useState<number>(() => {
         const stored = Number(localStorage.getItem('chat_font_size'));
@@ -448,6 +494,14 @@ const Chat: React.FC = () => {
             setShowVariableMenu(false);
         }
     }, [showBottomControls]);
+
+    React.useEffect(() => {
+        try {
+            localStorage.setItem(CHAT_PERF_HISTORY_KEY, JSON.stringify(recentPerfBenchmarks.slice(0, 5)));
+        } catch {
+            // Ignore persistence failures for perf diagnostics.
+        }
+    }, [recentPerfBenchmarks]);
 
     // Context management state persistence (per session)
     React.useEffect(() => {
@@ -831,6 +885,99 @@ const Chat: React.FC = () => {
             window.removeEventListener('scroll', updateDiagnosticsPanelPosition, true);
         };
     }, [showDiagnosticsPanel, updateDiagnosticsPanelPosition]);
+
+    const finalizePerfBenchmark = React.useCallback((pending: PendingChatPerfBenchmark) => {
+        if (pendingPerfBenchmarkRef.current !== pending || pending.inputToRenderMs === undefined) return;
+
+        const sample: ChatPerfSample = {
+            timestamp: Date.now(),
+            modelId: pending.modelId,
+            mode: pending.mode,
+            inputChars: pending.inputChars,
+            inputToRenderMs: pending.inputToRenderMs,
+            inputToFirstTokenMs: pending.inputToFirstTokenMs ?? null,
+        };
+
+        setRecentPerfBenchmarks(prev => [sample, ...prev].slice(0, 5));
+        pendingPerfBenchmarkRef.current = null;
+        setActivePerfBenchmark(null);
+    }, []);
+
+    const beginPerfBenchmark = React.useCallback((pendingInput: string) => {
+        if (!pendingInput.trim() && attachments.length === 0 && imageAttachments.length === 0) {
+            return;
+        }
+
+        const baselineHistoryLength = history.length;
+        const isBattleRequest = battleMode && Boolean(secondaryModel);
+        const assistantTargets = isBattleRequest
+            ? [baselineHistoryLength + 1, baselineHistoryLength + 2]
+            : [baselineHistoryLength + 1];
+        const initialContentLengthByTarget: Record<number, number> = {};
+        assistantTargets.forEach((targetIndex, targetOrder) => {
+            initialContentLengthByTarget[targetIndex] = !isBattleRequest && targetOrder === 0 ? (prefill?.length || 0) : 0;
+        });
+
+        const pending: PendingChatPerfBenchmark = {
+            startedAt: performance.now(),
+            baselineHistoryLength,
+            assistantTargets,
+            initialContentLengthByTarget,
+            modelId: currentModel || 'unknown',
+            mode: isBattleRequest ? 'battle' : 'single',
+            inputChars: pendingInput.trim().length,
+        };
+
+        pendingPerfBenchmarkRef.current = pending;
+        setActivePerfBenchmark(pending);
+    }, [attachments.length, imageAttachments.length, history.length, battleMode, secondaryModel, prefill, currentModel]);
+
+    React.useEffect(() => {
+        const pending = pendingPerfBenchmarkRef.current;
+        if (!pending) return;
+
+        const targetsInRange = pending.assistantTargets.filter(index => index < history.length);
+        if (targetsInRange.length === 0) return;
+
+        if (pending.inputToRenderMs === undefined) {
+            window.requestAnimationFrame(() => {
+                const current = pendingPerfBenchmarkRef.current;
+                if (!current || current !== pending || current.inputToRenderMs !== undefined) return;
+                current.inputToRenderMs = performance.now() - current.startedAt;
+                setActivePerfBenchmark({ ...current });
+            });
+        }
+
+        if (pending.inputToFirstTokenMs === undefined) {
+            for (const targetIndex of targetsInRange) {
+                const targetMessage = history[targetIndex];
+                if (!targetMessage) continue;
+                const initialLength = pending.initialContentLengthByTarget[targetIndex] || 0;
+                if ((targetMessage.content || '').length > initialLength) {
+                    pending.inputToFirstTokenMs = performance.now() - pending.startedAt;
+                    setActivePerfBenchmark({ ...pending });
+                    break;
+                }
+            }
+        }
+
+        const allTargetsDone = pending.assistantTargets.every((targetIndex) => {
+            const targetMessage = history[targetIndex];
+            return Boolean(targetMessage) && !targetMessage.isLoading;
+        });
+
+        if (pending.inputToRenderMs !== undefined && (pending.inputToFirstTokenMs !== undefined || allTargetsDone)) {
+            finalizePerfBenchmark(pending);
+        }
+    }, [history, finalizePerfBenchmark]);
+
+    const latestPerfBenchmark = recentPerfBenchmarks[0] || null;
+    const formatPerfMs = React.useCallback((value?: number | null) => {
+        if (value === null) return 'n/a';
+        if (value === undefined) return '...';
+        return `${Math.round(value)}ms`;
+    }, []);
+
     const contextWindowTokens = currentModelObj?.contextLength || 32768;
     const excludedContextKey = React.useMemo(
         () => Array.from(excludedContextIndices).sort((a, b) => a - b).join(','),
@@ -971,12 +1118,14 @@ const Chat: React.FC = () => {
             setInput(textToSend);
             // Allow state to update before sending
             setTimeout(() => {
+                beginPerfBenchmark(textToSend);
                 sendMessage(sendOptions);
             }, 100);
         } else {
+            beginPerfBenchmark(textToSend);
             sendMessage(sendOptions);
         }
-    }, [input, projectContext, includeContextInMessages, sendMessage, currentModel, availableModels, sessionId, savedSessions, history, buildContextSendOptions]);
+    }, [input, projectContext, includeContextInMessages, sendMessage, currentModel, availableModels, sessionId, savedSessions, history, buildContextSendOptions, beginPerfBenchmark]);
 
     // Project Context subscription
     React.useEffect(() => {
@@ -2550,6 +2699,30 @@ const Chat: React.FC = () => {
                                     >
                                         <X size={14} />
                                     </button>
+                                </div>
+
+                                <div className="mt-3 rounded-md border border-slate-800 bg-slate-950/50 px-2.5 py-2">
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Dev Perf (Last Send)</p>
+                                        {activePerfBenchmark && (
+                                            <span className="text-[10px] text-cyan-300 animate-pulse">Measuring...</span>
+                                        )}
+                                    </div>
+                                    {latestPerfBenchmark ? (
+                                        <div className="mt-1.5 space-y-1">
+                                            <p className="text-[11px] text-slate-300">
+                                                Input → Render: <span className="font-semibold text-cyan-300">{formatPerfMs(latestPerfBenchmark.inputToRenderMs)}</span>
+                                            </p>
+                                            <p className="text-[11px] text-slate-300">
+                                                Input → First Token: <span className="font-semibold text-emerald-300">{formatPerfMs(latestPerfBenchmark.inputToFirstTokenMs)}</span>
+                                            </p>
+                                            <p className="text-[10px] text-slate-500">
+                                                {latestPerfBenchmark.mode === 'battle' ? 'Battle mode' : 'Single mode'} • {latestPerfBenchmark.inputChars} chars
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <p className="mt-1.5 text-[11px] text-slate-500">Send one prompt to record benchmark metrics.</p>
+                                    )}
                                 </div>
 
                                 <div className="mt-3 space-y-2">
