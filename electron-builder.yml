@@ -52,11 +52,12 @@ linux:
     - AppImage
     - deb
     - rpm
+  maintainer: GenieWeenie <152430369+GenieWeenie@users.noreply.github.com>
   icon: build/icon.png
   category: Development
 
 publish:
   provider: github
-  owner: your-username
-  repo: inferencer-c
+  owner: GenieWeenie
+  repo: InferencerC
   releaseType: release

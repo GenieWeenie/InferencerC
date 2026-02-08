@@ -1,6 +1,6 @@
 {
   "name": "win-inferencer-clone",
-  "version": "3.0.0",
+  "version": "3.1.1",
   "description": "Windows Desktop App for Local LLM Inference",
   "main": "dist/main/index.js",
   "scripts": {
@@ -10,11 +10,11 @@
     "dev:backend": "tsc -p tsconfig.node.json && node dist/server/index.js",
     "dev:electron": "wait-on http://localhost:5173 && tsc -p tsconfig.node.json && electron .",
     "build": "tsc -p tsconfig.node.json && vite build",
-    "build:win": "npm run build && electron-builder --win",
-    "build:mac": "npm run build && electron-builder --mac -c.mac.identity=null",
+    "build:win": "npm run build && electron-builder --win --publish never",
+    "build:mac": "npm run build && electron-builder --mac -c.mac.identity=null --publish never",
     "build:mac:signed": "npm run build && electron-builder --mac",
     "release:mac:signed": "npm run build && electron-builder --mac --publish always",
-    "build:linux": "npm run build && electron-builder --linux",
+    "build:linux": "npm run build && electron-builder --linux --publish never",
     "build:portable": "npm run build && electron-builder --win portable",
     "clean:workspace": "bash ./scripts/dev/clean_workspace.sh",
     "test": "jest",
@@ -24,7 +24,7 @@
     "qa:release:gate": "bash ./scripts/qa/release_gate.sh"
   },
   "keywords": [],
-  "author": "",
+  "author": "GenieWeenie <152430369+GenieWeenie@users.noreply.github.com>",
   "license": "ISC",
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
