@@ -16,11 +16,10 @@ import { useLongPress, usePinchZoom, useSwipeNavigation } from '../hooks/useGest
 import { calculateEntropy, compressImage } from '../lib/chatUtils';
 import { useMCP } from '../hooks/useMCP';
 import { readAnalyticsUsageStats, UsageStatsRecord } from '../services/analyticsStore';
-import { projectContextService, ProjectContext } from '../services/projectContext';
+import type { ProjectContext } from '../services/projectContext';
 import { HistoryService } from '../services/history';
 import { activityLogService } from '../services/activityLog';
-import { TemplateService, ConversationTemplate } from '../services/templates';
-import { PromptVariableService } from '../services/promptVariables';
+import type { ConversationTemplate } from '../services/templates';
 import { ContextManagementService } from '../services/contextManagement';
 import { AVAILABLE_TOOLS } from '../lib/tools';
 import { RecoveryState } from '../../shared/types';
@@ -120,6 +119,8 @@ type AutoCategorizationService = typeof import('../services/autoCategorization')
 type AutoTaggingService = typeof import('../services/autoTagging')['autoTaggingService'];
 type WorkflowsService = typeof import('../services/workflows')['workflowsService'];
 type ApiClientService = typeof import('../services/apiClient')['apiClientService'];
+type ProjectContextService = typeof import('../services/projectContext')['projectContextService'];
+type PromptVariableServiceType = typeof import('../services/promptVariables')['PromptVariableService'];
 
 let cloudSyncServicePromise: Promise<CloudSyncService> | null = null;
 let multiModalAIServicePromise: Promise<MultiModalAIService> | null = null;
@@ -127,6 +128,8 @@ let autoCategorizationServicePromise: Promise<AutoCategorizationService> | null 
 let autoTaggingServicePromise: Promise<AutoTaggingService> | null = null;
 let workflowsServicePromise: Promise<WorkflowsService> | null = null;
 let apiClientServicePromise: Promise<ApiClientService> | null = null;
+let projectContextServicePromise: Promise<ProjectContextService> | null = null;
+let promptVariableServicePromise: Promise<PromptVariableServiceType> | null = null;
 
 const loadOnboardingService = async () => {
     const onboardingModule: OnboardingServiceModule = await import('../services/onboarding');
@@ -173,6 +176,20 @@ const loadApiClientService = async (): Promise<ApiClientService> => {
         apiClientServicePromise = import('../services/apiClient').then((mod) => mod.apiClientService);
     }
     return apiClientServicePromise;
+};
+
+const loadProjectContextService = async (): Promise<ProjectContextService> => {
+    if (!projectContextServicePromise) {
+        projectContextServicePromise = import('../services/projectContext').then((mod) => mod.projectContextService);
+    }
+    return projectContextServicePromise;
+};
+
+const loadPromptVariableService = async (): Promise<PromptVariableServiceType> => {
+    if (!promptVariableServicePromise) {
+        promptVariableServicePromise = import('../services/promptVariables').then((mod) => mod.PromptVariableService);
+    }
+    return promptVariableServicePromise;
 };
 
 type ChatPerfMode = 'single' | 'battle';
@@ -1355,15 +1372,16 @@ const Chat: React.FC = () => {
         let hasChanges = false;
 
         // 1. Process Prompt Variables
-        if (PromptVariableService.hasVariables(textToSend)) {
+        const promptVariableService = await loadPromptVariableService();
+        if (promptVariableService.hasVariables(textToSend)) {
             try {
-                const processed = await PromptVariableService.processText(textToSend, {
+                const processed = await promptVariableService.processText(textToSend, {
                     modelId: currentModel,
                     modelName: availableModels.find(m => m.id === currentModel)?.name,
                     sessionId: sessionId,
                     sessionTitle: savedSessions.find(s => s.id === sessionId)?.title,
                     messageCount: history.length,
-                    userName: PromptVariableService.getUserName()
+                    userName: promptVariableService.getUserName()
                 });
                 if (processed !== textToSend) {
                     textToSend = processed;
@@ -1376,6 +1394,7 @@ const Chat: React.FC = () => {
 
         // 2. Add Project Context
         if (projectContext && includeContextInMessages) {
+            const projectContextService = await loadProjectContextService();
             const contextSummary = projectContextService.getContextSummary(10);
             if (contextSummary) {
                 textToSend += contextSummary;
@@ -1401,17 +1420,43 @@ const Chat: React.FC = () => {
     // Project Context subscription (lazily enabled when the feature is used)
     React.useEffect(() => {
         if (!projectContextFeatureEnabled) return;
-        const unsubscribe = projectContextService.subscribe((context) => {
-            setProjectContext(context);
-        });
-        setProjectContext(projectContextService.getContext());
-        return unsubscribe;
+        let isMounted = true;
+        let unsubscribe: (() => void) | null = null;
+
+        void loadProjectContextService()
+            .then((projectContextService) => {
+                if (!isMounted) return;
+                unsubscribe = projectContextService.subscribe((context) => {
+                    setProjectContext(context);
+                });
+                setProjectContext(projectContextService.getContext());
+            })
+            .catch(() => {
+                if (!isMounted) return;
+                setProjectContext(null);
+            });
+
+        return () => {
+            isMounted = false;
+            unsubscribe?.();
+        };
     }, [projectContextFeatureEnabled]);
 
     React.useEffect(() => {
-        if (projectContextService.getContext()) {
-            setProjectContextFeatureEnabled(true);
-        }
+        let isMounted = true;
+        void loadProjectContextService()
+            .then((projectContextService) => {
+                if (!isMounted) return;
+                if (projectContextService.getContext()) {
+                    setProjectContextFeatureEnabled(true);
+                }
+            })
+            .catch(() => {
+                // Ignore project context preload errors.
+            });
+        return () => {
+            isMounted = false;
+        };
     }, []);
 
     // Auto-categorization and auto-tagging
@@ -3823,8 +3868,14 @@ const Chat: React.FC = () => {
                                             </button>
                                             <button
                                                 onClick={() => {
-                                                    projectContextService.clearContext();
-                                                    toast.success('Project context cleared');
+                                                    void loadProjectContextService()
+                                                        .then((projectContextService) => {
+                                                            projectContextService.clearContext();
+                                                            toast.success('Project context cleared');
+                                                        })
+                                                        .catch(() => {
+                                                            toast.error('Failed to clear project context');
+                                                        });
                                                 }}
                                                 className="p-1 hover:bg-slate-800 rounded transition-colors"
                                                 title="Clear context"
@@ -3844,6 +3895,7 @@ const Chat: React.FC = () => {
                                             <button
                                                 onClick={async () => {
                                                     enableProjectContextFeature();
+                                                    const projectContextService = await loadProjectContextService();
                                                     const success = await projectContextService.startWatching();
                                                     if (success) {
                                                         toast.success('Started watching folder for changes');
@@ -3929,6 +3981,7 @@ const Chat: React.FC = () => {
                             <button
                                 onClick={async () => {
                                     enableProjectContextFeature();
+                                    const projectContextService = await loadProjectContextService();
                                     if (projectContext) {
                                         projectContextService.clearContext();
                                         toast.success('Project context cleared');
