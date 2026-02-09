@@ -29,6 +29,8 @@ let sessionsMetadataCacheRaw: string | null = null;
 const messageContentWriteCache = new Map<string, string>();
 const messageContentKindCache = new Map<string, 'plain' | 'json'>();
 const chunkKeysBySession = new Map<string, Set<string>>();
+const messageSizeCacheByRef = new WeakMap<ChatMessage, number>();
+const chunkDecisionCacheByRef = new WeakMap<ChatMessage, boolean>();
 type SessionDataCacheEntry = {
   raw: string;
   parsed: ChatSession;
@@ -232,11 +234,18 @@ const pruneSessionChunkKeys = (sessionId: string, activeKeys: Set<string>): void
  * Calculate message size in bytes
  */
 const getMessageSize = (message: ChatMessage): number => {
+  const cachedSize = messageSizeCacheByRef.get(message);
+  if (cachedSize !== undefined) {
+    return cachedSize;
+  }
+
   try {
     const contentStr = typeof message.content === 'string'
       ? message.content
       : JSON.stringify(message.content);
-    return new Blob([contentStr]).size;
+    const size = new Blob([contentStr]).size;
+    messageSizeCacheByRef.set(message, size);
+    return size;
   } catch (e) {
     return 0;
   }
@@ -246,7 +255,14 @@ const getMessageSize = (message: ChatMessage): number => {
  * Check if message content should be stored separately
  */
 const shouldChunkMessage = (message: ChatMessage): boolean => {
-  return getMessageSize(message) > CONTENT_CHUNK_THRESHOLD;
+  const cachedDecision = chunkDecisionCacheByRef.get(message);
+  if (cachedDecision !== undefined) {
+    return cachedDecision;
+  }
+
+  const decision = getMessageSize(message) > CONTENT_CHUNK_THRESHOLD;
+  chunkDecisionCacheByRef.set(message, decision);
+  return decision;
 };
 
 /**
