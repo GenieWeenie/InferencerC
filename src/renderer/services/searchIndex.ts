@@ -391,6 +391,49 @@ export const SearchIndexService = {
             }
             return resultIds;
         }
+        if (queryTermCount === 3) {
+            const firstTerm = queryTerms[0];
+            const secondTerm = queryTerms[1];
+            const thirdTerm = queryTerms[2];
+            const firstIds = index.terms[firstTerm];
+            const secondIds = index.terms[secondTerm];
+            const thirdIds = index.terms[thirdTerm];
+
+            if (!firstIds || firstIds.length === 0 || !secondIds || secondIds.length === 0 || !thirdIds || thirdIds.length === 0) {
+                return resultIds;
+            }
+
+            let candidateIds = firstIds;
+            let membershipTermA = secondTerm;
+            let membershipIdsA = secondIds;
+            let membershipTermB = thirdTerm;
+            let membershipIdsB = thirdIds;
+
+            if (secondIds.length < candidateIds.length) {
+                candidateIds = secondIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = thirdTerm;
+                membershipIdsB = thirdIds;
+            }
+            if (thirdIds.length < candidateIds.length) {
+                candidateIds = thirdIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+            }
+
+            const membershipSetA = getPostingSet(membershipTermA, membershipIdsA);
+            const membershipSetB = getPostingSet(membershipTermB, membershipIdsB);
+            for (let i = 0; i < candidateIds.length; i++) {
+                const sessionId = candidateIds[i];
+                if (membershipSetA.has(sessionId) && membershipSetB.has(sessionId)) {
+                    resultIds.add(sessionId);
+                }
+            }
+            return resultIds;
+        }
 
         const initialIds = index.terms[queryTerms[0]];
         if (!initialIds || initialIds.length === 0) {
