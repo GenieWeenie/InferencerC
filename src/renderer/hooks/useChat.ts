@@ -648,7 +648,13 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         setFullMessageCache(new Map());
         HistoryService.setLastActiveSessionId(newSession.id);
         HistoryService.saveSession(newSession);
-        setSavedSessions(HistoryService.getAllSessions());
+        setSavedSessions((prev) => {
+            const metadata: ChatSession = {
+                ...newSession,
+                messages: [],
+            };
+            return [metadata, ...prev.filter((session) => session.id !== newSession.id)];
+        });
         setShowHistory(false);
 
         // Restore draft for new session
@@ -761,7 +767,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
     const deleteSession = (id: string) => {
         HistoryService.deleteSession(id);
-        setSavedSessions(HistoryService.getAllSessions());
+        setSavedSessions((prev) => prev.filter((session) => session.id !== id));
         if (id === sessionId) createNewSession();
         logComplianceEvent({
             category: 'chat.session',
