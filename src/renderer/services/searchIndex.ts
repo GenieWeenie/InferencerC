@@ -272,26 +272,29 @@ export const SearchIndexService = {
             return resultIds;
         }
 
-        firstIds.forEach(id => resultIds.add(id));
-
-        // Filter by subsequent terms
+        const remainingTermSets: Set<string>[] = [];
         for (let i = 1; i < sortedTerms.length; i++) {
             const { term, ids: termIdsRaw } = sortedTerms[i];
             if (termIdsRaw.length === 0) {
-                resultIds.clear();
                 return resultIds;
             }
-            const termIds = getPostingSet(term, termIdsRaw);
+            remainingTermSets.push(getPostingSet(term, termIdsRaw));
+        }
 
-            // Intersection
-            for (const id of resultIds) {
-                if (!termIds.has(id)) {
-                    resultIds.delete(id);
+        // Scan candidates from the smallest posting list once.
+        for (let i = 0; i < firstIds.length; i++) {
+            const sessionId = firstIds[i];
+            let matchesAll = true;
+
+            for (let j = 0; j < remainingTermSets.length; j++) {
+                if (!remainingTermSets[j].has(sessionId)) {
+                    matchesAll = false;
+                    break;
                 }
             }
 
-            if (resultIds.size === 0) {
-                return resultIds;
+            if (matchesAll) {
+                resultIds.add(sessionId);
             }
         }
 
