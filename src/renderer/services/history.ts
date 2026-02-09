@@ -34,6 +34,7 @@ const chunkDecisionCacheByRef = new WeakMap<ChatMessage, boolean>();
 type SessionDataCacheEntry = {
   raw: string;
   parsed: ChatSession;
+  chunkedMessageIndexes: number[];
 };
 const sessionDataCache = new Map<string, SessionDataCacheEntry>();
 
@@ -193,10 +194,22 @@ const patchStoredSessionMetadata = (
     sessionDataCache.set(sessionId, {
       raw: updatedRaw,
       parsed: updatedSession,
+      chunkedMessageIndexes: getChunkedMessageIndexes(updatedSession.messages),
     });
   } catch (e) {
     console.error(`Failed to patch stored session metadata for ${sessionId}`, e);
   }
+};
+
+const getChunkedMessageIndexes = (messages: ChatMessage[]): number[] => {
+  const chunkedIndexes: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const chatMsg = messages[i] as any;
+    if (chatMsg._contentChunked) {
+      chunkedIndexes.push(i);
+    }
+  }
+  return chunkedIndexes;
 };
 
 const getChunkContentKey = (sessionId: string, messageIndex: number): string => {
@@ -445,6 +458,7 @@ export const HistoryService = {
       const rawSpecific = localStorage.getItem(specificKey);
 
       let session: ChatSession | undefined;
+      let chunkedMessageIndexes: number[] = [];
 
       if (rawSpecific) {
         const cached = sessionDataCache.get(id);
@@ -453,11 +467,14 @@ export const HistoryService = {
             ...cached.parsed,
             messages: [...cached.parsed.messages],
           };
+          chunkedMessageIndexes = cached.chunkedMessageIndexes;
         } else {
           session = JSON.parse(rawSpecific);
+          chunkedMessageIndexes = getChunkedMessageIndexes(session.messages);
           sessionDataCache.set(id, {
             raw: rawSpecific,
             parsed: session,
+            chunkedMessageIndexes,
           });
         }
       } else {
@@ -476,26 +493,28 @@ export const HistoryService = {
         };
       }
 
-      // Load chunked message content
-      const messagesWithContent = session.messages.map((msg, index) => {
-        const chatMsg = msg as any;
+      if (chunkedMessageIndexes.length === 0) {
+        return {
+          ...session,
+          messages: [...session.messages],
+        };
+      }
 
-        // Check if message has chunked content
-        if (chatMsg._contentChunked) {
-          // Load content from separate storage
-          const content = loadMessageContent(id, index);
-          if (content !== null) {
-            // Remove the chunked marker and restore content
-            const { _contentChunked, ...msgWithoutMarker } = chatMsg;
-            return {
-              ...msgWithoutMarker,
-              content
-            } as ChatMessage;
-          }
+      // Load chunked message content.
+      const messagesWithContent = [...session.messages] as ChatMessage[];
+      for (let i = 0; i < chunkedMessageIndexes.length; i++) {
+        const index = chunkedMessageIndexes[i];
+        const chatMsg = messagesWithContent[index] as any;
+        const content = loadMessageContent(id, index);
+        if (content !== null) {
+          // Remove the chunked marker and restore content.
+          const { _contentChunked, ...msgWithoutMarker } = chatMsg;
+          messagesWithContent[index] = {
+            ...msgWithoutMarker,
+            content,
+          } as ChatMessage;
         }
-
-        return chatMsg as ChatMessage;
-      });
+      }
 
       return {
         ...session,
@@ -640,6 +659,7 @@ export const HistoryService = {
     sessionDataCache.set(session.id, {
       raw: processedSessionRaw,
       parsed: processedSession,
+      chunkedMessageIndexes: getChunkedMessageIndexes(processedMessages),
     });
 
     // 2. Update metadata in main list
