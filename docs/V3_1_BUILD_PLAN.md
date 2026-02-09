@@ -152,6 +152,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 83: in `searchSessions`, add a dedicated three-term intersection fast path that scans the smallest posting list against two cached membership sets, bypassing generic multi-term set-array setup for common short queries.
    - Pass 84: in `removeSessionIdFromTerm`, add a tail-match fast path (when the removed session ID is already last) to truncate or delete posting lists without running compaction loops.
    - Pass 85: in `getUniqueQueryTerms`, add a three-token dedupe fast path that preserves token order while avoiding general Set allocation for common short queries.
+   - Pass 86: in `applyOperations` upserts, treat empty extracted term lists as no-op/cleanup by skipping empty `sessionTerms` writes for new sessions and deleting stale empty entries after removals, reducing unnecessary index mutations and storage writes.
 
 ## Release Checklist for v3.1.x
 
