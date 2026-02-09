@@ -236,13 +236,14 @@ export const SearchIndexService = {
      */
     _removeSessionFromIndex: (index: InvertedIndex, sessionId: string, termsHint?: string[]) => {
         const termsToScan = termsHint && termsHint.length > 0 ? termsHint : Object.keys(index.terms);
-        termsToScan.forEach(term => {
+        for (let i = 0; i < termsToScan.length; i++) {
+            const term = termsToScan[i];
             const ids = index.terms[term];
-            if (!ids || ids.length === 0) return;
+            if (!ids || ids.length === 0) continue;
 
             let removeIndex = ids.indexOf(sessionId);
             if (removeIndex === -1) {
-                return;
+                continue;
             }
 
             while (removeIndex !== -1) {
@@ -253,7 +254,7 @@ export const SearchIndexService = {
             if (ids.length === 0) {
                 delete index.terms[term];
             }
-        });
+        }
     },
 
     /**

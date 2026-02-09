@@ -131,6 +131,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 62: in `searchIndex`, change term removal to in-place splice only when the session ID exists (instead of always rebuilding arrays with `filter`), reducing allocation churn during upsert/delete index maintenance.
    - Pass 63: in `searchIndex`, replace per-query posting-list sort with a linear smallest-list selection plus early missing-term exit, reducing temporary object allocation and sort cost on hot multi-term searches.
    - Pass 64: in `searchIndex`, streamline smallest-list intersection setup by tracking only the smallest term index and building remaining membership sets directly from `queryTerms`, removing intermediate `remainingTerms` object allocation.
+   - Pass 65: in `searchIndex`, switch session-removal term scanning from callback-based iteration to indexed loops in `_removeSessionFromIndex`, trimming closure overhead on frequent upsert/delete maintenance paths.
 
 ## Release Checklist for v3.1.x
 
