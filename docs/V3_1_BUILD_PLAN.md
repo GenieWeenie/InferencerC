@@ -77,6 +77,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 8: add explicit Vite vendor `manualChunks` to break oversized renderer bundles and improve cacheability.
    - Pass 9: defer full API activity-log hydration until log panel open; keep instant badge count via lightweight metadata.
    - Pass 10: replace integration-availability service imports with lightweight local config checks; load integration services only on action click.
+   - Pass 11: extract chat empty-state + launch checklist into a lazy component mounted only for zero-history sessions.
 
 ## Release Checklist for v3.1.x
 
