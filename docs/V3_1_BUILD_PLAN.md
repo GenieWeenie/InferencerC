@@ -160,6 +160,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 91: in `applyOperations` upserts, check `terms.size` before `Array.from(terms)` so empty-term updates skip transient array allocation while keeping existing cleanup behavior.
    - Pass 92: in `getUniqueQueryTerms`, add a five-token dedupe fast path that preserves first-seen order while avoiding general `Set` allocation for common short queries.
    - Pass 93: in `rebuildIndex`, check `terms.size` before `Array.from(terms)` so empty-term sessions skip transient array allocation during full rebuilds.
+   - Pass 94: in `cacheTokenized` and `cacheQueryTerms`, replace `has()+delete()` with unconditional `delete()` before `set()`, avoiding redundant map lookups while preserving LRU recency behavior.
 
 ## Release Checklist for v3.1.x
 

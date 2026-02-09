@@ -55,9 +55,7 @@ const hasSameTerms = (previousTerms: string[], nextTerms: Set<string>): boolean 
 };
 
 const cacheTokenized = (text: string, tokens: string[]): void => {
-    if (tokenizeCache.has(text)) {
-        tokenizeCache.delete(text);
-    }
+    tokenizeCache.delete(text);
     tokenizeCache.set(text, tokens);
     if (tokenizeCache.size > TOKEN_CACHE_LIMIT) {
         const oldestKey = tokenizeCache.keys().next().value;
@@ -68,9 +66,7 @@ const cacheTokenized = (text: string, tokens: string[]): void => {
 };
 
 const cacheQueryTerms = (query: string, terms: string[]): void => {
-    if (queryTermCache.has(query)) {
-        queryTermCache.delete(query);
-    }
+    queryTermCache.delete(query);
     queryTermCache.set(query, terms);
     if (queryTermCache.size > QUERY_TERM_CACHE_LIMIT) {
         const oldestKey = queryTermCache.keys().next().value;
