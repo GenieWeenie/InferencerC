@@ -26,6 +26,7 @@ let searchIndexFlushTimeout: ReturnType<typeof setTimeout> | null = null;
 let searchIndexFlushIdleId: number | null = null;
 let sessionsMetadataCache: ChatSession[] | null = null;
 let sessionsMetadataCacheRaw: string | null = null;
+const messageContentWriteCache = new Map<string, string>();
 
 const loadEncryptionService = async (): Promise<EncryptionServiceType> => {
   if (!encryptionServicePromise) {
@@ -211,7 +212,21 @@ const shouldChunkMessage = (message: ChatMessage): boolean => {
 const storeMessageContent = (sessionId: string, messageIndex: number, content: string | any): void => {
   const key = `${MESSAGE_CONTENT_PREFIX}${sessionId}_${messageIndex}`;
   const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+  const cached = messageContentWriteCache.get(key);
+  if (cached === contentStr) {
+    return;
+  }
+
+  if (cached === undefined) {
+    const existing = localStorage.getItem(key);
+    if (existing === contentStr) {
+      messageContentWriteCache.set(key, existing);
+      return;
+    }
+  }
+
   localStorage.setItem(key, contentStr);
+  messageContentWriteCache.set(key, contentStr);
 };
 
 /**
@@ -221,6 +236,7 @@ const loadMessageContent = (sessionId: string, messageIndex: number): string | a
   const key = `${MESSAGE_CONTENT_PREFIX}${sessionId}_${messageIndex}`;
   const content = localStorage.getItem(key);
   if (!content) return null;
+  messageContentWriteCache.set(key, content);
 
   // Try to parse as JSON (for multimodal content), fallback to string
   try {
@@ -245,7 +261,10 @@ const deleteMessageContents = (sessionId: string): void => {
   }
 
   // Delete found keys
-  keysToDelete.forEach(key => localStorage.removeItem(key));
+  keysToDelete.forEach(key => {
+    localStorage.removeItem(key);
+    messageContentWriteCache.delete(key);
+  });
 };
 
 // Migration helper (monolithic -> split)
