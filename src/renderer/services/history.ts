@@ -24,6 +24,8 @@ type SearchIndexOperation =
 const pendingSearchIndexOperations = new Map<string, SearchIndexOperation>();
 let searchIndexFlushTimeout: ReturnType<typeof setTimeout> | null = null;
 let searchIndexFlushIdleId: number | null = null;
+let sessionsMetadataCache: ChatSession[] | null = null;
+let sessionsMetadataCacheRaw: string | null = null;
 
 const loadEncryptionService = async (): Promise<EncryptionServiceType> => {
   if (!encryptionServicePromise) {
@@ -114,6 +116,54 @@ const queueSearchIndexUpsert = (session: ChatSession): void => {
 const queueSearchIndexDelete = (sessionId: string): void => {
   pendingSearchIndexOperations.set(sessionId, { kind: 'delete' });
   scheduleSearchIndexFlush();
+};
+
+const cloneMetadataList = (sessions: ChatSession[]): ChatSession[] => {
+  return sessions.map((session) => ({
+    ...session,
+    messages: [],
+  }));
+};
+
+const readSessionsMetadataFromStorage = (): ChatSession[] => {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch (e) {
+    console.error("Failed to load history", e);
+    sessionsMetadataCache = [];
+    sessionsMetadataCacheRaw = null;
+    return [];
+  }
+
+  if (sessionsMetadataCache && raw === sessionsMetadataCacheRaw) {
+    return sessionsMetadataCache;
+  }
+
+  try {
+    const parsed = raw ? (JSON.parse(raw) as ChatSession[]) : [];
+    const normalized = Array.isArray(parsed) ? cloneMetadataList(parsed) : [];
+    sessionsMetadataCache = normalized;
+    sessionsMetadataCacheRaw = raw;
+    return normalized;
+  } catch (e) {
+    console.error("Failed to parse history metadata", e);
+    sessionsMetadataCache = [];
+    sessionsMetadataCacheRaw = raw;
+    return [];
+  }
+};
+
+const persistSessionsMetadata = (sessions: ChatSession[]): void => {
+  const normalized = cloneMetadataList(sessions);
+  try {
+    const raw = JSON.stringify(normalized);
+    localStorage.setItem(STORAGE_KEY, raw);
+    sessionsMetadataCache = normalized;
+    sessionsMetadataCacheRaw = raw;
+  } catch (e) {
+    console.error("Failed to save session index", e);
+  }
 };
 
 /**
@@ -261,13 +311,7 @@ export const HistoryService = {
    * Note: Returned sessions behave as metadata, messages array will be empty.
    */
   getAllSessions: (): ChatSession[] => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch (e) {
-      console.error("Failed to load history", e);
-      return [];
-    }
+    return cloneMetadataList(readSessionsMetadataFromStorage());
   },
 
   /**
@@ -285,7 +329,7 @@ export const HistoryService = {
         session = JSON.parse(rawSpecific);
       } else {
         // Fallback: Try loading from global list (if not migrated or error)
-        const sessions = HistoryService.getAllSessions();
+        const sessions = readSessionsMetadataFromStorage();
         session = sessions.find(s => s.id === id);
       }
 
@@ -457,7 +501,7 @@ export const HistoryService = {
     localStorage.setItem(uniqueKey, JSON.stringify(processedSession));
 
     // 2. Update metadata in main list
-    const sessions = HistoryService.getAllSessions();
+    const sessions = cloneMetadataList(readSessionsMetadataFromStorage());
     const idx = sessions.findIndex(s => s.id === session.id);
 
     // Create metadata object (copy session but remove heavy messages)
@@ -480,20 +524,16 @@ export const HistoryService = {
       }
     }
 
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
-      // Indexing is deferred to idle time so save paths stay responsive.
-      queueSearchIndexUpsert(session);
-    } catch (e) {
-      console.error("Failed to save session index", e);
-    }
+    persistSessionsMetadata(sessions);
+    // Indexing is deferred to idle time so save paths stay responsive.
+    queueSearchIndexUpsert(session);
   },
 
   deleteSession: (id: string) => {
     // 1. Remove from main list
-    let sessions = HistoryService.getAllSessions();
+    let sessions = cloneMetadataList(readSessionsMetadataFromStorage());
     sessions = sessions.filter(s => s.id !== id);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+    persistSessionsMetadata(sessions);
 
     // 2. Remove specific data
     localStorage.removeItem(`${SESSION_DATA_PREFIX}${id}`);
@@ -677,11 +717,11 @@ export const HistoryService = {
 
   renameSession: (id: string, newTitle: string) => {
     // Update main list metadata
-    const sessions = HistoryService.getAllSessions();
+    const sessions = cloneMetadataList(readSessionsMetadataFromStorage());
     const idx = sessions.findIndex(s => s.id === id);
     if (idx >= 0) {
       sessions[idx].title = newTitle;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+      persistSessionsMetadata(sessions);
     }
 
     // Update individual session file
@@ -695,11 +735,11 @@ export const HistoryService = {
 
   togglePinSession: (id: string) => {
     // Update main list metadata
-    const sessions = HistoryService.getAllSessions();
+    const sessions = cloneMetadataList(readSessionsMetadataFromStorage());
     const idx = sessions.findIndex(s => s.id === id);
     if (idx >= 0) {
       sessions[idx].pinned = !sessions[idx].pinned;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+      persistSessionsMetadata(sessions);
     }
 
     // Update individual session file
