@@ -280,13 +280,15 @@ export const SearchIndexService = {
             return new Set(index.terms[queryTerms[0]] || []);
         }
 
+        const termIdsByIndex: string[][] = new Array(queryTerms.length);
         let smallestTermIndex = -1;
         let firstIds: string[] | null = null;
         for (let i = 0; i < queryTerms.length; i++) {
-            const ids = index.terms[queryTerms[i]] || [];
-            if (ids.length === 0) {
+            const ids = index.terms[queryTerms[i]];
+            if (!ids || ids.length === 0) {
                 return resultIds;
             }
+            termIdsByIndex[i] = ids;
             if (!firstIds || ids.length < firstIds.length) {
                 smallestTermIndex = i;
                 firstIds = ids;
@@ -303,7 +305,7 @@ export const SearchIndexService = {
                 continue;
             }
             const term = queryTerms[i];
-            const ids = index.terms[term] || [];
+            const ids = termIdsByIndex[i];
             remainingTermSets.push(getPostingSet(term, ids));
         }
 
