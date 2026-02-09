@@ -374,7 +374,6 @@ export const SearchIndexService = {
             return resultIds;
         }
 
-        const termIdsByIndex: string[][] = new Array(queryTerms.length);
         let smallestTermIndex = -1;
         let firstIds: string[] | null = null;
         for (let i = 0; i < queryTerms.length; i++) {
@@ -382,7 +381,6 @@ export const SearchIndexService = {
             if (!ids || ids.length === 0) {
                 return resultIds;
             }
-            termIdsByIndex[i] = ids;
             if (!firstIds || ids.length < firstIds.length) {
                 smallestTermIndex = i;
                 firstIds = ids;
@@ -393,14 +391,19 @@ export const SearchIndexService = {
             return resultIds;
         }
 
-        const remainingTermSets: Set<string>[] = [];
+        const remainingTermSets: Set<string>[] = new Array(queryTerms.length - 1);
+        let remainingTermSetIndex = 0;
         for (let i = 0; i < queryTerms.length; i++) {
             if (i === smallestTermIndex) {
                 continue;
             }
             const term = queryTerms[i];
-            const ids = termIdsByIndex[i];
-            remainingTermSets.push(getPostingSet(term, ids));
+            const ids = index.terms[term];
+            if (!ids || ids.length === 0) {
+                return resultIds;
+            }
+            remainingTermSets[remainingTermSetIndex] = getPostingSet(term, ids);
+            remainingTermSetIndex++;
         }
 
         // Scan candidates from the smallest posting list once.
