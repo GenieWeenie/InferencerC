@@ -26,6 +26,15 @@ const STOP_WORDS = new Set([
     'you', 'your', 'i', 'me', 'my', 'we', 'our', 'they', 'their',
     'what', 'which', 'who', 'whom', 'whose', 'why', 'how'
 ]);
+let indexCache: InvertedIndex | null = null;
+let indexCacheRaw: string | null = null;
+
+const createEmptyIndex = (): InvertedIndex => ({
+    version: 1,
+    updatedAt: Date.now(),
+    terms: {},
+    sessionTerms: {},
+});
 
 export const SearchIndexService = {
     /**
@@ -34,19 +43,33 @@ export const SearchIndexService = {
     getIndex: (): InvertedIndex => {
         try {
             const raw = localStorage.getItem(INDEX_STORAGE_KEY);
+            if (indexCache && raw === indexCacheRaw) {
+                return indexCache;
+            }
+
             if (raw) {
                 const parsed = JSON.parse(raw) as Partial<InvertedIndex>;
-                return {
+                const normalized = {
                     version: parsed.version || 1,
                     updatedAt: parsed.updatedAt || Date.now(),
                     terms: parsed.terms || {},
                     sessionTerms: parsed.sessionTerms || {},
                 };
+                indexCache = normalized;
+                indexCacheRaw = raw;
+                return normalized;
             }
+            const empty = createEmptyIndex();
+            indexCache = empty;
+            indexCacheRaw = raw;
+            return empty;
         } catch (e) {
             console.error('Failed to load search index', e);
+            const empty = createEmptyIndex();
+            indexCache = empty;
+            indexCacheRaw = null;
+            return empty;
         }
-        return { version: 1, updatedAt: Date.now(), terms: {}, sessionTerms: {} };
     },
 
     /**
@@ -55,7 +78,10 @@ export const SearchIndexService = {
     saveIndex: (index: InvertedIndex) => {
         try {
             index.updatedAt = Date.now();
-            localStorage.setItem(INDEX_STORAGE_KEY, JSON.stringify(index));
+            const raw = JSON.stringify(index);
+            localStorage.setItem(INDEX_STORAGE_KEY, raw);
+            indexCache = index;
+            indexCacheRaw = raw;
         } catch (e) {
             console.error('Failed to save search index', e);
         }
