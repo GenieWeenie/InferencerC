@@ -158,6 +158,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 89: in `searchSessions`, defer `resultIds` `Set` allocation in 2-term, 3-term, and generic multi-term branches until after posting-list existence checks, avoiding eager allocations on common no-result queries.
    - Pass 90: in `getUniqueQueryTerms`, add a four-token dedupe fast path that preserves first-seen order while avoiding general `Set` allocation for common short queries.
    - Pass 91: in `applyOperations` upserts, check `terms.size` before `Array.from(terms)` so empty-term updates skip transient array allocation while keeping existing cleanup behavior.
+   - Pass 92: in `getUniqueQueryTerms`, add a five-token dedupe fast path that preserves first-seen order while avoiding general `Set` allocation for common short queries.
 
 ## Release Checklist for v3.1.x
 
