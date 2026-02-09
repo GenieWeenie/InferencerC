@@ -262,6 +262,41 @@ interface IntegrationAvailability {
     calendar: boolean;
 }
 
+const EMPTY_INTEGRATION_AVAILABILITY: IntegrationAvailability = {
+    notion: false,
+    slack: false,
+    discord: false,
+    email: false,
+    calendar: false,
+};
+
+const parseStorageConfig = (key: string): Record<string, any> | null => {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed as Record<string, any> : null;
+    } catch {
+        return null;
+    }
+};
+
+const readIntegrationAvailability = (): IntegrationAvailability => {
+    const notionDatabaseConfigured = Boolean(localStorage.getItem('notion_database_id'));
+    const slackConfig = parseStorageConfig('slack_config');
+    const discordConfig = parseStorageConfig('discord_config');
+    const emailConfig = parseStorageConfig('email_config');
+    const calendarConfig = parseStorageConfig('calendar_config');
+
+    return {
+        notion: notionDatabaseConfigured,
+        slack: Boolean(slackConfig?.webhookUrl || slackConfig?.apiToken),
+        discord: Boolean(discordConfig?.webhookUrl),
+        email: Boolean(emailConfig?.defaultRecipient),
+        calendar: Boolean(calendarConfig?.provider),
+    };
+};
+
 // Message skeleton component for loading states
 const MessageSkeleton: React.FC<{ isUser?: boolean }> = ({ isUser = false }) => {
     return (
@@ -492,13 +527,7 @@ const Chat: React.FC = () => {
     const [showBlockchain, setShowBlockchain] = React.useState(false);
     const [showAIAgents, setShowAIAgents] = React.useState(false);
     const [showFederatedLearning, setShowFederatedLearning] = React.useState(false);
-    const [integrationAvailability, setIntegrationAvailability] = React.useState<IntegrationAvailability>({
-        notion: false,
-        slack: false,
-        discord: false,
-        email: false,
-        calendar: false,
-    });
+    const [integrationAvailability, setIntegrationAvailability] = React.useState<IntegrationAvailability>(EMPTY_INTEGRATION_AVAILABILITY);
     const [excludedContextIndices, setExcludedContextIndices] = React.useState<Set<number>>(new Set());
     const [autoSummarizeContext, setAutoSummarizeContext] = React.useState(true);
     const contextWarningTriggered = React.useRef(false);
@@ -718,64 +747,29 @@ const Chat: React.FC = () => {
         }
     }, [recentPerfBenchmarks]);
 
-    const resolveIntegrationAvailability = React.useCallback(async (): Promise<IntegrationAvailability> => {
-        try {
-            const [notionModule, slackModule, discordModule, emailModule, calendarModule] = await Promise.all([
-                import('../services/notion'),
-                import('../services/slack'),
-                import('../services/discord'),
-                import('../services/email'),
-                import('../services/calendar'),
-            ]);
-
-            return {
-                notion: notionModule.notionService.isConfigured(),
-                slack: slackModule.slackService.isConfigured(),
-                discord: discordModule.discordService.isConfigured(),
-                email: emailModule.emailService.isConfigured(),
-                calendar: calendarModule.calendarService.isConfigured(),
-            };
-        } catch {
-            return {
-                notion: false,
-                slack: false,
-                discord: false,
-                email: false,
-                calendar: false,
-            };
-        }
-    }, []);
-
     React.useEffect(() => {
         if (history.length === 0) {
-            setIntegrationAvailability({
-                notion: false,
-                slack: false,
-                discord: false,
-                email: false,
-                calendar: false,
-            });
+            setIntegrationAvailability(EMPTY_INTEGRATION_AVAILABILITY);
             return;
         }
 
-        let cancelled = false;
-        const refresh = async () => {
-            const availability = await resolveIntegrationAvailability();
-            if (!cancelled) {
-                setIntegrationAvailability(availability);
-            }
+        const refresh = () => {
+            setIntegrationAvailability(readIntegrationAvailability());
         };
-
         refresh();
-        const handleStorage = () => {
-            refresh();
-        };
+        const handleStorage = () => refresh();
+        const handleFocus = () => refresh();
+        const handleCredentialsUpdated = () => refresh();
+
         window.addEventListener('storage', handleStorage);
+        window.addEventListener('focus', handleFocus);
+        window.addEventListener('credentials-updated', handleCredentialsUpdated as EventListener);
         return () => {
-            cancelled = true;
             window.removeEventListener('storage', handleStorage);
+            window.removeEventListener('focus', handleFocus);
+            window.removeEventListener('credentials-updated', handleCredentialsUpdated as EventListener);
         };
-    }, [history.length, resolveIntegrationAvailability]);
+    }, [history.length]);
 
     // Context management state persistence (per session)
     React.useEffect(() => {
