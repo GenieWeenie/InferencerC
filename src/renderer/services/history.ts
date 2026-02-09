@@ -193,14 +193,34 @@ const patchStoredSessionMetadata = (
     if (!rawSession) {
       return;
     }
-    const session = JSON.parse(rawSession) as ChatSession;
+
+    const cached = sessionDataCache.get(sessionId);
+    let session: ChatSession;
+    let chunkedMessageIndexes: number[];
+
+    if (cached && cached.raw === rawSession) {
+      session = {
+        ...cached.parsed,
+        messages: [...cached.parsed.messages],
+      };
+      chunkedMessageIndexes = [...cached.chunkedMessageIndexes];
+    } else {
+      session = JSON.parse(rawSession) as ChatSession;
+      chunkedMessageIndexes = getChunkedMessageIndexes(session.messages);
+    }
+
     const updatedSession = patch(session);
     const updatedRaw = JSON.stringify(updatedSession);
+
+    if (updatedSession.messages !== session.messages) {
+      chunkedMessageIndexes = getChunkedMessageIndexes(updatedSession.messages);
+    }
+
     localStorage.setItem(uniqueKey, updatedRaw);
     sessionDataCache.set(sessionId, {
       raw: updatedRaw,
       parsed: updatedSession,
-      chunkedMessageIndexes: getChunkedMessageIndexes(updatedSession.messages),
+      chunkedMessageIndexes,
     });
   } catch (e) {
     console.error(`Failed to patch stored session metadata for ${sessionId}`, e);
@@ -691,12 +711,14 @@ export const HistoryService = {
    */
   saveSession: (session: ChatSession) => {
     const activeChunkKeys = new Set<string>();
+    const chunkedMessageIndexes: number[] = [];
     // Process messages for chunking (store large content separately)
     const processedMessages = session.messages.map((msg, index) => {
       const chatMsg = msg as ChatMessage;
 
       // Check if message should be chunked
       if (shouldChunkMessage(chatMsg)) {
+        chunkedMessageIndexes.push(index);
         // Store content separately
         activeChunkKeys.add(getChunkContentKey(session.id, index));
         storeMessageContent(session.id, index, chatMsg.content);
@@ -724,7 +746,7 @@ export const HistoryService = {
     sessionDataCache.set(session.id, {
       raw: processedSessionRaw,
       parsed: processedSession,
-      chunkedMessageIndexes: getChunkedMessageIndexes(processedMessages),
+      chunkedMessageIndexes,
     });
 
     // 2. Update metadata in main list
