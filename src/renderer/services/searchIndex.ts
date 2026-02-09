@@ -248,16 +248,17 @@ export const SearchIndexService = {
         const index = SearchIndexService.getIndex();
         let didChange = false;
 
-        operations.forEach((operation) => {
+        for (let opIndex = 0; opIndex < operations.length; opIndex++) {
+            const operation = operations[opIndex];
             if (operation.kind === 'delete') {
                 const previousTerms = index.sessionTerms[operation.sessionId] || [];
                 if (!(operation.sessionId in index.sessionTerms) && previousTerms.length === 0) {
-                    return;
+                    continue;
                 }
                 SearchIndexService._removeSessionFromIndex(index, operation.sessionId, previousTerms);
                 delete index.sessionTerms[operation.sessionId];
                 didChange = true;
-                return;
+                continue;
             }
 
             const session = operation.session;
@@ -267,7 +268,7 @@ export const SearchIndexService = {
             const hasPreviousEntry = sessionId in index.sessionTerms;
 
             if (hasPreviousEntry && hasSameTerms(previousTerms, terms)) {
-                return;
+                continue;
             }
 
             SearchIndexService._removeSessionFromIndex(index, sessionId, previousTerms);
@@ -289,7 +290,7 @@ export const SearchIndexService = {
             }
             index.sessionTerms[sessionId] = Array.from(terms);
             didChange = true;
-        });
+        }
 
         if (didChange) {
             SearchIndexService.saveIndex(index);
