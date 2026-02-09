@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import {
-    gestureService,
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type {
     GestureConfig,
     GestureType,
     GestureEventMap,
@@ -12,6 +11,40 @@ import {
 interface UseGestureOptions {
     enabled?: boolean;
 }
+
+type GestureService = typeof import('../services/gestures')['gestureService'];
+
+let gestureServicePromise: Promise<GestureService> | null = null;
+let gestureServiceInstance: GestureService | null = null;
+
+const DEFAULT_GESTURE_CONFIG: GestureConfig = {
+    enablePinchZoom: true,
+    enableSwipeNavigation: true,
+    enableLongPress: true,
+    pinchSensitivity: 1,
+    swipeSensitivity: 1,
+    longPressDuration: 500,
+};
+
+const loadGestureService = async (): Promise<GestureService> => {
+    if (gestureServiceInstance) {
+        return gestureServiceInstance;
+    }
+
+    if (!gestureServicePromise) {
+        gestureServicePromise = import('../services/gestures')
+            .then((mod) => {
+                gestureServiceInstance = mod.gestureService;
+                return mod.gestureService;
+            })
+            .catch((error) => {
+                gestureServicePromise = null;
+                throw error;
+            });
+    }
+
+    return gestureServicePromise;
+};
 
 export const useGesture = <T extends GestureType>(
     type: T,
@@ -30,14 +63,29 @@ export const useGesture = <T extends GestureType>(
             return;
         }
 
-        const off = gestureService.on(type, (event: GestureEventMap[T]) => {
-            callbackRef.current(event);
-        });
-        const detach = gestureService.attach(document);
+        let disposed = false;
+        let off: (() => void) | null = null;
+        let detach: (() => void) | null = null;
+
+        void loadGestureService()
+            .then((gestureService) => {
+                if (disposed) {
+                    return;
+                }
+
+                off = gestureService.on(type, (event: GestureEventMap[T]) => {
+                    callbackRef.current(event);
+                });
+                detach = gestureService.attach(document);
+            })
+            .catch((error) => {
+                console.warn('Failed to initialize gesture service:', error);
+            });
 
         return () => {
-            off();
-            detach();
+            disposed = true;
+            off?.();
+            detach?.();
         };
     }, [type, enabled]);
 };
@@ -64,32 +112,78 @@ export const useLongPress = (
 };
 
 export const useGestureConfig = () => {
-    const [config, setConfig] = useState<GestureConfig>(gestureService.getConfig());
+    const [config, setConfig] = useState<GestureConfig>(DEFAULT_GESTURE_CONFIG);
 
     useEffect(() => {
-        setConfig(gestureService.getConfig());
+        let disposed = false;
+        let unsubscribe: (() => void) | null = null;
 
-        const unsubscribe = gestureService.subscribe((nextConfig) => {
-            setConfig(nextConfig);
-        });
+        void loadGestureService()
+            .then((gestureService) => {
+                if (disposed) {
+                    return;
+                }
 
-        return unsubscribe;
+                setConfig(gestureService.getConfig());
+                unsubscribe = gestureService.subscribe((nextConfig) => {
+                    setConfig(nextConfig);
+                });
+            })
+            .catch((error) => {
+                console.warn('Failed to load gesture config:', error);
+            });
+
+        return () => {
+            disposed = true;
+            unsubscribe?.();
+        };
     }, []);
 
-    const updateConfig = (updates: Partial<GestureConfig>) => {
-        gestureService.updateConfig(updates);
-    };
+    const updateConfig = useCallback((updates: Partial<GestureConfig>) => {
+        void loadGestureService()
+            .then((gestureService) => {
+                gestureService.updateConfig(updates);
+            })
+            .catch((error) => {
+                console.warn('Failed to update gesture config:', error);
+            });
+    }, []);
 
-    const resetConfig = () => {
-        gestureService.resetConfig();
-    };
+    const resetConfig = useCallback(() => {
+        void loadGestureService()
+            .then((gestureService) => {
+                gestureService.resetConfig();
+            })
+            .catch((error) => {
+                console.warn('Failed to reset gesture config:', error);
+            });
+    }, []);
+
+    const isGestureEnabled = useCallback((type: GestureType) => {
+        switch (type) {
+            case 'pinch':
+                return config.enablePinchZoom;
+            case 'swipe':
+                return config.enableSwipeNavigation;
+            case 'longpress':
+                return config.enableLongPress;
+            default:
+                return false;
+        }
+    }, [config]);
+
+    const getSensitivity = useCallback((type: 'pinch' | 'swipe') => {
+        return type === 'pinch' ? config.pinchSensitivity : config.swipeSensitivity;
+    }, [config]);
+
+    const getLongPressDuration = useCallback(() => config.longPressDuration, [config]);
 
     return {
         config,
         updateConfig,
         resetConfig,
-        isGestureEnabled: (type: GestureType) => gestureService.isGestureEnabled(type),
-        getSensitivity: (type: 'pinch' | 'swipe') => gestureService.getSensitivity(type),
-        getLongPressDuration: () => gestureService.getLongPressDuration(),
+        isGestureEnabled,
+        getSensitivity,
+        getLongPressDuration,
     };
 };

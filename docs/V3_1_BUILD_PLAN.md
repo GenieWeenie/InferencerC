@@ -81,6 +81,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 12: extract diagnostics popover into a lazy component so diagnostics UI code loads only when the panel opens.
    - Pass 13: lazy-load the performance monitor overlay and mount it only when dev monitors are enabled.
    - Pass 14: remove uuid runtime usage from prompt storage hook and switch to native ID generation with lazy-safe localStorage hydration.
+   - Pass 15: lazy-load gesture runtime service from `useGestures` so touch/trackpad gesture code is deferred until gesture hooks are enabled.
 
 ## Release Checklist for v3.1.x
 
