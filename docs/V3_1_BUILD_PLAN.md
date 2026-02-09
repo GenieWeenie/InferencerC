@@ -119,6 +119,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 50: in `history`, serve chunked message payload reads from the in-memory chunk cache before `localStorage`, reducing repeated storage reads during hot `getSession()` hydration loops.
    - Pass 51: in `history`, persist split/chunk migration completion markers so post-upgrade launches skip full migration scans once data has already been normalized.
    - Pass 52: in `history`, remove redundant save/patch scans by collecting chunked indexes during `saveSession` and reusing cache-backed session parses for metadata-only patch writes.
+   - Pass 53: in `history`, switch metadata update paths to copy-on-write array/object updates (instead of pre-cloning whole metadata lists) and skip no-op split-session rewrites when patched content is unchanged.
 
 ## Release Checklist for v3.1.x
 

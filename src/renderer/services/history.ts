@@ -216,6 +216,15 @@ const patchStoredSessionMetadata = (
       chunkedMessageIndexes = getChunkedMessageIndexes(updatedSession.messages);
     }
 
+    if (updatedRaw === rawSession) {
+      sessionDataCache.set(sessionId, {
+        raw: rawSession,
+        parsed: updatedSession,
+        chunkedMessageIndexes,
+      });
+      return;
+    }
+
     localStorage.setItem(uniqueKey, updatedRaw);
     sessionDataCache.set(sessionId, {
       raw: updatedRaw,
@@ -750,21 +759,22 @@ export const HistoryService = {
     });
 
     // 2. Update metadata in main list
-    const sessions = cloneMetadataList(readSessionsMetadataFromStorage());
+    const sessions = readSessionsMetadataFromStorage();
     const idx = sessions.findIndex(s => s.id === session.id);
+    const nextSessions = sessions.slice();
 
     // Create metadata object (copy session but remove heavy messages)
     const metadata = { ...processedSession, messages: [] };
 
     // Update or Insert
     if (idx >= 0) {
-      sessions[idx] = { ...metadata, lastModified: Date.now() };
+      nextSessions[idx] = { ...metadata, lastModified: Date.now() };
     } else {
-      sessions.unshift({ ...metadata, lastModified: Date.now() });
+      nextSessions.unshift({ ...metadata, lastModified: Date.now() });
     }
 
     // Auto-generate title logic (using original session data)
-    const currentSessionMetadata = idx >= 0 ? sessions[idx] : sessions[0];
+    const currentSessionMetadata = idx >= 0 ? nextSessions[idx] : nextSessions[0];
     if (currentSessionMetadata.title === 'New Chat' && session.messages.length > 0) {
       const firstUserMsg = session.messages.find(m => m.role === 'user');
       if (firstUserMsg) {
@@ -773,16 +783,18 @@ export const HistoryService = {
       }
     }
 
-    persistSessionsMetadata(sessions);
+    persistSessionsMetadata(nextSessions);
     // Indexing is deferred to idle time so save paths stay responsive.
     queueSearchIndexUpsert(session);
   },
 
   deleteSession: (id: string) => {
     // 1. Remove from main list
-    let sessions = cloneMetadataList(readSessionsMetadataFromStorage());
-    sessions = sessions.filter(s => s.id !== id);
-    persistSessionsMetadata(sessions);
+    const sessions = readSessionsMetadataFromStorage();
+    const nextSessions = sessions.filter(s => s.id !== id);
+    if (nextSessions.length !== sessions.length) {
+      persistSessionsMetadata(nextSessions);
+    }
 
     // 2. Remove specific data
     localStorage.removeItem(`${SESSION_DATA_PREFIX}${id}`);
@@ -967,11 +979,15 @@ export const HistoryService = {
 
   renameSession: (id: string, newTitle: string) => {
     // Update main list metadata
-    const sessions = cloneMetadataList(readSessionsMetadataFromStorage());
+    const sessions = readSessionsMetadataFromStorage();
     const idx = sessions.findIndex(s => s.id === id);
     if (idx >= 0) {
-      sessions[idx].title = newTitle;
-      persistSessionsMetadata(sessions);
+      const nextSessions = sessions.slice();
+      nextSessions[idx] = {
+        ...sessions[idx],
+        title: newTitle,
+      };
+      persistSessionsMetadata(nextSessions);
     }
 
     // Patch session file without hydrating chunked message content.
@@ -983,11 +999,15 @@ export const HistoryService = {
 
   togglePinSession: (id: string) => {
     // Update main list metadata
-    const sessions = cloneMetadataList(readSessionsMetadataFromStorage());
+    const sessions = readSessionsMetadataFromStorage();
     const idx = sessions.findIndex(s => s.id === id);
     if (idx >= 0) {
-      sessions[idx].pinned = !sessions[idx].pinned;
-      persistSessionsMetadata(sessions);
+      const nextSessions = sessions.slice();
+      nextSessions[idx] = {
+        ...sessions[idx],
+        pinned: !sessions[idx].pinned,
+      };
+      persistSessionsMetadata(nextSessions);
     }
 
     // Patch session file without hydrating chunked message content.
