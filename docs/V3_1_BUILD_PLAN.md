@@ -94,6 +94,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 25: defer onboarding-service initialization to browser idle time on first-run paths, avoiding mount-time import pressure during initial chat startup.
    - Pass 26: in `useChat`, defer credential-service/key hydration to idle and skip it entirely when no OpenRouter credential marker exists, while still reacting immediately to `credentials-updated` events.
    - Pass 27: in `useChat`, skip team-workspace service import during model refresh unless an active workspace is detected via lightweight local storage markers; apply model-policy filtering only when needed.
+   - Pass 28: remove `teamWorkspacesService` import from the `useChat` model-refresh path entirely by applying workspace model-policy filtering directly from lightweight persisted workspace data.
 
 ## Release Checklist for v3.1.x
 
