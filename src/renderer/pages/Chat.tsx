@@ -118,6 +118,7 @@ const ONBOARDING_COMPLETED_KEY = 'onboarding_completed';
 const ACTIVITY_LOG_COUNT_KEY = 'api_activity_log_count';
 const PROJECT_CONTEXT_FEATURE_ENABLED_KEY = 'project_context_feature_enabled_v1';
 const CLOUD_SYNC_CONFIG_KEY = 'cloud_sync_config_v1';
+const MCP_SERVERS_CONFIG_KEY = 'mcp_servers';
 const MAX_ACTIVITY_LOG_ENTRIES = 200;
 
 type OnboardingServiceModule = typeof import('../services/onboarding');
@@ -272,6 +273,17 @@ const readCloudSyncAuthSnapshot = (): boolean => {
             encryptionSalt?: string;
         }>;
         return Boolean(parsed.token && parsed.accountId && parsed.encryptionSalt);
+    } catch {
+        return false;
+    }
+};
+
+const readHasConfiguredMcpServers = (): boolean => {
+    try {
+        const raw = localStorage.getItem(MCP_SERVERS_CONFIG_KEY);
+        if (!raw) return false;
+        const parsed = JSON.parse(raw) as unknown;
+        return Array.isArray(parsed) && parsed.length > 0;
     } catch {
         return false;
     }
@@ -473,6 +485,19 @@ const Chat: React.FC = () => {
         return () => clearTimeout(timer);
     }, []);
 
+    React.useEffect(() => {
+        const refreshConfiguredMcpServers = () => {
+            setHasConfiguredMcpServers(readHasConfiguredMcpServers());
+        };
+
+        window.addEventListener('focus', refreshConfiguredMcpServers);
+        window.addEventListener('storage', refreshConfiguredMcpServers);
+        return () => {
+            window.removeEventListener('focus', refreshConfiguredMcpServers);
+            window.removeEventListener('storage', refreshConfiguredMcpServers);
+        };
+    }, []);
+
     // Show skeleton loaders on initial message load
     React.useEffect(() => {
         if (history.length > 0 && isLoadingMessages) {
@@ -488,12 +513,13 @@ const Chat: React.FC = () => {
     }, [battleMode, availableModels, currentModel, secondaryModel, setSecondaryModel]);
 
     const { prompts } = usePrompts();
+    const [hasConfiguredMcpServers, setHasConfiguredMcpServers] = React.useState(readHasConfiguredMcpServers);
     const {
         tools: mcpTools,
         connectedCount: mcpConnectedCount,
         isAvailable: mcpAvailable,
         executeTool: executeMcpTool,
-    } = useMCP();
+    } = useMCP({ enabled: hasConfiguredMcpServers, deferUntilIdle: true });
     const [isDragging, setIsDragging] = React.useState(false);
     const [showInspector, setShowInspector] = React.useState(false);
     const [activeTab, setActiveTab] = React.useState<'inspector' | 'controls' | 'prompts' | 'documents'>('controls');
