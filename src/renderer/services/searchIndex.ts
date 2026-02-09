@@ -20,6 +20,7 @@ type SearchIndexBatchOperation =
 
 const INDEX_STORAGE_KEY = 'app_search_index';
 const TOKEN_CACHE_LIMIT = 512;
+const QUERY_TERM_CACHE_LIMIT = 256;
 const STOP_WORDS = new Set([
     'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
     'has', 'have', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'or',
@@ -30,6 +31,7 @@ const STOP_WORDS = new Set([
 let indexCache: InvertedIndex | null = null;
 let indexCacheRaw: string | null = null;
 const tokenizeCache = new Map<string, string[]>();
+const queryTermCache = new Map<string, string[]>();
 const postingSetCache = new Map<string, { idsRef: string[]; idsSet: Set<string> }>();
 
 const createEmptyIndex = (): InvertedIndex => ({
@@ -62,6 +64,45 @@ const cacheTokenized = (text: string, tokens: string[]): void => {
             tokenizeCache.delete(oldestKey);
         }
     }
+};
+
+const cacheQueryTerms = (query: string, terms: string[]): void => {
+    if (queryTermCache.has(query)) {
+        queryTermCache.delete(query);
+    }
+    queryTermCache.set(query, terms);
+    if (queryTermCache.size > QUERY_TERM_CACHE_LIMIT) {
+        const oldestKey = queryTermCache.keys().next().value;
+        if (oldestKey !== undefined) {
+            queryTermCache.delete(oldestKey);
+        }
+    }
+};
+
+const getUniqueQueryTerms = (query: string): string[] => {
+    const cached = queryTermCache.get(query);
+    if (cached) {
+        return cached;
+    }
+
+    const tokens = SearchIndexService.tokenize(query);
+    if (tokens.length <= 1) {
+        cacheQueryTerms(query, tokens);
+        return tokens;
+    }
+
+    const uniqueTerms: string[] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        if (seen.has(token)) {
+            continue;
+        }
+        seen.add(token);
+        uniqueTerms.push(token);
+    }
+    cacheQueryTerms(query, uniqueTerms);
+    return uniqueTerms;
 };
 
 const clearPostingSetCache = (): void => {
@@ -286,7 +327,7 @@ export const SearchIndexService = {
      */
     searchSessions: (query: string): Set<string> => {
         const index = SearchIndexService.getIndex();
-        const queryTerms = Array.from(new Set(SearchIndexService.tokenize(query)));
+        const queryTerms = getUniqueQueryTerms(query);
         const resultIds = new Set<string>();
 
         if (queryTerms.length === 0) return resultIds;
