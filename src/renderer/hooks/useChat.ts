@@ -987,16 +987,29 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         });
     };
 
+    const deriveSessionTitleFromMessages = (messages: ChatMessage[]): string => {
+        const firstUserMessage = messages.find(
+            (message) => message.role === 'user' && typeof message.content === 'string' && message.content.trim().length > 0
+        );
+        if (!firstUserMessage || typeof firstUserMessage.content !== 'string') {
+            return 'New Chat';
+        }
+        const content = firstUserMessage.content;
+        return content.slice(0, 30) + (content.length > 30 ? '...' : '');
+    };
+
 
     const streamResponse = async (
         modelId: string,
         messages: Message[],
         targetIndex: number,
         signal: AbortSignal,
-        labelPrefix: string = ""
+        labelPrefix: string = "",
+        webhookHistorySnapshot: ChatMessage[] | null = null
     ) => {
         const startTime = Date.now(); // Track generation start time
         const logId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        let finalToolCalls: ToolCall[] | undefined;
 
         try {
             const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -1142,6 +1155,10 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                         updateMessageContent(targetIndex, fullContent, !done, undefined, undefined, Object.values(toolCallsBuffer));
                     }
                 }
+                const completedToolCalls = Object.values(toolCallsBuffer) as ToolCall[];
+                if (completedToolCalls.length > 0) {
+                    finalToolCalls = completedToolCalls;
+                }
             } else {
                 // Non-streaming mode - get full response at once
                 const data = await res.json();
@@ -1153,7 +1170,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             // Final logprob simulation
             const processedLogprobs = simulateLogprobs(fullContent);
             const totalTime = Date.now() - startTime;
-            updateMessageContent(targetIndex, fullContent, false, processedLogprobs, totalTime);
+            updateMessageContent(targetIndex, fullContent, false, processedLogprobs, totalTime, finalToolCalls);
 
             // Track analytics - estimate token count (rough: ~4 chars per token)
             const estimatedTokens = Math.ceil(fullContent.length / 4);
@@ -1173,20 +1190,60 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                 },
             });
 
-            // Trigger webhooks for conversation_complete event
-            // Get current session for webhook payload
-            const currentSession = HistoryService.getSession(sessionId);
-            if (currentSession) {
+            const canUseInMemoryWebhookSnapshot = Boolean(
+                webhookHistorySnapshot && loadedMessageIndices.size >= webhookHistorySnapshot.length
+            );
+
+            let webhookMessages: ChatMessage[] | null = null;
+            let webhookTitle: string | null = null;
+
+            if (canUseInMemoryWebhookSnapshot && webhookHistorySnapshot) {
+                webhookMessages = webhookHistorySnapshot.map((message, index) => {
+                    if (index === targetIndex) {
+                        return {
+                            ...message,
+                            role: 'assistant',
+                            content: fullContent,
+                            isLoading: false,
+                            generationTime: totalTime,
+                            tool_calls: finalToolCalls || message.tool_calls,
+                            choices: [{
+                                message: { role: 'assistant', content: fullContent },
+                                index: 0,
+                                logprobs: { content: processedLogprobs },
+                            }],
+                        } as ChatMessage;
+                    }
+                    if (loadedMessageIndices.has(index) && fullMessageCache.has(index)) {
+                        return fullMessageCache.get(index)!;
+                    }
+                    return message;
+                });
+
+                const savedTitle = savedSessions.find((session) => session.id === sessionId)?.title;
+                webhookTitle = savedTitle && savedTitle.trim().length > 0 && savedTitle !== 'New Chat'
+                    ? savedTitle
+                    : deriveSessionTitleFromMessages(webhookMessages);
+            } else {
+                // Fallback to persisted session when lazy placeholders are still present.
+                const currentSession = HistoryService.getSession(sessionId);
+                if (currentSession) {
+                    webhookMessages = currentSession.messages;
+                    webhookTitle = currentSession.title;
+                }
+            }
+
+            if (webhookMessages) {
                 triggerConversationCompleteWebhooks({
                     sessionId,
-                    sessionTitle: currentSession.title,
+                    sessionTitle: webhookTitle || 'New Chat',
                     modelId: modelId,
-                    messageCount: history.length + 1, // +1 for the message we just added
-                    messages: currentSession.messages,
+                    messageCount: webhookMessages.length,
+                    messages: webhookMessages,
                     metadata: {
-                        temperature: currentSession.temperature,
-                        topP: currentSession.topP,
-                        maxTokens: currentSession.maxTokens,
+                        temperature,
+                        topP,
+                        maxTokens,
                     },
                 });
             }
@@ -1470,8 +1527,8 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const nameB = availableModels.find(m => m.id === secondaryModel)?.name || secondaryModel;
 
             // Trigger Parallel Streams
-            streamResponse(modelToUse, baseMessages, indexA, ctrlA.signal, `Model A: ${nameA}`);
-            streamResponse(secondaryModel, baseMessages, indexB, ctrlB.signal, `Model B: ${nameB}`);
+            streamResponse(modelToUse, baseMessages, indexA, ctrlA.signal, `Model A: ${nameA}`, newHistory);
+            streamResponse(secondaryModel, baseMessages, indexB, ctrlB.signal, `Model B: ${nameB}`, newHistory);
 
         } else {
             // Normal Mode
@@ -1502,7 +1559,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             let messagesToSend = [...baseMessages];
             if (prefill) messagesToSend.push({ role: 'assistant', content: prefill });
 
-            streamResponse(modelToUse, messagesToSend, targetIndex, ctrl.signal);
+            streamResponse(modelToUse, messagesToSend, targetIndex, ctrl.signal, "", newHistory);
         }
     };
 
