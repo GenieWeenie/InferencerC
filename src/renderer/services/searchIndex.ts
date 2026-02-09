@@ -232,28 +232,44 @@ export const SearchIndexService = {
      */
     searchSessions: (query: string): Set<string> => {
         const index = SearchIndexService.getIndex();
-        const queryTerms = SearchIndexService.tokenize(query);
+        const queryTerms = Array.from(new Set(SearchIndexService.tokenize(query)));
         const resultIds = new Set<string>();
 
         if (queryTerms.length === 0) return resultIds;
 
-        // Find intersection of all terms (AND search)
-        // Start with ids from first term
-        const firstTerm = queryTerms[0];
-        const firstIds = index.terms[firstTerm] || [];
+        // Intersect terms in increasing posting-list size order.
+        const sortedTerms = queryTerms
+            .map((term) => ({
+                term,
+                ids: index.terms[term] || [],
+            }))
+            .sort((a, b) => a.ids.length - b.ids.length);
+
+        const firstIds = sortedTerms[0].ids;
+        if (firstIds.length === 0) {
+            return resultIds;
+        }
 
         firstIds.forEach(id => resultIds.add(id));
 
         // Filter by subsequent terms
-        for (let i = 1; i < queryTerms.length; i++) {
-            const term = queryTerms[i];
-            const termIds = new Set(index.terms[term] || []);
+        for (let i = 1; i < sortedTerms.length; i++) {
+            const termIdsRaw = sortedTerms[i].ids;
+            if (termIdsRaw.length === 0) {
+                resultIds.clear();
+                return resultIds;
+            }
+            const termIds = new Set(termIdsRaw);
 
             // Intersection
             for (const id of resultIds) {
                 if (!termIds.has(id)) {
                     resultIds.delete(id);
                 }
+            }
+
+            if (resultIds.size === 0) {
+                return resultIds;
             }
         }
 
