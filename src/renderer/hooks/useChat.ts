@@ -38,6 +38,8 @@ let webhookServicePromise: Promise<WebhookService> | null = null;
 let teamWorkspacesServicePromise: Promise<TeamWorkspacesService> | null = null;
 let enterpriseComplianceServicePromise: Promise<EnterpriseComplianceService> | null = null;
 let credentialServicePromise: Promise<CredentialService> | null = null;
+const OPENROUTER_CREDENTIAL_MARKER_KEY = 'secure_marker_openRouterApiKey';
+const OPENROUTER_CREDENTIAL_LEGACY_KEY = 'openRouterApiKey';
 
 const loadAnalyticsService = async (): Promise<AnalyticsService> => {
     if (!analyticsServicePromise) {
@@ -72,6 +74,17 @@ const loadCredentialService = async (): Promise<CredentialService> => {
         credentialServicePromise = import('../services/credentials').then((mod) => mod.credentialService);
     }
     return credentialServicePromise;
+};
+
+const hasLikelyOpenRouterCredential = (): boolean => {
+    try {
+        return Boolean(
+            localStorage.getItem(OPENROUTER_CREDENTIAL_MARKER_KEY) ||
+            localStorage.getItem(OPENROUTER_CREDENTIAL_LEGACY_KEY)
+        );
+    } catch {
+        return false;
+    }
 };
 
 export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = true) => {
@@ -158,6 +171,12 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
     useEffect(() => {
         let isMounted = true;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let idleId: number | null = null;
+        const idleWindow = window as Window & {
+            requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+            cancelIdleCallback?: (handle: number) => void;
+        };
 
         const refreshOpenRouterKey = async () => {
             try {
@@ -180,11 +199,30 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             }
         };
 
-        void refreshOpenRouterKey();
+        if (hasLikelyOpenRouterCredential()) {
+            if (idleWindow.requestIdleCallback) {
+                idleId = idleWindow.requestIdleCallback(() => {
+                    void refreshOpenRouterKey();
+                }, { timeout: 2000 });
+            } else {
+                timeoutId = setTimeout(() => {
+                    void refreshOpenRouterKey();
+                }, 600);
+            }
+        } else {
+            setOpenRouterApiKey(null);
+        }
+
         window.addEventListener('credentials-updated', handleCredentialUpdate as EventListener);
 
         return () => {
             isMounted = false;
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+            if (idleId !== null && idleWindow.cancelIdleCallback) {
+                idleWindow.cancelIdleCallback(idleId);
+            }
             window.removeEventListener('credentials-updated', handleCredentialUpdate as EventListener);
         };
     }, []);
