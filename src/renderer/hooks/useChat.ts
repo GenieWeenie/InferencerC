@@ -517,6 +517,10 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const existingSessionMessages = needsSessionFallback
                 ? (HistoryService.getSession(sessionId)?.messages ?? [])
                 : [];
+            const persistedAt = Date.now();
+            const persistedTitle = history.length > 0
+                ? (history[0].content.slice(0, 30) + (history[0].content.length > 30 ? '...' : ''))
+                : 'New Chat';
             // Get full messages from cache for saving
             const messagesToSave = history.map((msg, index) => {
                 // If message is in cache, use full version
@@ -533,8 +537,8 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
             HistoryService.saveSession({
                 id: sessionId,
-                title: history.length > 0 ? (history[0].content.slice(0, 30) + (history[0].content.length > 30 ? '...' : '')) : 'New Chat',
-                lastModified: Date.now(),
+                title: persistedTitle,
+                lastModified: persistedAt,
                 modelId: currentModel,
                 messages: messagesToSave,
                 expertMode,
@@ -545,7 +549,36 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                 maxTokens,
                 batchSize
             });
-            setSavedSessions(HistoryService.getAllSessions());
+
+            // Keep sidebar history in sync without reparsing full storage every autosave tick.
+            setSavedSessions((prev) => {
+                const metadata: ChatSession = {
+                    id: sessionId,
+                    title: persistedTitle,
+                    lastModified: persistedAt,
+                    modelId: currentModel,
+                    messages: [],
+                    expertMode,
+                    thinkingEnabled,
+                    systemPrompt,
+                    temperature,
+                    topP,
+                    maxTokens,
+                    batchSize,
+                };
+
+                const existingIndex = prev.findIndex((session) => session.id === sessionId);
+                if (existingIndex === -1) {
+                    return [metadata, ...prev];
+                }
+
+                const merged = { ...prev[existingIndex], ...metadata };
+                if (existingIndex === 0) {
+                    return [merged, ...prev.slice(1)];
+                }
+
+                return [merged, ...prev.slice(0, existingIndex), ...prev.slice(existingIndex + 1)];
+            });
         }, 1000); // 1s debounce
 
         return () => clearTimeout(timer);
