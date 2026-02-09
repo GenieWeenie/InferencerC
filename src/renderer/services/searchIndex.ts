@@ -530,6 +530,9 @@ export const SearchIndexService = {
             const session = sessions[sessionIndex];
             const terms = extractSessionTerms(session);
             const termList = Array.from(terms);
+            if (termList.length === 0) {
+                continue;
+            }
             index.sessionTerms[session.id] = termList;
 
             for (let termIndex = 0; termIndex < termList.length; termIndex++) {
