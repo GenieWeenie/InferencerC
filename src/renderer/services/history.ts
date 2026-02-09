@@ -166,6 +166,24 @@ const persistSessionsMetadata = (sessions: ChatSession[]): void => {
   }
 };
 
+const patchStoredSessionMetadata = (
+  sessionId: string,
+  patch: (session: ChatSession) => ChatSession
+): void => {
+  try {
+    const uniqueKey = `${SESSION_DATA_PREFIX}${sessionId}`;
+    const rawSession = localStorage.getItem(uniqueKey);
+    if (!rawSession) {
+      return;
+    }
+    const session = JSON.parse(rawSession) as ChatSession;
+    const updatedSession = patch(session);
+    localStorage.setItem(uniqueKey, JSON.stringify(updatedSession));
+  } catch (e) {
+    console.error(`Failed to patch stored session metadata for ${sessionId}`, e);
+  }
+};
+
 /**
  * Calculate message size in bytes
  */
@@ -724,13 +742,11 @@ export const HistoryService = {
       persistSessionsMetadata(sessions);
     }
 
-    // Update individual session file
-    const session = HistoryService.getSession(id);
-    if (session) {
-      session.title = newTitle;
-      const uniqueKey = `${SESSION_DATA_PREFIX}${id}`;
-      localStorage.setItem(uniqueKey, JSON.stringify(session));
-    }
+    // Patch session file without hydrating chunked message content.
+    patchStoredSessionMetadata(id, (session) => ({
+      ...session,
+      title: newTitle,
+    }));
   },
 
   togglePinSession: (id: string) => {
@@ -742,13 +758,11 @@ export const HistoryService = {
       persistSessionsMetadata(sessions);
     }
 
-    // Update individual session file
-    const session = HistoryService.getSession(id);
-    if (session) {
-      session.pinned = !session.pinned;
-      const uniqueKey = `${SESSION_DATA_PREFIX}${id}`;
-      localStorage.setItem(uniqueKey, JSON.stringify(session));
-    }
+    // Patch session file without hydrating chunked message content.
+    patchStoredSessionMetadata(id, (session) => ({
+      ...session,
+      pinned: !session.pinned,
+    }));
   },
 
   /**
