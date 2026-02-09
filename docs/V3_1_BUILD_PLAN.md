@@ -78,6 +78,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 9: defer full API activity-log hydration until log panel open; keep instant badge count via lightweight metadata.
    - Pass 10: replace integration-availability service imports with lightweight local config checks; load integration services only on action click.
    - Pass 11: extract chat empty-state + launch checklist into a lazy component mounted only for zero-history sessions.
+   - Pass 12: extract diagnostics popover into a lazy component so diagnostics UI code loads only when the panel opens.
 
 ## Release Checklist for v3.1.x
 
