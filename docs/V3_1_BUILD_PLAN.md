@@ -99,6 +99,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 30: in `history`, defer `encryptionService` module loading (and worker/secure-storage chain) until encrypt/decrypt session paths are used, keeping non-encrypted chat startup lighter.
    - Pass 31: in `history`, defer search-index module loading and batch session index upsert/delete operations to idle-time flushes, preventing synchronous indexing work on hot save/delete paths.
    - Pass 32: in `useChat` autosave, load existing session data once per save cycle instead of per-message `getSession` calls, reducing repeated storage parse overhead during active conversations.
+   - Pass 33: in `useChat` autosave, skip session fallback reads entirely when in-memory loaded-message coverage already matches history length, avoiding unnecessary storage fetch/parse work on normal chats.
 
 ## Release Checklist for v3.1.x
 

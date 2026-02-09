@@ -513,8 +513,10 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         if (!sessionId || !currentModel) return;
 
         const timer = setTimeout(() => {
-            const existingSession = HistoryService.getSession(sessionId);
-            const existingSessionMessages = existingSession?.messages ?? [];
+            const needsSessionFallback = loadedMessageIndices.size < history.length;
+            const existingSessionMessages = needsSessionFallback
+                ? (HistoryService.getSession(sessionId)?.messages ?? [])
+                : [];
             // Get full messages from cache for saving
             const messagesToSave = history.map((msg, index) => {
                 // If message is in cache, use full version
