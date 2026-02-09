@@ -93,6 +93,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 24: defer prompt-variable service import on send unless input text matches variable syntax (`{{...}}`) to reduce first-send overhead for plain prompts.
    - Pass 25: defer onboarding-service initialization to browser idle time on first-run paths, avoiding mount-time import pressure during initial chat startup.
    - Pass 26: in `useChat`, defer credential-service/key hydration to idle and skip it entirely when no OpenRouter credential marker exists, while still reacting immediately to `credentials-updated` events.
+   - Pass 27: in `useChat`, skip team-workspace service import during model refresh unless an active workspace is detected via lightweight local storage markers; apply model-policy filtering only when needed.
 
 ## Release Checklist for v3.1.x
 

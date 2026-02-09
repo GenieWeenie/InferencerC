@@ -40,6 +40,8 @@ let enterpriseComplianceServicePromise: Promise<EnterpriseComplianceService> | n
 let credentialServicePromise: Promise<CredentialService> | null = null;
 const OPENROUTER_CREDENTIAL_MARKER_KEY = 'secure_marker_openRouterApiKey';
 const OPENROUTER_CREDENTIAL_LEGACY_KEY = 'openRouterApiKey';
+const TEAM_WORKSPACES_ACTIVE_KEY = 'team_workspaces_active_v1';
+const TEAM_WORKSPACES_STORAGE_KEY = 'team_workspaces_v1';
 
 const loadAnalyticsService = async (): Promise<AnalyticsService> => {
     if (!analyticsServicePromise) {
@@ -82,6 +84,19 @@ const hasLikelyOpenRouterCredential = (): boolean => {
             localStorage.getItem(OPENROUTER_CREDENTIAL_MARKER_KEY) ||
             localStorage.getItem(OPENROUTER_CREDENTIAL_LEGACY_KEY)
         );
+    } catch {
+        return false;
+    }
+};
+
+const hasLikelyActiveTeamWorkspace = (): boolean => {
+    try {
+        const activeWorkspace = localStorage.getItem(TEAM_WORKSPACES_ACTIVE_KEY);
+        if (!activeWorkspace || activeWorkspace.trim().length === 0) {
+            return false;
+        }
+        const workspacesRaw = localStorage.getItem(TEAM_WORKSPACES_STORAGE_KEY);
+        return Boolean(workspacesRaw && workspacesRaw !== '[]');
     } catch {
         return false;
     }
@@ -261,7 +276,10 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         let isInitialLoad = true;
 
         const fetchModels = async () => {
-            const teamWorkspacesService = await loadTeamWorkspacesService();
+            const shouldApplyWorkspacePolicy = hasLikelyActiveTeamWorkspace();
+            const teamWorkspacesService = shouldApplyWorkspacePolicy
+                ? await loadTeamWorkspacesService()
+                : null;
 
             let models: Model[] = [];
             let localStatus: 'online' | 'offline' = backendHealthService.isOnline() ? 'online' : 'offline';
@@ -309,7 +327,9 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                     remoteStatus = 'offline';
                 }
             }
-            const filteredModels = teamWorkspacesService.filterAllowedModels(models);
+            const filteredModels = teamWorkspacesService
+                ? teamWorkspacesService.filterAllowedModels(models)
+                : models;
             setAvailableModels(filteredModels);
             if (filteredModels.length === 0) {
                 setCurrentModel('');
