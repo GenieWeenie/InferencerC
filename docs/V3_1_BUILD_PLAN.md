@@ -137,6 +137,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 68: in `searchIndex`, add a dedicated two-term search fast path that intersects by scanning only the smaller posting list against one cached membership set, skipping generic multi-term setup for common two-word queries.
    - Pass 69: in `searchIndex`, avoid `Object.keys(index.terms)` allocation on full removals by iterating terms via `for...in` with `hasOwnProperty` and a shared per-term compaction helper.
    - Pass 70: in `searchIndex`, add an LRU-style cache for deduped query term arrays so repeated searches skip rebuilding unique-term lists from tokenized query text each call.
+   - Pass 71: in `searchIndex` upserts, skip per-term `includes(sessionId)` checks for terms already present in the previous session-term set (after they were removed in the same cycle), while retaining checks for newly introduced terms.
 
 ## Release Checklist for v3.1.x
 

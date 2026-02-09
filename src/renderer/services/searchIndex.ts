@@ -271,14 +271,22 @@ export const SearchIndexService = {
             }
 
             SearchIndexService._removeSessionFromIndex(index, sessionId, previousTerms);
-            terms.forEach(term => {
-                if (!index.terms[term]) {
-                    index.terms[term] = [];
+            const previousTermsLookup = hasPreviousEntry && previousTerms.length > 0
+                ? new Set(previousTerms)
+                : null;
+            for (const term of terms) {
+                let termIds = index.terms[term];
+                if (!termIds) {
+                    termIds = [];
+                    index.terms[term] = termIds;
                 }
-                if (!index.terms[term].includes(sessionId)) {
-                    index.terms[term].push(sessionId);
+
+                const requiresExistingCheck = !previousTermsLookup || !previousTermsLookup.has(term);
+                if (requiresExistingCheck && termIds.includes(sessionId)) {
+                    continue;
                 }
-            });
+                termIds.push(sessionId);
+            }
             index.sessionTerms[sessionId] = Array.from(terms);
             didChange = true;
         });
