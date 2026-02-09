@@ -275,10 +275,12 @@ export const SearchIndexService = {
             }
 
             SearchIndexService._removeSessionFromIndex(index, sessionId, previousTerms);
+            const termList = Array.from(terms);
             const previousTermsLookup = hasPreviousEntry && previousTerms.length > 0
                 ? new Set(previousTerms)
                 : null;
-            for (const term of terms) {
+            for (let termIndex = 0; termIndex < termList.length; termIndex++) {
+                const term = termList[termIndex];
                 let termIds = index.terms[term];
                 if (!termIds) {
                     termIds = [];
@@ -291,7 +293,7 @@ export const SearchIndexService = {
                 }
                 termIds.push(sessionId);
             }
-            index.sessionTerms[sessionId] = Array.from(terms);
+            index.sessionTerms[sessionId] = termList;
             didChange = true;
         }
 
@@ -440,9 +442,11 @@ export const SearchIndexService = {
         for (let sessionIndex = 0; sessionIndex < sessions.length; sessionIndex++) {
             const session = sessions[sessionIndex];
             const terms = extractSessionTerms(session);
-            index.sessionTerms[session.id] = Array.from(terms);
+            const termList = Array.from(terms);
+            index.sessionTerms[session.id] = termList;
 
-            for (const term of terms) {
+            for (let termIndex = 0; termIndex < termList.length; termIndex++) {
+                const term = termList[termIndex];
                 if (!index.terms[term]) {
                     index.terms[term] = [];
                 }
