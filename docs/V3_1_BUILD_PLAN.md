@@ -151,6 +151,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 82: in `getUniqueQueryTerms`, add a two-token fast path that returns cached tokens directly (or a single-element array for duplicates), avoiding general Set-based dedupe work for common short queries.
    - Pass 83: in `searchSessions`, add a dedicated three-term intersection fast path that scans the smallest posting list against two cached membership sets, bypassing generic multi-term set-array setup for common short queries.
    - Pass 84: in `removeSessionIdFromTerm`, add a tail-match fast path (when the removed session ID is already last) to truncate or delete posting lists without running compaction loops.
+   - Pass 85: in `getUniqueQueryTerms`, add a three-token dedupe fast path that preserves token order while avoiding general Set allocation for common short queries.
 
 ## Release Checklist for v3.1.x
 

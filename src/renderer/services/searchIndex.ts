@@ -100,6 +100,25 @@ const getUniqueQueryTerms = (query: string): string[] => {
         cacheQueryTerms(query, tokens);
         return tokens;
     }
+    if (tokens.length === 3) {
+        const first = tokens[0];
+        const second = tokens[1];
+        const third = tokens[2];
+        let deduped: string[];
+
+        if (first === second) {
+            deduped = first === third ? [first] : [first, third];
+        } else if (first === third) {
+            deduped = [first, second];
+        } else if (second === third) {
+            deduped = [first, second];
+        } else {
+            deduped = tokens;
+        }
+
+        cacheQueryTerms(query, deduped);
+        return deduped;
+    }
 
     const uniqueTerms: string[] = [];
     const seen = new Set<string>();
