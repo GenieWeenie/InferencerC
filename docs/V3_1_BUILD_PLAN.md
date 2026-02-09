@@ -165,6 +165,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 96: in generic multi-term `searchSessions`, defer `resultIds` `Set` allocation until the first intersection match, avoiding eager allocation on no-match queries while preserving return semantics.
    - Pass 97: in 2-term and 3-term `searchSessions` branches, defer `resultIds` `Set` allocation until first match, avoiding eager allocation on zero-intersection queries while preserving return semantics.
    - Pass 98: in `getUniqueQueryTerms`, add a six-token dedupe fast path that preserves first-seen order while avoiding general `Set` allocation for common short queries.
+   - Pass 99: in `getUniqueQueryTerms`, add a seven-token dedupe fast path that preserves first-seen order while avoiding general `Set` allocation for common short queries.
 
 ## Release Checklist for v3.1.x
 
