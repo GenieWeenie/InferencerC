@@ -318,7 +318,10 @@ export const SearchIndexService = {
      * Internal helper to remove session from index object
      */
     _removeSessionFromIndex: (index: InvertedIndex, sessionId: string, termsHint?: string[]) => {
-        if (termsHint && termsHint.length > 0) {
+        if (termsHint) {
+            if (termsHint.length === 0) {
+                return;
+            }
             for (let i = 0; i < termsHint.length; i++) {
                 removeSessionIdFromTerm(index, termsHint[i], sessionId);
             }
