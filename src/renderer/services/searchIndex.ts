@@ -551,7 +551,7 @@ export const SearchIndexService = {
             remainingTermSetIndex++;
         }
 
-        const resultIds = new Set<string>();
+        let resultIds: Set<string> | null = null;
         // Scan candidates from the smallest posting list once.
         for (let i = 0; i < firstIds.length; i++) {
             const sessionId = firstIds[i];
@@ -565,11 +565,14 @@ export const SearchIndexService = {
             }
 
             if (matchesAll) {
+                if (!resultIds) {
+                    resultIds = new Set<string>();
+                }
                 resultIds.add(sessionId);
             }
         }
 
-        return resultIds;
+        return resultIds ?? new Set<string>();
     },
 
     /**

@@ -162,6 +162,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 93: in `rebuildIndex`, check `terms.size` before `Array.from(terms)` so empty-term sessions skip transient array allocation during full rebuilds.
    - Pass 94: in `cacheTokenized` and `cacheQueryTerms`, replace `has()+delete()` with unconditional `delete()` before `set()`, avoiding redundant map lookups while preserving LRU recency behavior.
    - Pass 95: in the generic multi-term `searchSessions` path, split remaining-term set construction into pre/post smallest-index loops, removing a per-iteration skip branch while preserving identical term coverage.
+   - Pass 96: in generic multi-term `searchSessions`, defer `resultIds` `Set` allocation until the first intersection match, avoiding eager allocation on no-match queries while preserving return semantics.
 
 ## Release Checklist for v3.1.x
 
