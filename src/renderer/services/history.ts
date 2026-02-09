@@ -27,6 +27,11 @@ let searchIndexFlushIdleId: number | null = null;
 let sessionsMetadataCache: ChatSession[] | null = null;
 let sessionsMetadataCacheRaw: string | null = null;
 const messageContentWriteCache = new Map<string, string>();
+type SessionDataCacheEntry = {
+  raw: string;
+  parsed: ChatSession;
+};
+const sessionDataCache = new Map<string, SessionDataCacheEntry>();
 
 const loadEncryptionService = async (): Promise<EncryptionServiceType> => {
   if (!encryptionServicePromise) {
@@ -179,7 +184,12 @@ const patchStoredSessionMetadata = (
     }
     const session = JSON.parse(rawSession) as ChatSession;
     const updatedSession = patch(session);
-    localStorage.setItem(uniqueKey, JSON.stringify(updatedSession));
+    const updatedRaw = JSON.stringify(updatedSession);
+    localStorage.setItem(uniqueKey, updatedRaw);
+    sessionDataCache.set(sessionId, {
+      raw: updatedRaw,
+      parsed: updatedSession,
+    });
   } catch (e) {
     console.error(`Failed to patch stored session metadata for ${sessionId}`, e);
   }
@@ -363,7 +373,19 @@ export const HistoryService = {
       let session: ChatSession | undefined;
 
       if (rawSpecific) {
-        session = JSON.parse(rawSpecific);
+        const cached = sessionDataCache.get(id);
+        if (cached && cached.raw === rawSpecific) {
+          session = {
+            ...cached.parsed,
+            messages: [...cached.parsed.messages],
+          };
+        } else {
+          session = JSON.parse(rawSpecific);
+          sessionDataCache.set(id, {
+            raw: rawSpecific,
+            parsed: session,
+          });
+        }
       } else {
         // Fallback: Try loading from global list (if not migrated or error)
         const sessions = readSessionsMetadataFromStorage();
@@ -535,7 +557,12 @@ export const HistoryService = {
 
     // 1. Save full session to specific key
     const uniqueKey = `${SESSION_DATA_PREFIX}${session.id}`;
-    localStorage.setItem(uniqueKey, JSON.stringify(processedSession));
+    const processedSessionRaw = JSON.stringify(processedSession);
+    localStorage.setItem(uniqueKey, processedSessionRaw);
+    sessionDataCache.set(session.id, {
+      raw: processedSessionRaw,
+      parsed: processedSession,
+    });
 
     // 2. Update metadata in main list
     const sessions = cloneMetadataList(readSessionsMetadataFromStorage());
@@ -574,6 +601,7 @@ export const HistoryService = {
 
     // 2. Remove specific data
     localStorage.removeItem(`${SESSION_DATA_PREFIX}${id}`);
+    sessionDataCache.delete(id);
 
     // 3. Remove encrypted data if exists
     localStorage.removeItem(`${ENCRYPTED_SESSIONS_KEY}_${id}`);

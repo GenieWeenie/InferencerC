@@ -110,6 +110,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 41: in `useChat`, build webhook `conversation_complete` payloads from in-memory history snapshots when all messages are already loaded, and only fall back to `HistoryService.getSession()` for lazy-placeholder sessions.
    - Pass 42: in `useChat`, cache full loaded session messages in refs and reuse them for autosave/webhook fallback reconstruction, avoiding repeated `HistoryService.getSession()` reads on lazy-placeholder sessions.
    - Pass 43: in `history`, dedupe chunk-content writes via an in-memory chunk cache so unchanged large message chunks are not re-written to `localStorage` every autosave pass.
+   - Pass 44: in `history`, cache parsed split-session blobs by raw value so repeated `getSession()` calls can skip redundant `JSON.parse` work when session storage hasn’t changed.
 
 ## Release Checklist for v3.1.x
 
