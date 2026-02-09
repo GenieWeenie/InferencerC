@@ -1,5 +1,4 @@
 import { Message, TokenLogprob, ChatMessage, ChatSession, RecoveryState } from '../../shared/types';
-import { encryptionService } from './encryption';
 import { SearchIndexService } from './searchIndex';
 
 export interface ExportedChatHistory {
@@ -16,6 +15,15 @@ const SESSION_DATA_PREFIX = 'app_session_';
 const MESSAGE_CONTENT_PREFIX = 'app_message_content_'; // Store large message content separately
 const CONTENT_CHUNK_THRESHOLD = 1024; // 1KB threshold for chunking
 const RECOVERY_STATE_KEY = 'app_recovery_state';
+type EncryptionServiceType = typeof import('./encryption')['encryptionService'];
+let encryptionServicePromise: Promise<EncryptionServiceType> | null = null;
+
+const loadEncryptionService = async (): Promise<EncryptionServiceType> => {
+  if (!encryptionServicePromise) {
+    encryptionServicePromise = import('./encryption').then((mod) => mod.encryptionService);
+  }
+  return encryptionServicePromise;
+};
 
 /**
  * Calculate message size in bytes
@@ -236,6 +244,7 @@ export const HistoryService = {
    */
   decryptSession: async (id: string, password: string): Promise<ChatSession | null> => {
     try {
+      const encryptionService = await loadEncryptionService();
       // Verify password hash
       const passwordHashes = JSON.parse(localStorage.getItem(SESSION_PASSWORDS_KEY) || '{}');
       const storedHash = passwordHashes[id];
@@ -282,6 +291,7 @@ export const HistoryService = {
    */
   encryptSession: async (id: string, password: string): Promise<boolean> => {
     try {
+      const encryptionService = await loadEncryptionService();
       if (!encryptionService.isAvailable()) {
         return false;
       }
