@@ -36,6 +36,18 @@ const createEmptyIndex = (): InvertedIndex => ({
     sessionTerms: {},
 });
 
+const hasSameTerms = (previousTerms: string[], nextTerms: Set<string>): boolean => {
+    if (previousTerms.length !== nextTerms.size) {
+        return false;
+    }
+    for (let i = 0; i < previousTerms.length; i++) {
+        if (!nextTerms.has(previousTerms[i])) {
+            return false;
+        }
+    }
+    return true;
+};
+
 export const SearchIndexService = {
     /**
      * Get the current index
@@ -104,19 +116,23 @@ export const SearchIndexService = {
     applyOperations: (operations: SearchIndexBatchOperation[]) => {
         if (operations.length === 0) return;
         const index = SearchIndexService.getIndex();
+        let didChange = false;
 
         operations.forEach((operation) => {
             if (operation.kind === 'delete') {
                 const previousTerms = index.sessionTerms[operation.sessionId] || [];
+                if (!(operation.sessionId in index.sessionTerms) && previousTerms.length === 0) {
+                    return;
+                }
                 SearchIndexService._removeSessionFromIndex(index, operation.sessionId, previousTerms);
                 delete index.sessionTerms[operation.sessionId];
+                didChange = true;
                 return;
             }
 
             const session = operation.session;
             const sessionId = session.id;
             const previousTerms = index.sessionTerms[sessionId] || [];
-            SearchIndexService._removeSessionFromIndex(index, sessionId, previousTerms);
 
             let fullText = session.title + ' ';
             session.messages.forEach((msg: any) => {
@@ -126,6 +142,13 @@ export const SearchIndexService = {
             });
 
             const terms = new Set(SearchIndexService.tokenize(fullText));
+            const hasPreviousEntry = sessionId in index.sessionTerms;
+
+            if (hasPreviousEntry && hasSameTerms(previousTerms, terms)) {
+                return;
+            }
+
+            SearchIndexService._removeSessionFromIndex(index, sessionId, previousTerms);
             terms.forEach(term => {
                 if (!index.terms[term]) {
                     index.terms[term] = [];
@@ -135,9 +158,12 @@ export const SearchIndexService = {
                 }
             });
             index.sessionTerms[sessionId] = Array.from(terms);
+            didChange = true;
         });
 
-        SearchIndexService.saveIndex(index);
+        if (didChange) {
+            SearchIndexService.saveIndex(index);
+        }
     },
 
     /**
