@@ -308,16 +308,7 @@ const storeMessageContent = (sessionId: string, messageIndex: number, content: s
   messageContentWriteCache.set(key, contentStr);
 };
 
-/**
- * Load message content from separate storage
- */
-const loadMessageContent = (sessionId: string, messageIndex: number): string | any | null => {
-  const key = getChunkContentKey(sessionId, messageIndex);
-  const content = localStorage.getItem(key);
-  if (!content) return null;
-  registerChunkKey(sessionId, key);
-  messageContentWriteCache.set(key, content);
-
+const decodeStoredMessageContent = (key: string, content: string): string | any => {
   const knownKind = messageContentKindCache.get(key);
   if (knownKind === 'plain') {
     return content;
@@ -342,6 +333,24 @@ const loadMessageContent = (sessionId: string, messageIndex: number): string | a
     messageContentKindCache.set(key, 'plain');
     return content;
   }
+};
+
+/**
+ * Load message content from separate storage
+ */
+const loadMessageContent = (sessionId: string, messageIndex: number): string | any | null => {
+  const key = getChunkContentKey(sessionId, messageIndex);
+  registerChunkKey(sessionId, key);
+
+  const cachedContent = messageContentWriteCache.get(key);
+  if (cachedContent !== undefined) {
+    return decodeStoredMessageContent(key, cachedContent);
+  }
+
+  const storedContent = localStorage.getItem(key);
+  if (storedContent === null) return null;
+  messageContentWriteCache.set(key, storedContent);
+  return decodeStoredMessageContent(key, storedContent);
 };
 
 /**
