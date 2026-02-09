@@ -117,6 +117,7 @@ const CHAT_DEV_MONITORS_ENABLED_KEY = 'chat_dev_monitors_enabled_v1';
 const ONBOARDING_COMPLETED_KEY = 'onboarding_completed';
 const ACTIVITY_LOG_COUNT_KEY = 'api_activity_log_count';
 const PROJECT_CONTEXT_FEATURE_ENABLED_KEY = 'project_context_feature_enabled_v1';
+const CLOUD_SYNC_CONFIG_KEY = 'cloud_sync_config_v1';
 const MAX_ACTIVITY_LOG_ENTRIES = 200;
 
 type OnboardingServiceModule = typeof import('../services/onboarding');
@@ -258,6 +259,21 @@ const persistProjectContextFeatureEnabled = (enabled: boolean): void => {
         }
     } catch {
         // Ignore local persistence errors for this optional UI flag.
+    }
+};
+
+const readCloudSyncAuthSnapshot = (): boolean => {
+    try {
+        const raw = localStorage.getItem(CLOUD_SYNC_CONFIG_KEY);
+        if (!raw) return false;
+        const parsed = JSON.parse(raw) as Partial<{
+            token?: string;
+            accountId?: string;
+            encryptionSalt?: string;
+        }>;
+        return Boolean(parsed.token && parsed.accountId && parsed.encryptionSalt);
+    } catch {
+        return false;
     }
 };
 
@@ -592,7 +608,7 @@ const Chat: React.FC = () => {
     const [showTeamWorkspaces, setShowTeamWorkspaces] = React.useState(false);
     const [showEnterpriseCompliance, setShowEnterpriseCompliance] = React.useState(false);
     const [cloudSyncStatus, setCloudSyncStatus] = React.useState<CloudSyncStatus | null>(null);
-    const [isCloudSyncAuthenticated, setIsCloudSyncAuthenticated] = React.useState<boolean>(false);
+    const [isCloudSyncAuthenticated, setIsCloudSyncAuthenticated] = React.useState<boolean>(readCloudSyncAuthSnapshot);
     const [showBlockchain, setShowBlockchain] = React.useState(false);
     const [showAIAgents, setShowAIAgents] = React.useState(false);
     const [showFederatedLearning, setShowFederatedLearning] = React.useState(false);
@@ -683,6 +699,25 @@ const Chat: React.FC = () => {
     }, [shouldLoadContextManagement, contextManagementService]);
 
     React.useEffect(() => {
+        const refreshAuthSnapshot = () => {
+            setIsCloudSyncAuthenticated(readCloudSyncAuthSnapshot());
+        };
+
+        window.addEventListener('focus', refreshAuthSnapshot);
+        window.addEventListener('storage', refreshAuthSnapshot);
+        return () => {
+            window.removeEventListener('focus', refreshAuthSnapshot);
+            window.removeEventListener('storage', refreshAuthSnapshot);
+        };
+    }, []);
+
+    const shouldLoadCloudSyncService = showCloudSync || isCloudSyncAuthenticated;
+    React.useEffect(() => {
+        if (!shouldLoadCloudSyncService) {
+            setCloudSyncStatus(null);
+            return;
+        }
+
         let cancelled = false;
 
         const refreshCloudSyncStatus = async () => {
@@ -694,7 +729,6 @@ const Chat: React.FC = () => {
             } catch {
                 if (cancelled) return;
                 setCloudSyncStatus(null);
-                setIsCloudSyncAuthenticated(false);
             }
         };
 
@@ -715,7 +749,7 @@ const Chat: React.FC = () => {
             window.removeEventListener('focus', handleRefresh);
             window.removeEventListener('storage', handleRefresh);
         };
-    }, []);
+    }, [shouldLoadCloudSyncService]);
 
     const cloudSyncBadge = React.useMemo(() => {
         if (!isCloudSyncAuthenticated) {
