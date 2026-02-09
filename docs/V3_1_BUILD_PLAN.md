@@ -120,6 +120,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 51: in `history`, persist split/chunk migration completion markers so post-upgrade launches skip full migration scans once data has already been normalized.
    - Pass 52: in `history`, remove redundant save/patch scans by collecting chunked indexes during `saveSession` and reusing cache-backed session parses for metadata-only patch writes.
    - Pass 53: in `history`, switch metadata update paths to copy-on-write array/object updates (instead of pre-cloning whole metadata lists) and skip no-op split-session rewrites when patched content is unchanged.
+   - Pass 54: batch deferred search-index operations into a single index load/save cycle per flush (instead of per-operation load/save), reducing storage parse/stringify churn during autosave-heavy periods.
 
 ## Release Checklist for v3.1.x
 

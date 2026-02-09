@@ -82,18 +82,17 @@ const flushPendingSearchIndexOperations = (): void => {
     return;
   }
 
-  const operations = Array.from(pendingSearchIndexOperations.entries());
+  const operations = Array.from(pendingSearchIndexOperations.entries()).map(([sessionId, operation]) => {
+    if (operation.kind === 'delete') {
+      return { kind: 'delete' as const, sessionId };
+    }
+    return { kind: 'upsert' as const, session: operation.session };
+  });
   pendingSearchIndexOperations.clear();
 
   void loadSearchIndexService()
     .then((searchIndexService) => {
-      operations.forEach(([sessionId, operation]) => {
-        if (operation.kind === 'delete') {
-          searchIndexService.removeSession(sessionId);
-          return;
-        }
-        searchIndexService.indexSession(operation.session);
-      });
+      searchIndexService.applyOperations(operations);
     })
     .catch((error) => {
       console.error('Failed to flush search index operations', error);

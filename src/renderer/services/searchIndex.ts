@@ -14,6 +14,10 @@ interface InvertedIndex {
     sessionTerms: Record<string, string[]>; // sessionId -> terms
 }
 
+type SearchIndexBatchOperation =
+    | { kind: 'upsert'; session: ChatSession }
+    | { kind: 'delete'; sessionId: string };
+
 const INDEX_STORAGE_KEY = 'app_search_index';
 const STOP_WORDS = new Set([
     'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
@@ -69,50 +73,59 @@ export const SearchIndexService = {
     },
 
     /**
+     * Apply multiple index operations in one load/save cycle.
+     */
+    applyOperations: (operations: SearchIndexBatchOperation[]) => {
+        if (operations.length === 0) return;
+        const index = SearchIndexService.getIndex();
+
+        operations.forEach((operation) => {
+            if (operation.kind === 'delete') {
+                const previousTerms = index.sessionTerms[operation.sessionId] || [];
+                SearchIndexService._removeSessionFromIndex(index, operation.sessionId, previousTerms);
+                delete index.sessionTerms[operation.sessionId];
+                return;
+            }
+
+            const session = operation.session;
+            const sessionId = session.id;
+            const previousTerms = index.sessionTerms[sessionId] || [];
+            SearchIndexService._removeSessionFromIndex(index, sessionId, previousTerms);
+
+            let fullText = session.title + ' ';
+            session.messages.forEach((msg: any) => {
+                if (typeof msg.content === 'string') {
+                    fullText += msg.content + ' ';
+                }
+            });
+
+            const terms = new Set(SearchIndexService.tokenize(fullText));
+            terms.forEach(term => {
+                if (!index.terms[term]) {
+                    index.terms[term] = [];
+                }
+                if (!index.terms[term].includes(sessionId)) {
+                    index.terms[term].push(sessionId);
+                }
+            });
+            index.sessionTerms[sessionId] = Array.from(terms);
+        });
+
+        SearchIndexService.saveIndex(index);
+    },
+
+    /**
      * Index a session (add/update)
      */
     indexSession: (session: ChatSession) => {
-        const index = SearchIndexService.getIndex();
-        const sessionId = session.id;
-
-        // Remove this session from only the terms it previously owned.
-        const previousTerms = index.sessionTerms[sessionId] || [];
-        SearchIndexService._removeSessionFromIndex(index, sessionId, previousTerms);
-
-        // 2. Extract all text
-        let fullText = session.title + ' ';
-        session.messages.forEach((msg: any) => {
-            if (typeof msg.content === 'string') {
-                fullText += msg.content + ' ';
-            }
-        });
-
-        // 3. Tokenize
-        const terms = new Set(SearchIndexService.tokenize(fullText));
-
-        // 4. Update Index
-        terms.forEach(term => {
-            if (!index.terms[term]) {
-                index.terms[term] = [];
-            }
-            if (!index.terms[term].includes(sessionId)) {
-                index.terms[term].push(sessionId);
-            }
-        });
-        index.sessionTerms[sessionId] = Array.from(terms);
-
-        SearchIndexService.saveIndex(index);
+        SearchIndexService.applyOperations([{ kind: 'upsert', session }]);
     },
 
     /**
      * Remove a session from the index
      */
     removeSession: (sessionId: string) => {
-        const index = SearchIndexService.getIndex();
-        const previousTerms = index.sessionTerms[sessionId] || [];
-        SearchIndexService._removeSessionFromIndex(index, sessionId, previousTerms);
-        delete index.sessionTerms[sessionId];
-        SearchIndexService.saveIndex(index);
+        SearchIndexService.applyOperations([{ kind: 'delete', sessionId }]);
     },
 
     /**
