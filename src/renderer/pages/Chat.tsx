@@ -18,7 +18,6 @@ import { useMCP } from '../hooks/useMCP';
 import type { UsageStatsRecord } from '../services/analyticsStore';
 import type { ProjectContext } from '../services/projectContext';
 import { HistoryService } from '../services/history';
-import { activityLogService } from '../services/activityLog';
 import type { ConversationTemplate } from '../services/templates';
 import type { ContextTrimSuggestion, ContextUsage } from '../services/contextManagement';
 import { AVAILABLE_TOOLS } from '../lib/tools';
@@ -116,6 +115,8 @@ const RECOVERY_CLEAN_EXIT_KEY = 'app_recovery_clean_exit';
 const CHAT_PERF_HISTORY_KEY = 'chat_message_perf_benchmarks_v1';
 const CHAT_DEV_MONITORS_ENABLED_KEY = 'chat_dev_monitors_enabled_v1';
 const ONBOARDING_COMPLETED_KEY = 'onboarding_completed';
+const ACTIVITY_LOG_COUNT_KEY = 'api_activity_log_count';
+const MAX_ACTIVITY_LOG_ENTRIES = 200;
 
 type OnboardingServiceModule = typeof import('../services/onboarding');
 type CloudSyncService = typeof import('../services/cloudSync')['cloudSyncService'];
@@ -129,6 +130,7 @@ type PromptVariableServiceType = typeof import('../services/promptVariables')['P
 type ResponsiveDesignServiceType = typeof import('../services/responsiveDesign')['responsiveDesignService'];
 type ContextManagementServiceType = typeof import('../services/contextManagement')['ContextManagementService'];
 type AnalyticsStoreModule = typeof import('../services/analyticsStore');
+type ActivityLogServiceType = typeof import('../services/activityLog')['activityLogService'];
 
 let cloudSyncServicePromise: Promise<CloudSyncService> | null = null;
 let multiModalAIServicePromise: Promise<MultiModalAIService> | null = null;
@@ -141,6 +143,7 @@ let promptVariableServicePromise: Promise<PromptVariableServiceType> | null = nu
 let responsiveDesignServicePromise: Promise<ResponsiveDesignServiceType> | null = null;
 let contextManagementServicePromise: Promise<ContextManagementServiceType> | null = null;
 let analyticsStorePromise: Promise<AnalyticsStoreModule> | null = null;
+let activityLogServicePromise: Promise<ActivityLogServiceType> | null = null;
 
 const loadOnboardingService = async () => {
     const onboardingModule: OnboardingServiceModule = await import('../services/onboarding');
@@ -222,6 +225,13 @@ const loadAnalyticsStore = async (): Promise<AnalyticsStoreModule> => {
         analyticsStorePromise = import('../services/analyticsStore');
     }
     return analyticsStorePromise;
+};
+
+const loadActivityLogService = async (): Promise<ActivityLogServiceType> => {
+    if (!activityLogServicePromise) {
+        activityLogServicePromise = import('../services/activityLog').then((mod) => mod.activityLogService);
+    }
+    return activityLogServicePromise;
 };
 
 const estimateTokensFallback = (text: string): number => {
@@ -326,21 +336,46 @@ const MessageSkeleton: React.FC<{ isUser?: boolean }> = ({ isUser = false }) => 
     );
 };
 
+const readPersistedApiLogCount = (): number => {
+    try {
+        const rawCount = localStorage.getItem(ACTIVITY_LOG_COUNT_KEY);
+        if (rawCount === null) return 0;
+        const parsed = Number(rawCount);
+        return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
+    } catch {
+        return 0;
+    }
+};
+
 const Chat: React.FC = () => {
     // API logs state (defined before useChat so it can be passed as callback)
     const [apiLogs, setApiLogs] = React.useState<LogEntry[]>([]);
-    const [apiLogCount, setApiLogCount] = React.useState<number>(() => activityLogService.getEntryCount());
+    const [apiLogCount, setApiLogCount] = React.useState<number>(readPersistedApiLogCount);
     const [hasHydratedApiLogs, setHasHydratedApiLogs] = React.useState(false);
+    const [showRequestLog, setShowRequestLog] = React.useState(false);
 
     const [streamingEnabled, setStreamingEnabled] = React.useState(true);
     const [isLoadingSessions, setIsLoadingSessions] = React.useState(true);
     const [isLoadingMessages, setIsLoadingMessages] = React.useState(true);
 
     const handleApiLog = React.useCallback((log: LogEntry) => {
-        const next = activityLogService.append(log);
-        setApiLogCount(next.length);
-        setApiLogs(next);
-    }, []);
+        setApiLogCount((prev) => Math.min(prev + 1, MAX_ACTIVITY_LOG_ENTRIES));
+        if (hasHydratedApiLogs || showRequestLog) {
+            setApiLogs((prev) => [...prev, log].slice(-MAX_ACTIVITY_LOG_ENTRIES));
+        }
+
+        void loadActivityLogService()
+            .then((service) => {
+                const next = service.append(log);
+                setApiLogCount(next.length);
+                if (hasHydratedApiLogs || showRequestLog) {
+                    setApiLogs(next);
+                }
+            })
+            .catch(() => {
+                // Keep UI responsive even if activity-log persistence is unavailable.
+            });
+    }, [hasHydratedApiLogs, showRequestLog]);
 
     const {
         input, setInput,
@@ -448,7 +483,6 @@ const Chat: React.FC = () => {
     const lastMemoryWarning = React.useRef<number>(0);
 
     const [bookmarkedMessages, setBookmarkedMessages] = React.useState<Set<number>>(new Set());
-    const [showRequestLog, setShowRequestLog] = React.useState(false);
     const [showDiagnosticsPanel, setShowDiagnosticsPanel] = React.useState(false);
     const [hasCompletedLaunchChecklist, setHasCompletedLaunchChecklist] = React.useState<boolean>(() => {
         return localStorage.getItem('chat_launch_checklist_completed') === '1';
@@ -722,8 +756,22 @@ const Chat: React.FC = () => {
 
     React.useEffect(() => {
         if (!showRequestLog || hasHydratedApiLogs) return;
-        setApiLogs(activityLogService.getEntries());
-        setHasHydratedApiLogs(true);
+        let cancelled = false;
+        void loadActivityLogService()
+            .then((service) => {
+                if (cancelled) return;
+                setApiLogs(service.getEntries());
+                setApiLogCount(service.getEntryCount());
+                setHasHydratedApiLogs(true);
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setApiLogs([]);
+                setHasHydratedApiLogs(true);
+            });
+        return () => {
+            cancelled = true;
+        };
     }, [showRequestLog, hasHydratedApiLogs]);
 
     React.useEffect(() => {
@@ -4563,7 +4611,13 @@ const Chat: React.FC = () => {
                         onClose={() => setShowRequestLog(false)}
                         logs={apiLogs}
                         onClear={() => {
-                            activityLogService.clear();
+                            void loadActivityLogService()
+                                .then((service) => {
+                                    service.clear();
+                                })
+                                .catch(() => {
+                                    // Keep UI state cleared even if persistent store clear fails.
+                                });
                             setApiLogs([]);
                             setApiLogCount(0);
                             setHasHydratedApiLogs(true);

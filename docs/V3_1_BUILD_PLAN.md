@@ -84,6 +84,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 15: lazy-load gesture runtime service from `useGestures` so touch/trackpad gesture code is deferred until gesture hooks are enabled.
    - Pass 16: defer conversation-tree manager module load until branching is enabled; keep tree sync/view hooks functional once enabled.
    - Pass 17: defer analytics store import and usage-history hydration until the Analytics dashboard is opened.
+   - Pass 18: defer activity-log service import until logs are opened or new entries arrive; keep badge count from lightweight persisted count.
 
 ## Release Checklist for v3.1.x
 
