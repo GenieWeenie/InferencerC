@@ -408,7 +408,6 @@ export const SearchIndexService = {
             return new Set(ids);
         }
 
-        const resultIds = new Set<string>();
         if (queryTermCount === 2) {
             const firstTerm = queryTerms[0];
             const secondTerm = queryTerms[1];
@@ -416,9 +415,10 @@ export const SearchIndexService = {
             const secondIds = index.terms[secondTerm];
 
             if (!firstIds || firstIds.length === 0 || !secondIds || secondIds.length === 0) {
-                return resultIds;
+                return new Set<string>();
             }
 
+            const resultIds = new Set<string>();
             const scanFirstTerm = firstIds.length <= secondIds.length;
             const candidateIds = scanFirstTerm ? firstIds : secondIds;
             const membershipTerm = scanFirstTerm ? secondTerm : firstTerm;
@@ -442,9 +442,10 @@ export const SearchIndexService = {
             const thirdIds = index.terms[thirdTerm];
 
             if (!firstIds || firstIds.length === 0 || !secondIds || secondIds.length === 0 || !thirdIds || thirdIds.length === 0) {
-                return resultIds;
+                return new Set<string>();
             }
 
+            const resultIds = new Set<string>();
             let candidateIds = firstIds;
             let membershipTermA = secondTerm;
             let membershipIdsA = secondIds;
@@ -479,14 +480,14 @@ export const SearchIndexService = {
 
         const initialIds = index.terms[queryTerms[0]];
         if (!initialIds || initialIds.length === 0) {
-            return resultIds;
+            return new Set<string>();
         }
         let smallestTermIndex = 0;
         let firstIds: string[] = initialIds;
         for (let i = 1; i < queryTerms.length; i++) {
             const ids = index.terms[queryTerms[i]];
             if (!ids || ids.length === 0) {
-                return resultIds;
+                return new Set<string>();
             }
             if (ids.length < firstIds.length) {
                 smallestTermIndex = i;
@@ -506,6 +507,7 @@ export const SearchIndexService = {
             remainingTermSetIndex++;
         }
 
+        const resultIds = new Set<string>();
         // Scan candidates from the smallest posting list once.
         for (let i = 0; i < firstIds.length; i++) {
             const sessionId = firstIds[i];

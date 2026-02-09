@@ -155,6 +155,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 86: in `applyOperations` upserts, treat empty extracted term lists as no-op/cleanup by skipping empty `sessionTerms` writes for new sessions and deleting stale empty entries after removals, reducing unnecessary index mutations and storage writes.
    - Pass 87: in `rebuildIndex`, skip persisting `sessionTerms` entries for sessions with empty extracted term lists, reducing index size and avoiding unnecessary no-op removal work later.
    - Pass 88: in `tokenize`, replace callback-based `.filter` with indexed token filtering over split parts, reducing closure/iterator overhead on this hot path while preserving tokenization rules.
+   - Pass 89: in `searchSessions`, defer `resultIds` `Set` allocation in 2-term, 3-term, and generic multi-term branches until after posting-list existence checks, avoiding eager allocations on common no-result queries.
 
 ## Release Checklist for v3.1.x
 
