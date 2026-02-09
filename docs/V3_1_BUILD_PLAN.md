@@ -90,6 +90,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 21: defer cloud-sync service import/polling until cloud sync UI is opened or an authenticated cloud profile is detected from lightweight local config.
    - Pass 22: defer MCP client bootstrap in Chat until MCP servers are actually configured, using a lightweight local config snapshot instead of unconditional idle initialization.
    - Pass 23: remove Chat's mount-time responsive-design service import; use local resize-driven breakpoint updates with preserved document breakpoint classes.
+   - Pass 24: defer prompt-variable service import on send unless input text matches variable syntax (`{{...}}`) to reduce first-send overhead for plain prompts.
 
 ## Release Checklist for v3.1.x
 

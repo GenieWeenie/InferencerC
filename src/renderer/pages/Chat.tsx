@@ -233,6 +233,8 @@ const estimateTokensFallback = (text: string): number => {
     return Math.max(1, Math.ceil(normalized.length / 4));
 };
 
+const mightContainPromptVariables = (text: string): boolean => /{{[^{}]+}}/.test(text);
+
 const readPersistedProjectContextFeatureEnabled = (): boolean => {
     try {
         return localStorage.getItem(PROJECT_CONTEXT_FEATURE_ENABLED_KEY) === '1';
@@ -1656,23 +1658,25 @@ const Chat: React.FC = () => {
         let hasChanges = false;
 
         // 1. Process Prompt Variables
-        const promptVariableService = await loadPromptVariableService();
-        if (promptVariableService.hasVariables(textToSend)) {
-            try {
-                const processed = await promptVariableService.processText(textToSend, {
-                    modelId: currentModel,
-                    modelName: availableModels.find(m => m.id === currentModel)?.name,
-                    sessionId: sessionId,
-                    sessionTitle: savedSessions.find(s => s.id === sessionId)?.title,
-                    messageCount: history.length,
-                    userName: promptVariableService.getUserName()
-                });
-                if (processed !== textToSend) {
-                    textToSend = processed;
-                    hasChanges = true;
+        if (mightContainPromptVariables(textToSend)) {
+            const promptVariableService = await loadPromptVariableService();
+            if (promptVariableService.hasVariables(textToSend)) {
+                try {
+                    const processed = await promptVariableService.processText(textToSend, {
+                        modelId: currentModel,
+                        modelName: availableModels.find(m => m.id === currentModel)?.name,
+                        sessionId: sessionId,
+                        sessionTitle: savedSessions.find(s => s.id === sessionId)?.title,
+                        messageCount: history.length,
+                        userName: promptVariableService.getUserName()
+                    });
+                    if (processed !== textToSend) {
+                        textToSend = processed;
+                        hasChanges = true;
+                    }
+                } catch (e) {
+                    console.error("Failed to process variables", e);
                 }
-            } catch (e) {
-                console.error("Failed to process variables", e);
             }
         }
 
