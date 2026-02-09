@@ -80,6 +80,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 11: extract chat empty-state + launch checklist into a lazy component mounted only for zero-history sessions.
    - Pass 12: extract diagnostics popover into a lazy component so diagnostics UI code loads only when the panel opens.
    - Pass 13: lazy-load the performance monitor overlay and mount it only when dev monitors are enabled.
+   - Pass 14: remove uuid runtime usage from prompt storage hook and switch to native ID generation with lazy-safe localStorage hydration.
 
 ## Release Checklist for v3.1.x
 

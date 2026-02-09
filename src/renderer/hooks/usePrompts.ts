@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { v4 as uuidv4 } from 'uuid';
+import { useState } from 'react';
 
 export interface PromptSnippet {
     id: string;
@@ -7,6 +6,8 @@ export interface PromptSnippet {
     title: string; // Description
     content: string;
 }
+
+const PROMPTS_STORAGE_KEY = 'user_prompts';
 
 const DEFAULT_PROMPTS: PromptSnippet[] = [
     {
@@ -35,43 +36,76 @@ const DEFAULT_PROMPTS: PromptSnippet[] = [
     }
 ];
 
-export const usePrompts = () => {
-    const [prompts, setPrompts] = useState<PromptSnippet[]>([]);
+const createPromptId = (): string => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return `prompt_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+};
 
-    useEffect(() => {
-        const saved = localStorage.getItem('user_prompts');
+const loadInitialPrompts = (): PromptSnippet[] => {
+    try {
+        const saved = localStorage.getItem(PROMPTS_STORAGE_KEY);
         if (saved) {
-            setPrompts(JSON.parse(saved));
-        } else {
-            setPrompts(DEFAULT_PROMPTS);
-            localStorage.setItem('user_prompts', JSON.stringify(DEFAULT_PROMPTS));
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) {
+                return parsed;
+            }
         }
-    }, []);
+    } catch {
+        // Fall back to defaults when storage is unavailable or malformed.
+    }
+
+    try {
+        localStorage.setItem(PROMPTS_STORAGE_KEY, JSON.stringify(DEFAULT_PROMPTS));
+    } catch {
+        // Non-fatal: UI can still operate with in-memory defaults.
+    }
+
+    return DEFAULT_PROMPTS;
+};
+
+const persistPrompts = (prompts: PromptSnippet[]) => {
+    try {
+        localStorage.setItem(PROMPTS_STORAGE_KEY, JSON.stringify(prompts));
+    } catch {
+        // Non-fatal: keep runtime state even if persistence fails.
+    }
+};
+
+export const usePrompts = () => {
+    const [prompts, setPrompts] = useState<PromptSnippet[]>(loadInitialPrompts);
 
     const savePrompt = (alias: string, title: string, content: string) => {
-        const newPrompt: PromptSnippet = {
-            id: uuidv4(),
-            alias,
-            title,
-            content
-        };
-        const updated = [...prompts, newPrompt];
-        setPrompts(updated);
-        localStorage.setItem('user_prompts', JSON.stringify(updated));
+        setPrompts((prev) => {
+            const newPrompt: PromptSnippet = {
+                id: createPromptId(),
+                alias,
+                title,
+                content
+            };
+            const updated = [...prev, newPrompt];
+            persistPrompts(updated);
+            return updated;
+        });
     };
 
     const updatePrompt = (id: string, alias: string, title: string, content: string) => {
-        const updated = prompts.map(p =>
-            p.id === id ? { ...p, alias, title, content } : p
-        );
-        setPrompts(updated);
-        localStorage.setItem('user_prompts', JSON.stringify(updated));
+        setPrompts((prev) => {
+            const updated = prev.map(p =>
+                p.id === id ? { ...p, alias, title, content } : p
+            );
+            persistPrompts(updated);
+            return updated;
+        });
     };
 
     const deletePrompt = (id: string) => {
-        const updated = prompts.filter(p => p.id !== id);
-        setPrompts(updated);
-        localStorage.setItem('user_prompts', JSON.stringify(updated));
+        setPrompts((prev) => {
+            const updated = prev.filter(p => p.id !== id);
+            persistPrompts(updated);
+            return updated;
+        });
     };
 
     return {
