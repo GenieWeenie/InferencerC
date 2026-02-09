@@ -128,6 +128,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 59: in `searchIndex`, optimize AND-search intersection by deduping query terms, ordering by smallest posting list first, and short-circuiting when any term has zero candidates.
    - Pass 60: in `searchIndex`, cache per-term posting `Set`s (keyed by posting-array identity and invalidated on index reload/save) so repeated multi-term searches avoid rebuilding identical membership sets each query.
    - Pass 61: in `searchIndex`, replace iterative result-set pruning with a single scan over the smallest posting list plus cached membership checks for remaining terms, cutting mutation overhead during multi-term intersection.
+   - Pass 62: in `searchIndex`, change term removal to in-place splice only when the session ID exists (instead of always rebuilding arrays with `filter`), reducing allocation churn during upsert/delete index maintenance.
 
 ## Release Checklist for v3.1.x
 
