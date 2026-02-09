@@ -241,19 +241,28 @@ export const SearchIndexService = {
             const ids = index.terms[term];
             if (!ids || ids.length === 0) continue;
 
-            let removeIndex = ids.indexOf(sessionId);
-            if (removeIndex === -1) {
+            let writeIndex = 0;
+            let removed = false;
+            for (let readIndex = 0; readIndex < ids.length; readIndex++) {
+                const currentId = ids[readIndex];
+                if (currentId === sessionId) {
+                    removed = true;
+                    continue;
+                }
+                ids[writeIndex] = currentId;
+                writeIndex++;
+            }
+
+            if (!removed) {
                 continue;
             }
 
-            while (removeIndex !== -1) {
-                ids.splice(removeIndex, 1);
-                removeIndex = ids.indexOf(sessionId, removeIndex);
+            if (writeIndex === 0) {
+                delete index.terms[term];
+                continue;
             }
 
-            if (ids.length === 0) {
-                delete index.terms[term];
-            }
+            ids.length = writeIndex;
         }
     },
 
