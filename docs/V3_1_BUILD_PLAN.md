@@ -79,6 +79,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 10: replace integration-availability service imports with lightweight local config checks; load integration services only on action click.
    - Pass 11: extract chat empty-state + launch checklist into a lazy component mounted only for zero-history sessions.
    - Pass 12: extract diagnostics popover into a lazy component so diagnostics UI code loads only when the panel opens.
+   - Pass 13: lazy-load the performance monitor overlay and mount it only when dev monitors are enabled.
 
 ## Release Checklist for v3.1.x
 

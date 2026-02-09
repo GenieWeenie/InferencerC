@@ -6,7 +6,6 @@ import type { LaunchReadinessStep } from '../components/ChatEmptyState';
 import type { LogEntry } from '../components/RequestResponseLog';
 import type { ResponsiveConfig } from '../services/responsiveDesign';
 import type { Tutorial } from '../services/onboarding';
-import { PerformanceMonitorOverlay } from '../components/PerformanceMonitorOverlay';
 import { crashRecoveryService } from '../services/crashRecovery';
 import type { CloudSyncStatus } from '../services/cloudSync';
 const PromptManager = React.lazy(() => import('../components/PromptManager'));
@@ -43,6 +42,9 @@ const RecoveryDialog = React.lazy(() => import('../components/RecoveryDialog'));
 const VariableInsertMenu = React.lazy(() => import('../components/VariableInsertMenu'));
 const ChatEmptyState = React.lazy(() => import('../components/ChatEmptyState'));
 const ChatDiagnosticsPopover = React.lazy(() => import('../components/ChatDiagnosticsPopover'));
+const PerformanceMonitorOverlay = React.lazy(() =>
+    import('../components/PerformanceMonitorOverlay').then((mod) => ({ default: mod.PerformanceMonitorOverlay }))
+);
 const DocumentChatPanel = React.lazy(() =>
     import('../components/DocumentChatPanel').then((mod) => ({ default: mod.DocumentChatPanel }))
 );
@@ -4963,8 +4965,12 @@ const Chat: React.FC = () => {
                 </React.Suspense>
             )}
 
-            {/* Performance Monitor Overlay */}
-            <PerformanceMonitorOverlay messageCount={history.length} />
+            {/* Performance Monitor Overlay (dev-only, on demand) */}
+            {devMonitorsEnabled && (
+                <React.Suspense fallback={null}>
+                    <PerformanceMonitorOverlay messageCount={history.length} />
+                </React.Suspense>
+            )}
 
             {/* Recovery Dialog */}
             {showRecoveryDialog && (
