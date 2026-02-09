@@ -459,7 +459,7 @@ export const SearchIndexService = {
                 return new Set<string>();
             }
 
-            const resultIds = new Set<string>();
+            let resultIds: Set<string> | null = null;
             const scanFirstTerm = firstIds.length <= secondIds.length;
             const candidateIds = scanFirstTerm ? firstIds : secondIds;
             const membershipTerm = scanFirstTerm ? secondTerm : firstTerm;
@@ -469,10 +469,13 @@ export const SearchIndexService = {
             for (let i = 0; i < candidateIds.length; i++) {
                 const sessionId = candidateIds[i];
                 if (membershipSet.has(sessionId)) {
+                    if (!resultIds) {
+                        resultIds = new Set<string>();
+                    }
                     resultIds.add(sessionId);
                 }
             }
-            return resultIds;
+            return resultIds ?? new Set<string>();
         }
         if (queryTermCount === 3) {
             const firstTerm = queryTerms[0];
@@ -486,7 +489,7 @@ export const SearchIndexService = {
                 return new Set<string>();
             }
 
-            const resultIds = new Set<string>();
+            let resultIds: Set<string> | null = null;
             let candidateIds = firstIds;
             let membershipTermA = secondTerm;
             let membershipIdsA = secondIds;
@@ -513,10 +516,13 @@ export const SearchIndexService = {
             for (let i = 0; i < candidateIds.length; i++) {
                 const sessionId = candidateIds[i];
                 if (membershipSetA.has(sessionId) && membershipSetB.has(sessionId)) {
+                    if (!resultIds) {
+                        resultIds = new Set<string>();
+                    }
                     resultIds.add(sessionId);
                 }
             }
-            return resultIds;
+            return resultIds ?? new Set<string>();
         }
 
         const initialIds = index.terms[queryTerms[0]];
