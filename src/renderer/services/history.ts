@@ -12,6 +12,8 @@ const ENCRYPTED_SESSIONS_KEY = 'app_encrypted_sessions'; // Store encrypted sess
 const SESSION_PASSWORDS_KEY = 'app_session_passwords'; // Store password hashes (for verification only)
 const SESSION_DATA_PREFIX = 'app_session_';
 const MESSAGE_CONTENT_PREFIX = 'app_message_content_'; // Store large message content separately
+const SPLIT_STORAGE_MIGRATION_DONE_KEY = 'app_migration_split_storage_v1_done';
+const CHUNK_STORAGE_MIGRATION_DONE_KEY = 'app_migration_chunk_storage_v1_done';
 const CONTENT_CHUNK_THRESHOLD = 1024; // 1KB threshold for chunking
 const RECOVERY_STATE_KEY = 'app_recovery_state';
 type EncryptionServiceType = typeof import('./encryption')['encryptionService'];
@@ -380,8 +382,15 @@ const deleteMessageContents = (sessionId: string): void => {
 // Migration helper (monolithic -> split)
 const migrateStorage = () => {
   try {
+    if (localStorage.getItem(SPLIT_STORAGE_MIGRATION_DONE_KEY) === '1') {
+      return;
+    }
+
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
+    if (!raw) {
+      localStorage.setItem(SPLIT_STORAGE_MIGRATION_DONE_KEY, '1');
+      return;
+    }
 
     // Check if it's already migrated (naive check: if raw size is small vs number of sessions)
     // Better: parse and check structure
@@ -407,6 +416,7 @@ const migrateStorage = () => {
       console.log(`Migrated ${migratedCount} sessions to split storage`);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
     }
+    localStorage.setItem(SPLIT_STORAGE_MIGRATION_DONE_KEY, '1');
   } catch (e) {
     console.error("Migration failed", e);
   }
@@ -415,6 +425,10 @@ const migrateStorage = () => {
 // Migration helper (chunking large messages)
 const migrateToChunkedStorage = () => {
   try {
+    if (localStorage.getItem(CHUNK_STORAGE_MIGRATION_DONE_KEY) === '1') {
+      return;
+    }
+
     const metadataSessions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
 
     metadataSessions.forEach((meta: ChatSession) => {
@@ -443,6 +457,7 @@ const migrateToChunkedStorage = () => {
         HistoryService.saveSession(session);
       }
     });
+    localStorage.setItem(CHUNK_STORAGE_MIGRATION_DONE_KEY, '1');
   } catch (e) {
     console.error("Chunking migration failed", e);
   }
