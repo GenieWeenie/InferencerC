@@ -1,5 +1,4 @@
 import { Message, TokenLogprob, ChatMessage, ChatSession, RecoveryState } from '../../shared/types';
-import { SearchIndexService } from './searchIndex';
 
 export interface ExportedChatHistory {
   version: string;
@@ -16,13 +15,105 @@ const MESSAGE_CONTENT_PREFIX = 'app_message_content_'; // Store large message co
 const CONTENT_CHUNK_THRESHOLD = 1024; // 1KB threshold for chunking
 const RECOVERY_STATE_KEY = 'app_recovery_state';
 type EncryptionServiceType = typeof import('./encryption')['encryptionService'];
+type SearchIndexServiceType = typeof import('./searchIndex')['SearchIndexService'];
 let encryptionServicePromise: Promise<EncryptionServiceType> | null = null;
+let searchIndexServicePromise: Promise<SearchIndexServiceType> | null = null;
+type SearchIndexOperation =
+  | { kind: 'upsert'; session: ChatSession }
+  | { kind: 'delete' };
+const pendingSearchIndexOperations = new Map<string, SearchIndexOperation>();
+let searchIndexFlushTimeout: ReturnType<typeof setTimeout> | null = null;
+let searchIndexFlushIdleId: number | null = null;
 
 const loadEncryptionService = async (): Promise<EncryptionServiceType> => {
   if (!encryptionServicePromise) {
     encryptionServicePromise = import('./encryption').then((mod) => mod.encryptionService);
   }
   return encryptionServicePromise;
+};
+
+const loadSearchIndexService = async (): Promise<SearchIndexServiceType> => {
+  if (!searchIndexServicePromise) {
+    searchIndexServicePromise = import('./searchIndex').then((mod) => mod.SearchIndexService);
+  }
+  return searchIndexServicePromise;
+};
+
+const clearScheduledSearchIndexFlush = (): void => {
+  if (searchIndexFlushTimeout) {
+    clearTimeout(searchIndexFlushTimeout);
+    searchIndexFlushTimeout = null;
+  }
+  if (searchIndexFlushIdleId !== null) {
+    if (typeof window !== 'undefined') {
+      const idleWindow = window as Window & {
+        cancelIdleCallback?: (handle: number) => void;
+      };
+      if (idleWindow.cancelIdleCallback) {
+        idleWindow.cancelIdleCallback(searchIndexFlushIdleId);
+      }
+    }
+    searchIndexFlushIdleId = null;
+  }
+};
+
+const flushPendingSearchIndexOperations = (): void => {
+  clearScheduledSearchIndexFlush();
+  if (pendingSearchIndexOperations.size === 0) {
+    return;
+  }
+
+  const operations = Array.from(pendingSearchIndexOperations.entries());
+  pendingSearchIndexOperations.clear();
+
+  void loadSearchIndexService()
+    .then((searchIndexService) => {
+      operations.forEach(([sessionId, operation]) => {
+        if (operation.kind === 'delete') {
+          searchIndexService.removeSession(sessionId);
+          return;
+        }
+        searchIndexService.indexSession(operation.session);
+      });
+    })
+    .catch((error) => {
+      console.error('Failed to flush search index operations', error);
+    });
+};
+
+const scheduleSearchIndexFlush = (): void => {
+  if (searchIndexFlushTimeout || searchIndexFlushIdleId !== null) {
+    return;
+  }
+
+  if (typeof window !== 'undefined') {
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    };
+
+    if (idleWindow.requestIdleCallback) {
+      searchIndexFlushIdleId = idleWindow.requestIdleCallback(() => {
+        searchIndexFlushIdleId = null;
+        flushPendingSearchIndexOperations();
+      }, { timeout: 1800 });
+      return;
+    }
+  }
+
+  searchIndexFlushTimeout = setTimeout(() => {
+    searchIndexFlushTimeout = null;
+    flushPendingSearchIndexOperations();
+  }, 250);
+};
+
+const queueSearchIndexUpsert = (session: ChatSession): void => {
+  pendingSearchIndexOperations.set(session.id, { kind: 'upsert', session });
+  scheduleSearchIndexFlush();
+};
+
+const queueSearchIndexDelete = (sessionId: string): void => {
+  pendingSearchIndexOperations.set(sessionId, { kind: 'delete' });
+  scheduleSearchIndexFlush();
 };
 
 /**
@@ -391,9 +482,8 @@ export const HistoryService = {
 
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
-
-      // Index the full session content (use original session with full content)
-      SearchIndexService.indexSession(session);
+      // Indexing is deferred to idle time so save paths stay responsive.
+      queueSearchIndexUpsert(session);
     } catch (e) {
       console.error("Failed to save session index", e);
     }
@@ -421,8 +511,8 @@ export const HistoryService = {
     // 5. Remove chunked message content
     deleteMessageContents(id);
 
-    // 6. Remove from search index
-    SearchIndexService.removeSession(id);
+    // 6. Remove from search index (deferred to idle time)
+    queueSearchIndexDelete(id);
   },
 
   /**

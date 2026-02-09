@@ -97,6 +97,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 28: remove `teamWorkspacesService` import from the `useChat` model-refresh path entirely by applying workspace model-policy filtering directly from lightweight persisted workspace data.
    - Pass 29: remove Chat's mount-time `githubService` import for credential-state hydration; use lightweight GitHub credential markers/legacy keys for `githubConfigured` snapshots and reserve `githubService` import for actual GitHub actions.
    - Pass 30: in `history`, defer `encryptionService` module loading (and worker/secure-storage chain) until encrypt/decrypt session paths are used, keeping non-encrypted chat startup lighter.
+   - Pass 31: in `history`, defer search-index module loading and batch session index upsert/delete operations to idle-time flushes, preventing synchronous indexing work on hot save/delete paths.
 
 ## Release Checklist for v3.1.x
 
