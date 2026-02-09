@@ -21,6 +21,7 @@ type SearchIndexBatchOperation =
 const INDEX_STORAGE_KEY = 'app_search_index';
 const TOKEN_CACHE_LIMIT = 512;
 const QUERY_TERM_CACHE_LIMIT = 256;
+const EMPTY_TERMS: string[] = [];
 const STOP_WORDS = new Set([
     'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
     'has', 'have', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'or',
@@ -253,8 +254,8 @@ export const SearchIndexService = {
         for (let opIndex = 0; opIndex < operations.length; opIndex++) {
             const operation = operations[opIndex];
             if (operation.kind === 'delete') {
-                const previousTerms = index.sessionTerms[operation.sessionId] || [];
-                if (!(operation.sessionId in index.sessionTerms) && previousTerms.length === 0) {
+                const previousTerms = index.sessionTerms[operation.sessionId] ?? EMPTY_TERMS;
+                if (previousTerms === EMPTY_TERMS) {
                     continue;
                 }
                 SearchIndexService._removeSessionFromIndex(index, operation.sessionId, previousTerms);
@@ -265,9 +266,9 @@ export const SearchIndexService = {
 
             const session = operation.session;
             const sessionId = session.id;
-            const previousTerms = index.sessionTerms[sessionId] || [];
+            const previousTerms = index.sessionTerms[sessionId] ?? EMPTY_TERMS;
             const terms = extractSessionTerms(session);
-            const hasPreviousEntry = sessionId in index.sessionTerms;
+            const hasPreviousEntry = previousTerms !== EMPTY_TERMS;
 
             if (hasPreviousEntry && hasSameTerms(previousTerms, terms)) {
                 continue;

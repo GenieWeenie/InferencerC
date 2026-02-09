@@ -142,6 +142,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 73: in `searchIndex`, optimize per-term session-id removal by finding the first match before compaction and only rewriting the suffix, avoiding full-array rewrite work when no removal is needed.
    - Pass 74: in `searchIndex`, replace callback-heavy `forEach` iteration in session-term extraction and full rebuild paths with indexed loops, reducing closure/iterator overhead on indexing hot paths.
    - Pass 75: in `searchIndex` two-term fast search path, select candidate/membership sides before building the posting set so only one membership set is created per query.
+   - Pass 76: in `searchIndex` batch apply, replace per-operation `|| []` fallbacks with a shared empty-terms sentinel so missing-session paths avoid transient array allocations and extra key checks.
 
 ## Release Checklist for v3.1.x
 
