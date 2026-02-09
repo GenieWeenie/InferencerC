@@ -538,10 +538,13 @@ export const SearchIndexService = {
 
         const remainingTermSets: Set<string>[] = new Array(queryTerms.length - 1);
         let remainingTermSetIndex = 0;
-        for (let i = 0; i < queryTerms.length; i++) {
-            if (i === smallestTermIndex) {
-                continue;
-            }
+        for (let i = 0; i < smallestTermIndex; i++) {
+            const term = queryTerms[i];
+            const ids = index.terms[term]!;
+            remainingTermSets[remainingTermSetIndex] = getPostingSet(term, ids);
+            remainingTermSetIndex++;
+        }
+        for (let i = smallestTermIndex + 1; i < queryTerms.length; i++) {
             const term = queryTerms[i];
             const ids = index.terms[term]!;
             remainingTermSets[remainingTermSetIndex] = getPostingSet(term, ids);
