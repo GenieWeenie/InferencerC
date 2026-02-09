@@ -108,6 +108,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 39: in `history`, add a storage-value-keyed in-memory session-metadata cache so hot paths (`saveSession`, `deleteSession`, `renameSession`, `togglePinSession`) stop repeatedly reparsing the full metadata JSON on every operation.
    - Pass 40: in `history`, update `renameSession`/`togglePinSession` to patch split-storage session files directly (without `getSession` hydration), avoiding expensive chunk-content rehydration for metadata-only actions.
    - Pass 41: in `useChat`, build webhook `conversation_complete` payloads from in-memory history snapshots when all messages are already loaded, and only fall back to `HistoryService.getSession()` for lazy-placeholder sessions.
+   - Pass 42: in `useChat`, cache full loaded session messages in refs and reuse them for autosave/webhook fallback reconstruction, avoiding repeated `HistoryService.getSession()` reads on lazy-placeholder sessions.
 
 ## Release Checklist for v3.1.x
 

@@ -168,6 +168,8 @@ const filterModelsByWorkspacePolicy = (models: Model[]): Model[] => {
 export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = true) => {
     const didBootstrapSessionsRef = useRef(false);
     const didApplyInitialModelSelectionRef = useRef(false);
+    const loadedSessionIdRef = useRef<string | null>(null);
+    const loadedSessionMessagesRef = useRef<ChatMessage[]>([]);
 
     // Logic State
     const [input, setInput] = useState('');
@@ -520,7 +522,11 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const canPersistCurrentHistoryDirectly = loadedMessageIndices.size >= history.length;
             const needsSessionFallback = !canPersistCurrentHistoryDirectly;
             const existingSessionMessages = needsSessionFallback
-                ? (HistoryService.getSession(sessionId)?.messages ?? [])
+                ? (
+                    loadedSessionIdRef.current === sessionId
+                        ? loadedSessionMessagesRef.current
+                        : (HistoryService.getSession(sessionId)?.messages ?? [])
+                )
                 : [];
             const persistedAt = Date.now();
             const persistedTitle = history.length > 0
@@ -555,6 +561,8 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                 maxTokens,
                 batchSize
             });
+            loadedSessionIdRef.current = sessionId;
+            loadedSessionMessagesRef.current = messagesToSave;
 
             // Keep sidebar history in sync without reparsing full storage every autosave tick.
             setSavedSessions((prev) => {
@@ -645,6 +653,8 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     const createNewSession = () => {
         const newSession = HistoryService.createNewSession(currentModel || 'local-lmstudio');
         setSessionId(newSession.id);
+        loadedSessionIdRef.current = newSession.id;
+        loadedSessionMessagesRef.current = [];
         setHistory([]);
         setSelectedToken(null);
         // Reset lazy loading state
@@ -690,6 +700,8 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const INITIAL_LOAD_COUNT = 50; // Load last 50 messages with full content
             const allMessages = session.messages;
             const messageCount = allMessages.length;
+            loadedSessionIdRef.current = session.id;
+            loadedSessionMessagesRef.current = allMessages;
 
             // Reset lazy loading state
             const newCache = new Map<number, ChatMessage>();
@@ -1191,13 +1203,17 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             });
 
             const canUseInMemoryWebhookSnapshot = Boolean(
-                webhookHistorySnapshot && loadedMessageIndices.size >= webhookHistorySnapshot.length
+                webhookHistorySnapshot
             );
 
             let webhookMessages: ChatMessage[] | null = null;
             let webhookTitle: string | null = null;
 
             if (canUseInMemoryWebhookSnapshot && webhookHistorySnapshot) {
+                const cachedSessionMessages = loadedSessionIdRef.current === sessionId
+                    ? loadedSessionMessagesRef.current
+                    : [];
+                let missingMessages = false;
                 webhookMessages = webhookHistorySnapshot.map((message, index) => {
                     if (index === targetIndex) {
                         return {
@@ -1217,13 +1233,21 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                     if (loadedMessageIndices.has(index) && fullMessageCache.has(index)) {
                         return fullMessageCache.get(index)!;
                     }
+                    if (cachedSessionMessages[index]) {
+                        return cachedSessionMessages[index];
+                    }
+                    missingMessages = true;
                     return message;
                 });
 
-                const savedTitle = savedSessions.find((session) => session.id === sessionId)?.title;
-                webhookTitle = savedTitle && savedTitle.trim().length > 0 && savedTitle !== 'New Chat'
-                    ? savedTitle
-                    : deriveSessionTitleFromMessages(webhookMessages);
+                if (!missingMessages) {
+                    const savedTitle = savedSessions.find((session) => session.id === sessionId)?.title;
+                    webhookTitle = savedTitle && savedTitle.trim().length > 0 && savedTitle !== 'New Chat'
+                        ? savedTitle
+                        : deriveSessionTitleFromMessages(webhookMessages);
+                } else {
+                    webhookMessages = null;
+                }
             } else {
                 // Fallback to persisted session when lazy placeholders are still present.
                 const currentSession = HistoryService.getSession(sessionId);
@@ -1234,6 +1258,8 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             }
 
             if (webhookMessages) {
+                loadedSessionIdRef.current = sessionId;
+                loadedSessionMessagesRef.current = webhookMessages;
                 triggerConversationCompleteWebhooks({
                     sessionId,
                     sessionTitle: webhookTitle || 'New Chat',
