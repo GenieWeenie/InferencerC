@@ -640,7 +640,12 @@ const Chat: React.FC = () => {
         };
     }, []);
 
+    const shouldLoadContextManagement = history.length > 0 || sidebarOpen || projectContextFeatureEnabled;
     React.useEffect(() => {
+        if (!shouldLoadContextManagement || contextManagementService) {
+            return;
+        }
+
         let isMounted = true;
         void loadContextManagementService()
             .then((service) => {
@@ -654,7 +659,7 @@ const Chat: React.FC = () => {
         return () => {
             isMounted = false;
         };
-    }, []);
+    }, [shouldLoadContextManagement, contextManagementService]);
 
     React.useEffect(() => {
         let cancelled = false;
