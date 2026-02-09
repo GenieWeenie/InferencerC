@@ -121,18 +121,22 @@ const getPostingSet = (term: string, ids: string[]): Set<string> => {
 
 const extractSessionTerms = (session: ChatSession): Set<string> => {
     const terms = new Set<string>();
-    SearchIndexService.tokenize(session.title).forEach((term) => {
-        terms.add(term);
-    });
+    const titleTerms = SearchIndexService.tokenize(session.title);
+    for (let i = 0; i < titleTerms.length; i++) {
+        terms.add(titleTerms[i]);
+    }
 
-    session.messages.forEach((msg: any) => {
-        if (typeof msg.content !== 'string') {
-            return;
+    const messages = session.messages as any[];
+    for (let i = 0; i < messages.length; i++) {
+        const content = messages[i]?.content;
+        if (typeof content !== 'string') {
+            continue;
         }
-        SearchIndexService.tokenize(msg.content).forEach((term) => {
-            terms.add(term);
-        });
-    });
+        const contentTerms = SearchIndexService.tokenize(content);
+        for (let j = 0; j < contentTerms.length; j++) {
+            terms.add(contentTerms[j]);
+        }
+    }
 
     return terms;
 };
@@ -423,17 +427,18 @@ export const SearchIndexService = {
     rebuildIndex: (sessions: ChatSession[]) => {
         const index: InvertedIndex = { version: 1, updatedAt: Date.now(), terms: {}, sessionTerms: {} };
 
-        sessions.forEach(session => {
+        for (let sessionIndex = 0; sessionIndex < sessions.length; sessionIndex++) {
+            const session = sessions[sessionIndex];
             const terms = extractSessionTerms(session);
             index.sessionTerms[session.id] = Array.from(terms);
 
-            terms.forEach(term => {
+            for (const term of terms) {
                 if (!index.terms[term]) {
                     index.terms[term] = [];
                 }
                 index.terms[term].push(session.id);
-            });
-        });
+            }
+        }
 
         SearchIndexService.saveIndex(index);
     }

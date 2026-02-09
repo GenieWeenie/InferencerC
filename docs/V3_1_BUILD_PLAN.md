@@ -140,6 +140,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 71: in `searchIndex` upserts, skip per-term `includes(sessionId)` checks for terms already present in the previous session-term set (after they were removed in the same cycle), while retaining checks for newly introduced terms.
    - Pass 72: in `searchIndex` batch apply, replace callback-based `operations.forEach` with indexed iteration and `continue` flow control, trimming closure/callback overhead on frequent deferred index flushes.
    - Pass 73: in `searchIndex`, optimize per-term session-id removal by finding the first match before compaction and only rewriting the suffix, avoiding full-array rewrite work when no removal is needed.
+   - Pass 74: in `searchIndex`, replace callback-heavy `forEach` iteration in session-term extraction and full rebuild paths with indexed loops, reducing closure/iterator overhead on indexing hot paths.
 
 ## Release Checklist for v3.1.x
 
