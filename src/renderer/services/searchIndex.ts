@@ -48,6 +48,24 @@ const hasSameTerms = (previousTerms: string[], nextTerms: Set<string>): boolean 
     return true;
 };
 
+const extractSessionTerms = (session: ChatSession): Set<string> => {
+    const terms = new Set<string>();
+    SearchIndexService.tokenize(session.title).forEach((term) => {
+        terms.add(term);
+    });
+
+    session.messages.forEach((msg: any) => {
+        if (typeof msg.content !== 'string') {
+            return;
+        }
+        SearchIndexService.tokenize(msg.content).forEach((term) => {
+            terms.add(term);
+        });
+    });
+
+    return terms;
+};
+
 export const SearchIndexService = {
     /**
      * Get the current index
@@ -133,15 +151,7 @@ export const SearchIndexService = {
             const session = operation.session;
             const sessionId = session.id;
             const previousTerms = index.sessionTerms[sessionId] || [];
-
-            let fullText = session.title + ' ';
-            session.messages.forEach((msg: any) => {
-                if (typeof msg.content === 'string') {
-                    fullText += msg.content + ' ';
-                }
-            });
-
-            const terms = new Set(SearchIndexService.tokenize(fullText));
+            const terms = extractSessionTerms(session);
             const hasPreviousEntry = sessionId in index.sessionTerms;
 
             if (hasPreviousEntry && hasSameTerms(previousTerms, terms)) {
@@ -236,15 +246,7 @@ export const SearchIndexService = {
         const index: InvertedIndex = { version: 1, updatedAt: Date.now(), terms: {}, sessionTerms: {} };
 
         sessions.forEach(session => {
-            // Tokenize
-            let fullText = session.title + ' ';
-            session.messages.forEach((msg: any) => {
-                if (typeof msg.content === 'string') {
-                    fullText += msg.content + ' ';
-                }
-            });
-
-            const terms = new Set(SearchIndexService.tokenize(fullText));
+            const terms = extractSessionTerms(session);
             index.sessionTerms[session.id] = Array.from(terms);
 
             terms.forEach(term => {

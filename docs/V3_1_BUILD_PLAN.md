@@ -123,6 +123,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 54: batch deferred search-index operations into a single index load/save cycle per flush (instead of per-operation load/save), reducing storage parse/stringify churn during autosave-heavy periods.
    - Pass 55: in `searchIndex`, add a raw-keyed in-memory index cache so repeated search/index operations reuse parsed index objects when storage is unchanged, eliminating repeated `JSON.parse` work on hot query/update paths.
    - Pass 56: in `searchIndex` batch apply, detect no-op upsert/delete operations (unchanged term set or missing session delete) and skip unnecessary index mutations plus storage writes.
+   - Pass 57: in `searchIndex`, replace large concatenated full-text tokenization with segment-based term extraction (title + message strings) to reduce temporary string allocation/GC pressure during indexing.
 
 ## Release Checklist for v3.1.x
 
