@@ -4,7 +4,6 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { LaunchReadinessStep } from '../components/ChatEmptyState';
 import type { LogEntry } from '../components/RequestResponseLog';
-import type { ResponsiveConfig } from '../services/responsiveDesign';
 import type { Tutorial } from '../services/onboarding';
 import { crashRecoveryService } from '../services/crashRecovery';
 import type { CloudSyncStatus } from '../services/cloudSync';
@@ -130,7 +129,6 @@ type WorkflowsService = typeof import('../services/workflows')['workflowsService
 type ApiClientService = typeof import('../services/apiClient')['apiClientService'];
 type ProjectContextService = typeof import('../services/projectContext')['projectContextService'];
 type PromptVariableServiceType = typeof import('../services/promptVariables')['PromptVariableService'];
-type ResponsiveDesignServiceType = typeof import('../services/responsiveDesign')['responsiveDesignService'];
 type ContextManagementServiceType = typeof import('../services/contextManagement')['ContextManagementService'];
 type AnalyticsStoreModule = typeof import('../services/analyticsStore');
 type ActivityLogServiceType = typeof import('../services/activityLog')['activityLogService'];
@@ -143,7 +141,6 @@ let workflowsServicePromise: Promise<WorkflowsService> | null = null;
 let apiClientServicePromise: Promise<ApiClientService> | null = null;
 let projectContextServicePromise: Promise<ProjectContextService> | null = null;
 let promptVariableServicePromise: Promise<PromptVariableServiceType> | null = null;
-let responsiveDesignServicePromise: Promise<ResponsiveDesignServiceType> | null = null;
 let contextManagementServicePromise: Promise<ContextManagementServiceType> | null = null;
 let analyticsStorePromise: Promise<AnalyticsStoreModule> | null = null;
 let activityLogServicePromise: Promise<ActivityLogServiceType> | null = null;
@@ -207,13 +204,6 @@ const loadPromptVariableService = async (): Promise<PromptVariableServiceType> =
         promptVariableServicePromise = import('../services/promptVariables').then((mod) => mod.PromptVariableService);
     }
     return promptVariableServicePromise;
-};
-
-const loadResponsiveDesignService = async (): Promise<ResponsiveDesignServiceType> => {
-    if (!responsiveDesignServicePromise) {
-        responsiveDesignServicePromise = import('../services/responsiveDesign').then((mod) => mod.responsiveDesignService);
-    }
-    return responsiveDesignServicePromise;
 };
 
 const loadContextManagementService = async (): Promise<ContextManagementServiceType> => {
@@ -287,6 +277,28 @@ const readHasConfiguredMcpServers = (): boolean => {
     } catch {
         return false;
     }
+};
+
+type ResponsiveBreakpoint = 'mobile' | 'tablet' | 'desktop' | 'wide';
+
+interface ResponsiveConfig {
+    breakpoint: ResponsiveBreakpoint;
+    isMobile: boolean;
+    isTablet: boolean;
+    isDesktop: boolean;
+    isWide: boolean;
+    width: number;
+    height: number;
+}
+
+const applyResponsiveClasses = (config: ResponsiveConfig): void => {
+    if (typeof document === 'undefined') return;
+
+    document.documentElement.setAttribute('data-breakpoint', config.breakpoint);
+    document.documentElement.classList.toggle('is-mobile', config.isMobile);
+    document.documentElement.classList.toggle('is-tablet', config.isTablet);
+    document.documentElement.classList.toggle('is-desktop', config.isDesktop);
+    document.documentElement.classList.toggle('is-wide', config.isWide);
 };
 
 const getFallbackResponsiveConfig = (): ResponsiveConfig => {
@@ -679,27 +691,17 @@ const Chat: React.FC = () => {
         }
     }, []);
 
-    // Responsive design subscription
     React.useEffect(() => {
-        let isMounted = true;
-        let unsubscribe: (() => void) | null = null;
+        const updateResponsiveConfig = () => {
+            const nextConfig = getFallbackResponsiveConfig();
+            setResponsiveConfig(nextConfig);
+            applyResponsiveClasses(nextConfig);
+        };
 
-        void loadResponsiveDesignService()
-            .then((responsiveDesignService) => {
-                if (!isMounted) return;
-                setResponsiveConfig(responsiveDesignService.getConfig());
-                unsubscribe = responsiveDesignService.subscribe((config) => {
-                    setResponsiveConfig(config);
-                });
-            })
-            .catch(() => {
-                if (!isMounted) return;
-                setResponsiveConfig(getFallbackResponsiveConfig());
-            });
-
+        updateResponsiveConfig();
+        window.addEventListener('resize', updateResponsiveConfig);
         return () => {
-            isMounted = false;
-            unsubscribe?.();
+            window.removeEventListener('resize', updateResponsiveConfig);
         };
     }, []);
 

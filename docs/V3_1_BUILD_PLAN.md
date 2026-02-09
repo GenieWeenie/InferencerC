@@ -89,6 +89,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 20: remove unconditional project-context service preload at chat mount; restore feature state via lightweight persisted flag and load service only when project context is used.
    - Pass 21: defer cloud-sync service import/polling until cloud sync UI is opened or an authenticated cloud profile is detected from lightweight local config.
    - Pass 22: defer MCP client bootstrap in Chat until MCP servers are actually configured, using a lightweight local config snapshot instead of unconditional idle initialization.
+   - Pass 23: remove Chat's mount-time responsive-design service import; use local resize-driven breakpoint updates with preserved document breakpoint classes.
 
 ## Release Checklist for v3.1.x
 
