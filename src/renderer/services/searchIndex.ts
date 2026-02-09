@@ -270,26 +270,33 @@ export const SearchIndexService = {
             return new Set(index.terms[queryTerms[0]] || []);
         }
 
-        // Intersect terms in increasing posting-list size order.
-        const sortedTerms = queryTerms
-            .map((term) => ({
-                term,
-                ids: index.terms[term] || [],
-            }))
-            .sort((a, b) => a.ids.length - b.ids.length);
+        let firstTerm = '';
+        let firstIds: string[] | null = null;
+        const remainingTerms: Array<{ term: string; ids: string[] }> = [];
+        for (let i = 0; i < queryTerms.length; i++) {
+            const term = queryTerms[i];
+            const ids = index.terms[term] || [];
+            if (ids.length === 0) {
+                return resultIds;
+            }
+            if (!firstIds || ids.length < firstIds.length) {
+                if (firstIds) {
+                    remainingTerms.push({ term: firstTerm, ids: firstIds });
+                }
+                firstTerm = term;
+                firstIds = ids;
+            } else {
+                remainingTerms.push({ term, ids });
+            }
+        }
 
-        const firstIds = sortedTerms[0].ids;
-        if (firstIds.length === 0) {
+        if (!firstIds) {
             return resultIds;
         }
 
         const remainingTermSets: Set<string>[] = [];
-        for (let i = 1; i < sortedTerms.length; i++) {
-            const { term, ids: termIdsRaw } = sortedTerms[i];
-            if (termIdsRaw.length === 0) {
-                return resultIds;
-            }
-            remainingTermSets.push(getPostingSet(term, termIdsRaw));
+        for (let i = 0; i < remainingTerms.length; i++) {
+            remainingTermSets.push(getPostingSet(remainingTerms[i].term, remainingTerms[i].ids));
         }
 
         // Scan candidates from the smallest posting list once.
