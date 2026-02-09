@@ -583,10 +583,10 @@ export const SearchIndexService = {
         for (let sessionIndex = 0; sessionIndex < sessions.length; sessionIndex++) {
             const session = sessions[sessionIndex];
             const terms = extractSessionTerms(session);
-            const termList = Array.from(terms);
-            if (termList.length === 0) {
+            if (terms.size === 0) {
                 continue;
             }
+            const termList = Array.from(terms);
             index.sessionTerms[session.id] = termList;
 
             for (let termIndex = 0; termIndex < termList.length; termIndex++) {
