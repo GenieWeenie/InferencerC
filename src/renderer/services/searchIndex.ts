@@ -19,6 +19,7 @@ type SearchIndexBatchOperation =
     | { kind: 'delete'; sessionId: string };
 
 const INDEX_STORAGE_KEY = 'app_search_index';
+const TOKEN_CACHE_LIMIT = 512;
 const STOP_WORDS = new Set([
     'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
     'has', 'have', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'or',
@@ -28,6 +29,7 @@ const STOP_WORDS = new Set([
 ]);
 let indexCache: InvertedIndex | null = null;
 let indexCacheRaw: string | null = null;
+const tokenizeCache = new Map<string, string[]>();
 
 const createEmptyIndex = (): InvertedIndex => ({
     version: 1,
@@ -46,6 +48,19 @@ const hasSameTerms = (previousTerms: string[], nextTerms: Set<string>): boolean 
         }
     }
     return true;
+};
+
+const cacheTokenized = (text: string, tokens: string[]): void => {
+    if (tokenizeCache.has(text)) {
+        tokenizeCache.delete(text);
+    }
+    tokenizeCache.set(text, tokens);
+    if (tokenizeCache.size > TOKEN_CACHE_LIMIT) {
+        const oldestKey = tokenizeCache.keys().next().value;
+        if (oldestKey !== undefined) {
+            tokenizeCache.delete(oldestKey);
+        }
+    }
 };
 
 const extractSessionTerms = (session: ChatSession): Set<string> => {
@@ -121,11 +136,18 @@ export const SearchIndexService = {
      * Tokenize text into unique terms
      */
     tokenize: (text: string): string[] => {
-        return text
+        const cached = tokenizeCache.get(text);
+        if (cached) {
+            return cached;
+        }
+
+        const tokens = text
             .toLowerCase()
             .replace(/[^\w\s]/g, '') // Remove punctuation
             .split(/\s+/)
             .filter(term => term.length > 2 && !STOP_WORDS.has(term));
+        cacheTokenized(text, tokens);
+        return tokens;
     },
 
     /**
