@@ -355,12 +355,11 @@ export const SearchIndexService = {
                 return resultIds;
             }
 
-            let candidateIds = firstIds;
-            let membershipSet = getPostingSet(secondTerm, secondIds);
-            if (secondIds.length < firstIds.length) {
-                candidateIds = secondIds;
-                membershipSet = getPostingSet(firstTerm, firstIds);
-            }
+            const scanFirstTerm = firstIds.length <= secondIds.length;
+            const candidateIds = scanFirstTerm ? firstIds : secondIds;
+            const membershipTerm = scanFirstTerm ? secondTerm : firstTerm;
+            const membershipIds = scanFirstTerm ? secondIds : firstIds;
+            const membershipSet = getPostingSet(membershipTerm, membershipIds);
 
             for (let i = 0; i < candidateIds.length; i++) {
                 const sessionId = candidateIds[i];
