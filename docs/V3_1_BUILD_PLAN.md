@@ -148,6 +148,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 79: in `searchSessions` (>2 terms), prime smallest-list selection from the first term and drop redundant second-pass missing checks, reducing per-query branching while preserving early exits from the initial scan.
    - Pass 80: in `searchSessions`, defer `resultIds` allocation until multi-term paths and replace one-term `|| []` fallback with explicit checks, removing redundant set/array allocations on empty and single-term queries.
    - Pass 81: in `searchIndex` upsert/rebuild paths, materialize each session's `termList` once and reuse it for both posting updates and `sessionTerms` assignment, avoiding duplicate Set iteration and extra conversion work per indexed session.
+   - Pass 82: in `getUniqueQueryTerms`, add a two-token fast path that returns cached tokens directly (or a single-element array for duplicates), avoiding general Set-based dedupe work for common short queries.
 
 ## Release Checklist for v3.1.x
 

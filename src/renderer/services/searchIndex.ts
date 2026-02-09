@@ -91,6 +91,15 @@ const getUniqueQueryTerms = (query: string): string[] => {
         cacheQueryTerms(query, tokens);
         return tokens;
     }
+    if (tokens.length === 2) {
+        if (tokens[0] === tokens[1]) {
+            const deduped = [tokens[0]];
+            cacheQueryTerms(query, deduped);
+            return deduped;
+        }
+        cacheQueryTerms(query, tokens);
+        return tokens;
+    }
 
     const uniqueTerms: string[] = [];
     const seen = new Set<string>();
