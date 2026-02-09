@@ -15,7 +15,7 @@ import { useConversationTree } from '../hooks/useConversationTree';
 import { useLongPress, usePinchZoom, useSwipeNavigation } from '../hooks/useGestures';
 import { calculateEntropy, compressImage } from '../lib/chatDisplayUtils';
 import { useMCP } from '../hooks/useMCP';
-import { readAnalyticsUsageStats, UsageStatsRecord } from '../services/analyticsStore';
+import type { UsageStatsRecord } from '../services/analyticsStore';
 import type { ProjectContext } from '../services/projectContext';
 import { HistoryService } from '../services/history';
 import { activityLogService } from '../services/activityLog';
@@ -128,6 +128,7 @@ type ProjectContextService = typeof import('../services/projectContext')['projec
 type PromptVariableServiceType = typeof import('../services/promptVariables')['PromptVariableService'];
 type ResponsiveDesignServiceType = typeof import('../services/responsiveDesign')['responsiveDesignService'];
 type ContextManagementServiceType = typeof import('../services/contextManagement')['ContextManagementService'];
+type AnalyticsStoreModule = typeof import('../services/analyticsStore');
 
 let cloudSyncServicePromise: Promise<CloudSyncService> | null = null;
 let multiModalAIServicePromise: Promise<MultiModalAIService> | null = null;
@@ -139,6 +140,7 @@ let projectContextServicePromise: Promise<ProjectContextService> | null = null;
 let promptVariableServicePromise: Promise<PromptVariableServiceType> | null = null;
 let responsiveDesignServicePromise: Promise<ResponsiveDesignServiceType> | null = null;
 let contextManagementServicePromise: Promise<ContextManagementServiceType> | null = null;
+let analyticsStorePromise: Promise<AnalyticsStoreModule> | null = null;
 
 const loadOnboardingService = async () => {
     const onboardingModule: OnboardingServiceModule = await import('../services/onboarding');
@@ -213,6 +215,13 @@ const loadContextManagementService = async (): Promise<ContextManagementServiceT
         contextManagementServicePromise = import('../services/contextManagement').then((mod) => mod.ContextManagementService);
     }
     return contextManagementServicePromise;
+};
+
+const loadAnalyticsStore = async (): Promise<AnalyticsStoreModule> => {
+    if (!analyticsStorePromise) {
+        analyticsStorePromise = import('../services/analyticsStore');
+    }
+    return analyticsStorePromise;
 };
 
 const estimateTokensFallback = (text: string): number => {
@@ -476,7 +485,7 @@ const Chat: React.FC = () => {
     const [messageRatings, setMessageRatings] = React.useState<Record<number, 'up' | 'down'>>({});
     const [jsonMode, setJsonMode] = React.useState(false);
     const [showAnalytics, setShowAnalytics] = React.useState(false);
-    const [usageStats, setUsageStats] = React.useState<UsageStatsRecord[]>(() => readAnalyticsUsageStats());
+    const [usageStats, setUsageStats] = React.useState<UsageStatsRecord[]>([]);
     const [comparisonIndex, setComparisonIndex] = React.useState<number | null>(null);
     const [projectContext, setProjectContext] = React.useState<ProjectContext | null>(null);
     const [projectContextFeatureEnabled, setProjectContextFeatureEnabled] = React.useState(false);
@@ -563,6 +572,15 @@ const Chat: React.FC = () => {
 
     // Initialize conversation tree only when branching is enabled.
     const treeHook = useConversationTree(history, { enabled: branchingEnabled });
+
+    const hydrateUsageStats = React.useCallback(async () => {
+        try {
+            const analyticsStore = await loadAnalyticsStore();
+            setUsageStats(analyticsStore.readAnalyticsUsageStats());
+        } catch {
+            setUsageStats([]);
+        }
+    }, []);
 
     // Responsive design subscription
     React.useEffect(() => {
@@ -707,6 +725,11 @@ const Chat: React.FC = () => {
         setApiLogs(activityLogService.getEntries());
         setHasHydratedApiLogs(true);
     }, [showRequestLog, hasHydratedApiLogs]);
+
+    React.useEffect(() => {
+        if (!showAnalytics) return;
+        void hydrateUsageStats();
+    }, [showAnalytics, hydrateUsageStats]);
 
     React.useEffect(() => {
         localStorage.setItem('chat_show_bottom_controls', showBottomControls ? '1' : '0');
@@ -4041,7 +4064,6 @@ const Chat: React.FC = () => {
                             <button
                                 onClick={() => {
                                     setShowAnalytics(true);
-                                    setUsageStats(readAnalyticsUsageStats());
                                 }}
                                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white"
                                 title="View usage analytics and statistics"
