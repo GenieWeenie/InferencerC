@@ -271,11 +271,18 @@ export const SearchIndexService = {
             return cached;
         }
 
-        const tokens = text
+        const rawTokens = text
             .toLowerCase()
             .replace(/[^\w\s]/g, '') // Remove punctuation
-            .split(/\s+/)
-            .filter(term => term.length > 2 && !STOP_WORDS.has(term));
+            .split(/\s+/);
+        const tokens: string[] = [];
+        for (let i = 0; i < rawTokens.length; i++) {
+            const term = rawTokens[i];
+            if (term.length <= 2 || STOP_WORDS.has(term)) {
+                continue;
+            }
+            tokens.push(term);
+        }
         cacheTokenized(text, tokens);
         return tokens;
     },
