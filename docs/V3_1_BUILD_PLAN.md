@@ -134,6 +134,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 65: in `searchIndex`, switch session-removal term scanning from callback-based iteration to indexed loops in `_removeSessionFromIndex`, trimming closure overhead on frequent upsert/delete maintenance paths.
    - Pass 66: in `searchIndex`, replace repeated `indexOf` + `splice` removal with single-pass in-place compaction when deleting a session ID from posting lists, reducing worst-case removal cost and array churn.
    - Pass 67: in `searchIndex`, cache posting arrays during the first query-term scan and reuse them for membership-set setup, avoiding duplicate `index.terms` lookups and fallback array allocations in hot multi-term searches.
+   - Pass 68: in `searchIndex`, add a dedicated two-term search fast path that intersects by scanning only the smaller posting list against one cached membership set, skipping generic multi-term setup for common two-word queries.
 
 ## Release Checklist for v3.1.x
 

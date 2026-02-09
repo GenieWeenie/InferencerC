@@ -279,6 +279,31 @@ export const SearchIndexService = {
         if (queryTerms.length === 1) {
             return new Set(index.terms[queryTerms[0]] || []);
         }
+        if (queryTerms.length === 2) {
+            const firstTerm = queryTerms[0];
+            const secondTerm = queryTerms[1];
+            const firstIds = index.terms[firstTerm];
+            const secondIds = index.terms[secondTerm];
+
+            if (!firstIds || firstIds.length === 0 || !secondIds || secondIds.length === 0) {
+                return resultIds;
+            }
+
+            let candidateIds = firstIds;
+            let membershipSet = getPostingSet(secondTerm, secondIds);
+            if (secondIds.length < firstIds.length) {
+                candidateIds = secondIds;
+                membershipSet = getPostingSet(firstTerm, firstIds);
+            }
+
+            for (let i = 0; i < candidateIds.length; i++) {
+                const sessionId = candidateIds[i];
+                if (membershipSet.has(sessionId)) {
+                    resultIds.add(sessionId);
+                }
+            }
+            return resultIds;
+        }
 
         const termIdsByIndex: string[][] = new Array(queryTerms.length);
         let smallestTermIndex = -1;
