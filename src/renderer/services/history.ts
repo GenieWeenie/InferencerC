@@ -27,6 +27,7 @@ let searchIndexFlushIdleId: number | null = null;
 let sessionsMetadataCache: ChatSession[] | null = null;
 let sessionsMetadataCacheRaw: string | null = null;
 const messageContentWriteCache = new Map<string, string>();
+const chunkKeysBySession = new Map<string, Set<string>>();
 type SessionDataCacheEntry = {
   raw: string;
   parsed: ChatSession;
@@ -195,6 +196,36 @@ const patchStoredSessionMetadata = (
   }
 };
 
+const getChunkContentKey = (sessionId: string, messageIndex: number): string => {
+  return `${MESSAGE_CONTENT_PREFIX}${sessionId}_${messageIndex}`;
+};
+
+const registerChunkKey = (sessionId: string, key: string): void => {
+  let keys = chunkKeysBySession.get(sessionId);
+  if (!keys) {
+    keys = new Set<string>();
+    chunkKeysBySession.set(sessionId, keys);
+  }
+  keys.add(key);
+};
+
+const pruneSessionChunkKeys = (sessionId: string, activeKeys: Set<string>): void => {
+  const existing = chunkKeysBySession.get(sessionId);
+  if (!existing) return;
+
+  existing.forEach((key) => {
+    if (!activeKeys.has(key)) {
+      localStorage.removeItem(key);
+      messageContentWriteCache.delete(key);
+      existing.delete(key);
+    }
+  });
+
+  if (existing.size === 0) {
+    chunkKeysBySession.delete(sessionId);
+  }
+};
+
 /**
  * Calculate message size in bytes
  */
@@ -220,7 +251,8 @@ const shouldChunkMessage = (message: ChatMessage): boolean => {
  * Store message content separately
  */
 const storeMessageContent = (sessionId: string, messageIndex: number, content: string | any): void => {
-  const key = `${MESSAGE_CONTENT_PREFIX}${sessionId}_${messageIndex}`;
+  const key = getChunkContentKey(sessionId, messageIndex);
+  registerChunkKey(sessionId, key);
   const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
   const cached = messageContentWriteCache.get(key);
   if (cached === contentStr) {
@@ -243,9 +275,10 @@ const storeMessageContent = (sessionId: string, messageIndex: number, content: s
  * Load message content from separate storage
  */
 const loadMessageContent = (sessionId: string, messageIndex: number): string | any | null => {
-  const key = `${MESSAGE_CONTENT_PREFIX}${sessionId}_${messageIndex}`;
+  const key = getChunkContentKey(sessionId, messageIndex);
   const content = localStorage.getItem(key);
   if (!content) return null;
+  registerChunkKey(sessionId, key);
   messageContentWriteCache.set(key, content);
 
   // Try to parse as JSON (for multimodal content), fallback to string
@@ -260,21 +293,23 @@ const loadMessageContent = (sessionId: string, messageIndex: number): string | a
  * Delete all message content chunks for a session
  */
 const deleteMessageContents = (sessionId: string): void => {
-  const keysToDelete: string[] = [];
+  const knownKeys = chunkKeysBySession.get(sessionId);
+  const keysToDelete = new Set<string>(knownKeys ? Array.from(knownKeys) : []);
 
-  // Find all keys matching this session's message content
+  // Merge with storage scan so orphan keys from previous runtimes are also removed.
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
     if (key && key.startsWith(`${MESSAGE_CONTENT_PREFIX}${sessionId}_`)) {
-      keysToDelete.push(key);
+      keysToDelete.add(key);
     }
   }
 
   // Delete found keys
-  keysToDelete.forEach(key => {
+  keysToDelete.forEach((key) => {
     localStorage.removeItem(key);
     messageContentWriteCache.delete(key);
   });
+  chunkKeysBySession.delete(sessionId);
 };
 
 // Migration helper (monolithic -> split)
@@ -532,6 +567,7 @@ export const HistoryService = {
    * Save session state (updates both split storage and metadata list)
    */
   saveSession: (session: ChatSession) => {
+    const activeChunkKeys = new Set<string>();
     // Process messages for chunking (store large content separately)
     const processedMessages = session.messages.map((msg, index) => {
       const chatMsg = msg as ChatMessage;
@@ -539,6 +575,7 @@ export const HistoryService = {
       // Check if message should be chunked
       if (shouldChunkMessage(chatMsg)) {
         // Store content separately
+        activeChunkKeys.add(getChunkContentKey(session.id, index));
         storeMessageContent(session.id, index, chatMsg.content);
 
         // Return message with marker indicating content is chunked
@@ -551,6 +588,8 @@ export const HistoryService = {
 
       return chatMsg;
     });
+
+    pruneSessionChunkKeys(session.id, activeChunkKeys);
 
     // Create session with processed messages
     const processedSession = { ...session, messages: processedMessages };
