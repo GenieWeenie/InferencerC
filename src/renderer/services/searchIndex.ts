@@ -162,6 +162,15 @@ const removeSessionIdFromTerm = (index: InvertedIndex, term: string, sessionId: 
         return;
     }
 
+    if (firstMatchIndex === ids.length - 1) {
+        if (firstMatchIndex === 0) {
+            delete index.terms[term];
+            return;
+        }
+        ids.length = firstMatchIndex;
+        return;
+    }
+
     let writeIndex = firstMatchIndex;
     for (let readIndex = firstMatchIndex + 1; readIndex < ids.length; readIndex++) {
         const currentId = ids[readIndex];
