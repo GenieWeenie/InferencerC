@@ -339,14 +339,15 @@ export const SearchIndexService = {
             }
 
             SearchIndexService._removeSessionFromIndex(index, sessionId, previousTerms);
-            const termList = Array.from(terms);
-            if (termList.length === 0) {
+            const termCount = terms.size;
+            if (termCount === 0) {
                 if (hasPreviousEntry) {
                     delete index.sessionTerms[sessionId];
                     didChange = true;
                 }
                 continue;
             }
+            const termList = Array.from(terms);
             const previousTermsLookup = hasPreviousEntry && previousTerms.length > 0
                 ? new Set(previousTerms)
                 : null;
