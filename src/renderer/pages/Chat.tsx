@@ -972,7 +972,18 @@ const Chat: React.FC = () => {
 
     // Check for onboarding on mount
     React.useEffect(() => {
+        if (localStorage.getItem(ONBOARDING_COMPLETED_KEY) === 'true') {
+            return;
+        }
+
         let cancelled = false;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let idleId: number | null = null;
+        const idleWindow = window as Window & {
+            requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+            cancelIdleCallback?: (handle: number) => void;
+        };
+
         const checkOnboarding = async () => {
             try {
                 if (localStorage.getItem(ONBOARDING_COMPLETED_KEY) === 'true') {
@@ -995,9 +1006,24 @@ const Chat: React.FC = () => {
             }
         };
 
-        void checkOnboarding();
+        if (idleWindow.requestIdleCallback) {
+            idleId = idleWindow.requestIdleCallback(() => {
+                void checkOnboarding();
+            }, { timeout: 2500 });
+        } else {
+            timeoutId = setTimeout(() => {
+                void checkOnboarding();
+            }, 800);
+        }
+
         return () => {
             cancelled = true;
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+            if (idleId !== null && idleWindow.cancelIdleCallback) {
+                idleWindow.cancelIdleCallback(idleId);
+            }
         };
     }, []);
 
