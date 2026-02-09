@@ -115,6 +115,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 46: in `history`, track chunk content type (`plain` vs `json`) per key so chunk loads avoid repeated `JSON.parse` exceptions for plain text and preserve string fidelity for newly written JSON-looking text chunks.
    - Pass 47: in `history`, cache message size/chunking decisions by message reference (`WeakMap`) so autosave avoids repeated blob-size computations for unchanged messages.
    - Pass 48: in `history`, cache chunked-message indexes per split-session blob and hydrate only those indexes in `getSession()`, avoiding full-message chunk checks on every read.
+   - Pass 49: in `history`, move storage migrations off synchronous module load and schedule them on idle (with immediate timeout fallback) to reduce startup blocking work.
 
 ## Release Checklist for v3.1.x
 

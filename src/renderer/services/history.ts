@@ -31,6 +31,10 @@ const messageContentKindCache = new Map<string, 'plain' | 'json'>();
 const chunkKeysBySession = new Map<string, Set<string>>();
 const messageSizeCacheByRef = new WeakMap<ChatMessage, number>();
 const chunkDecisionCacheByRef = new WeakMap<ChatMessage, boolean>();
+let storageMigrationsScheduled = false;
+let storageMigrationsCompleted = false;
+let storageMigrationTimeout: ReturnType<typeof setTimeout> | null = null;
+let storageMigrationIdleId: number | null = null;
 type SessionDataCacheEntry = {
   raw: string;
   parsed: ChatSession;
@@ -435,9 +439,46 @@ const migrateToChunkedStorage = () => {
   }
 };
 
-// Run migrations on load
-migrateStorage();
-migrateToChunkedStorage();
+const runStorageMigrations = (): void => {
+  if (storageMigrationsCompleted) return;
+  storageMigrationsCompleted = true;
+  migrateStorage();
+  migrateToChunkedStorage();
+};
+
+const scheduleStorageMigrations = (): void => {
+  if (storageMigrationsScheduled || storageMigrationsCompleted) return;
+  storageMigrationsScheduled = true;
+
+  const run = () => {
+    if (storageMigrationTimeout) {
+      clearTimeout(storageMigrationTimeout);
+      storageMigrationTimeout = null;
+    }
+    storageMigrationIdleId = null;
+    runStorageMigrations();
+  };
+
+  if (typeof window !== 'undefined') {
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    };
+    if (idleWindow.requestIdleCallback) {
+      storageMigrationIdleId = idleWindow.requestIdleCallback(() => {
+        run();
+      }, { timeout: 2000 });
+      return;
+    }
+  }
+
+  storageMigrationTimeout = setTimeout(() => {
+    storageMigrationTimeout = null;
+    run();
+  }, 0);
+};
+
+// Run migrations after first paint/idle so module-load path stays responsive.
+scheduleStorageMigrations();
 
 export const HistoryService = {
   /**
