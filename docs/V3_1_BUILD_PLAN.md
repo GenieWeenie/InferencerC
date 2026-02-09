@@ -95,6 +95,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 26: in `useChat`, defer credential-service/key hydration to idle and skip it entirely when no OpenRouter credential marker exists, while still reacting immediately to `credentials-updated` events.
    - Pass 27: in `useChat`, skip team-workspace service import during model refresh unless an active workspace is detected via lightweight local storage markers; apply model-policy filtering only when needed.
    - Pass 28: remove `teamWorkspacesService` import from the `useChat` model-refresh path entirely by applying workspace model-policy filtering directly from lightweight persisted workspace data.
+   - Pass 29: remove Chat's mount-time `githubService` import for credential-state hydration; use lightweight GitHub credential markers/legacy keys for `githubConfigured` snapshots and reserve `githubService` import for actual GitHub actions.
 
 ## Release Checklist for v3.1.x
 

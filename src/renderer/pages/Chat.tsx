@@ -118,6 +118,8 @@ const ACTIVITY_LOG_COUNT_KEY = 'api_activity_log_count';
 const PROJECT_CONTEXT_FEATURE_ENABLED_KEY = 'project_context_feature_enabled_v1';
 const CLOUD_SYNC_CONFIG_KEY = 'cloud_sync_config_v1';
 const MCP_SERVERS_CONFIG_KEY = 'mcp_servers';
+const GITHUB_CREDENTIAL_MARKER_KEY = 'secure_marker_github_api_key';
+const GITHUB_CREDENTIAL_LEGACY_KEY = 'github_api_key';
 const MAX_ACTIVITY_LOG_ENTRIES = 200;
 
 type OnboardingServiceModule = typeof import('../services/onboarding');
@@ -276,6 +278,17 @@ const readHasConfiguredMcpServers = (): boolean => {
         if (!raw) return false;
         const parsed = JSON.parse(raw) as unknown;
         return Array.isArray(parsed) && parsed.length > 0;
+    } catch {
+        return false;
+    }
+};
+
+const readHasGithubCredentialSnapshot = (): boolean => {
+    try {
+        return Boolean(
+            localStorage.getItem(GITHUB_CREDENTIAL_MARKER_KEY) ||
+            localStorage.getItem(GITHUB_CREDENTIAL_LEGACY_KEY)
+        );
     } catch {
         return false;
     }
@@ -604,7 +617,7 @@ const Chat: React.FC = () => {
     const [showGithubInput, setShowGithubInput] = React.useState(false);
     const [githubUrl, setGithubUrl] = React.useState('');
     const [isFetchingGithub, setIsFetchingGithub] = React.useState(false);
-    const [githubConfigured, setGithubConfigured] = React.useState(false);
+    const [githubConfigured, setGithubConfigured] = React.useState<boolean>(readHasGithubCredentialSnapshot);
 
     // Conversation branching state
     const [showTreeView, setShowTreeView] = React.useState(false);
@@ -1210,38 +1223,22 @@ const Chat: React.FC = () => {
         };
     }, [devMonitorsEnabled, history.length]); // Re-run when history length changes to log message count
 
-    const refreshGithubConfigured = React.useCallback(async () => {
-        try {
-            const { githubService } = await import('../services/github');
-            setGithubConfigured(githubService.isConfigured());
-        } catch {
-            setGithubConfigured(false);
-        }
-    }, []);
-
     React.useEffect(() => {
-        refreshGithubConfigured();
-
-        const handleCredentialsUpdated = () => {
-            refreshGithubConfigured();
-        };
-        const handleFocus = () => {
-            refreshGithubConfigured();
+        const refreshGithubConfiguredSnapshot = () => {
+            setGithubConfigured(readHasGithubCredentialSnapshot());
         };
 
-        window.addEventListener('credentials-updated', handleCredentialsUpdated as EventListener);
-        window.addEventListener('focus', handleFocus);
+        refreshGithubConfiguredSnapshot();
+        window.addEventListener('credentials-updated', refreshGithubConfiguredSnapshot as EventListener);
+        window.addEventListener('focus', refreshGithubConfiguredSnapshot);
+        window.addEventListener('storage', refreshGithubConfiguredSnapshot);
+
         return () => {
-            window.removeEventListener('credentials-updated', handleCredentialsUpdated as EventListener);
-            window.removeEventListener('focus', handleFocus);
+            window.removeEventListener('credentials-updated', refreshGithubConfiguredSnapshot as EventListener);
+            window.removeEventListener('focus', refreshGithubConfiguredSnapshot);
+            window.removeEventListener('storage', refreshGithubConfiguredSnapshot);
         };
-    }, [refreshGithubConfigured]);
-
-    React.useEffect(() => {
-        if (showGithubInput) {
-            refreshGithubConfigured();
-        }
-    }, [showGithubInput, refreshGithubConfigured]);
+    }, []);
 
     // GitHub file fetching
     const executeGithubFetch = async () => {
@@ -1268,7 +1265,6 @@ const Chat: React.FC = () => {
                 setHistory(prev => [...prev, { role: 'user', content }]);
                 toast.success("GitHub file added to conversation context.");
                 setGithubUrl('');
-                refreshGithubConfigured();
             } else {
                 toast.error(result.error || 'Failed to fetch file');
             }
