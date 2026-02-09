@@ -156,6 +156,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 87: in `rebuildIndex`, skip persisting `sessionTerms` entries for sessions with empty extracted term lists, reducing index size and avoiding unnecessary no-op removal work later.
    - Pass 88: in `tokenize`, replace callback-based `.filter` with indexed token filtering over split parts, reducing closure/iterator overhead on this hot path while preserving tokenization rules.
    - Pass 89: in `searchSessions`, defer `resultIds` `Set` allocation in 2-term, 3-term, and generic multi-term branches until after posting-list existence checks, avoiding eager allocations on common no-result queries.
+   - Pass 90: in `getUniqueQueryTerms`, add a four-token dedupe fast path that preserves first-seen order while avoiding general `Set` allocation for common short queries.
 
 ## Release Checklist for v3.1.x
 
