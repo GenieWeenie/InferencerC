@@ -30,6 +30,7 @@ const STOP_WORDS = new Set([
 let indexCache: InvertedIndex | null = null;
 let indexCacheRaw: string | null = null;
 const tokenizeCache = new Map<string, string[]>();
+const postingSetCache = new Map<string, { idsRef: string[]; idsSet: Set<string> }>();
 
 const createEmptyIndex = (): InvertedIndex => ({
     version: 1,
@@ -61,6 +62,20 @@ const cacheTokenized = (text: string, tokens: string[]): void => {
             tokenizeCache.delete(oldestKey);
         }
     }
+};
+
+const clearPostingSetCache = (): void => {
+    postingSetCache.clear();
+};
+
+const getPostingSet = (term: string, ids: string[]): Set<string> => {
+    const cached = postingSetCache.get(term);
+    if (cached && cached.idsRef === ids) {
+        return cached.idsSet;
+    }
+    const idsSet = new Set(ids);
+    postingSetCache.set(term, { idsRef: ids, idsSet });
+    return idsSet;
 };
 
 const extractSessionTerms = (session: ChatSession): Set<string> => {
@@ -102,17 +117,20 @@ export const SearchIndexService = {
                 };
                 indexCache = normalized;
                 indexCacheRaw = raw;
+                clearPostingSetCache();
                 return normalized;
             }
             const empty = createEmptyIndex();
             indexCache = empty;
             indexCacheRaw = raw;
+            clearPostingSetCache();
             return empty;
         } catch (e) {
             console.error('Failed to load search index', e);
             const empty = createEmptyIndex();
             indexCache = empty;
             indexCacheRaw = null;
+            clearPostingSetCache();
             return empty;
         }
     },
@@ -127,6 +145,7 @@ export const SearchIndexService = {
             localStorage.setItem(INDEX_STORAGE_KEY, raw);
             indexCache = index;
             indexCacheRaw = raw;
+            clearPostingSetCache();
         } catch (e) {
             console.error('Failed to save search index', e);
         }
@@ -236,6 +255,9 @@ export const SearchIndexService = {
         const resultIds = new Set<string>();
 
         if (queryTerms.length === 0) return resultIds;
+        if (queryTerms.length === 1) {
+            return new Set(index.terms[queryTerms[0]] || []);
+        }
 
         // Intersect terms in increasing posting-list size order.
         const sortedTerms = queryTerms
@@ -254,12 +276,12 @@ export const SearchIndexService = {
 
         // Filter by subsequent terms
         for (let i = 1; i < sortedTerms.length; i++) {
-            const termIdsRaw = sortedTerms[i].ids;
+            const { term, ids: termIdsRaw } = sortedTerms[i];
             if (termIdsRaw.length === 0) {
                 resultIds.clear();
                 return resultIds;
             }
-            const termIds = new Set(termIdsRaw);
+            const termIds = getPostingSet(term, termIdsRaw);
 
             // Intersection
             for (const id of resultIds) {

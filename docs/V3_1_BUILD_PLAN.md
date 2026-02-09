@@ -126,6 +126,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 57: in `searchIndex`, replace large concatenated full-text tokenization with segment-based term extraction (title + message strings) to reduce temporary string allocation/GC pressure during indexing.
    - Pass 58: in `searchIndex`, add a bounded in-memory tokenize cache (LRU-style eviction) so repeated text tokenization across search/index flows avoids redundant regex/split/filter work.
    - Pass 59: in `searchIndex`, optimize AND-search intersection by deduping query terms, ordering by smallest posting list first, and short-circuiting when any term has zero candidates.
+   - Pass 60: in `searchIndex`, cache per-term posting `Set`s (keyed by posting-array identity and invalidated on index reload/save) so repeated multi-term searches avoid rebuilding identical membership sets each query.
 
 ## Release Checklist for v3.1.x
 
