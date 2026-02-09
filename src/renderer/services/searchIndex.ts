@@ -96,6 +96,36 @@ const extractSessionTerms = (session: ChatSession): Set<string> => {
     return terms;
 };
 
+const removeSessionIdFromTerm = (index: InvertedIndex, term: string, sessionId: string): void => {
+    const ids = index.terms[term];
+    if (!ids || ids.length === 0) {
+        return;
+    }
+
+    let writeIndex = 0;
+    let removed = false;
+    for (let readIndex = 0; readIndex < ids.length; readIndex++) {
+        const currentId = ids[readIndex];
+        if (currentId === sessionId) {
+            removed = true;
+            continue;
+        }
+        ids[writeIndex] = currentId;
+        writeIndex++;
+    }
+
+    if (!removed) {
+        return;
+    }
+
+    if (writeIndex === 0) {
+        delete index.terms[term];
+        return;
+    }
+
+    ids.length = writeIndex;
+};
+
 export const SearchIndexService = {
     /**
      * Get the current index
@@ -235,34 +265,18 @@ export const SearchIndexService = {
      * Internal helper to remove session from index object
      */
     _removeSessionFromIndex: (index: InvertedIndex, sessionId: string, termsHint?: string[]) => {
-        const termsToScan = termsHint && termsHint.length > 0 ? termsHint : Object.keys(index.terms);
-        for (let i = 0; i < termsToScan.length; i++) {
-            const term = termsToScan[i];
-            const ids = index.terms[term];
-            if (!ids || ids.length === 0) continue;
-
-            let writeIndex = 0;
-            let removed = false;
-            for (let readIndex = 0; readIndex < ids.length; readIndex++) {
-                const currentId = ids[readIndex];
-                if (currentId === sessionId) {
-                    removed = true;
-                    continue;
-                }
-                ids[writeIndex] = currentId;
-                writeIndex++;
+        if (termsHint && termsHint.length > 0) {
+            for (let i = 0; i < termsHint.length; i++) {
+                removeSessionIdFromTerm(index, termsHint[i], sessionId);
             }
+            return;
+        }
 
-            if (!removed) {
+        for (const term in index.terms) {
+            if (!Object.prototype.hasOwnProperty.call(index.terms, term)) {
                 continue;
             }
-
-            if (writeIndex === 0) {
-                delete index.terms[term];
-                continue;
-            }
-
-            ids.length = writeIndex;
+            removeSessionIdFromTerm(index, term, sessionId);
         }
     },
 
