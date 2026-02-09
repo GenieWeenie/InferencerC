@@ -102,6 +102,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 33: in `useChat` autosave, skip session fallback reads entirely when in-memory loaded-message coverage already matches history length, avoiding unnecessary storage fetch/parse work on normal chats.
    - Pass 34: in `useChat` autosave, replace full `getAllSessions()` re-hydration with an in-memory metadata patch/reorder for the active session, avoiding repeated full history parsing on each save tick.
    - Pass 35: in `useChat` autosave, bypass per-message reconstruction and persist `history` directly when all messages are already loaded, keeping the heavier merge path only for lazy-placeholder sessions.
+   - Pass 36: in `useChat`, replace rename/pin post-action `getAllSessions()` reloads with local `savedSessions` patch updates to remove avoidable storage parse work during history management actions.
 
 ## Release Checklist for v3.1.x
 

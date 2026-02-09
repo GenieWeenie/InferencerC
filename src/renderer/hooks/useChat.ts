@@ -1529,7 +1529,13 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         deleteSession,
         renameSession: (id: string, newTitle: string) => {
             HistoryService.renameSession(id, newTitle);
-            setSavedSessions(HistoryService.getAllSessions());
+            setSavedSessions((prev) => {
+                const index = prev.findIndex((session) => session.id === id);
+                if (index === -1) return prev;
+                const next = [...prev];
+                next[index] = { ...next[index], title: newTitle };
+                return next;
+            });
             logComplianceEvent({
                 category: 'chat.session',
                 action: 'renamed',
@@ -1541,7 +1547,13 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         },
         togglePinSession: (id: string) => {
             HistoryService.togglePinSession(id);
-            setSavedSessions(HistoryService.getAllSessions());
+            setSavedSessions((prev) => {
+                const index = prev.findIndex((session) => session.id === id);
+                if (index === -1) return prev;
+                const next = [...prev];
+                next[index] = { ...next[index], pinned: !Boolean(next[index].pinned) };
+                return next;
+            });
             logComplianceEvent({
                 category: 'chat.session',
                 action: 'pin_toggled',
