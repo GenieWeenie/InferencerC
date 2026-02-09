@@ -343,13 +343,20 @@ export const SearchIndexService = {
     searchSessions: (query: string): Set<string> => {
         const index = SearchIndexService.getIndex();
         const queryTerms = getUniqueQueryTerms(query);
-        const resultIds = new Set<string>();
-
-        if (queryTerms.length === 0) return resultIds;
-        if (queryTerms.length === 1) {
-            return new Set(index.terms[queryTerms[0]] || []);
+        const queryTermCount = queryTerms.length;
+        if (queryTermCount === 0) {
+            return new Set<string>();
         }
-        if (queryTerms.length === 2) {
+        if (queryTermCount === 1) {
+            const ids = index.terms[queryTerms[0]];
+            if (!ids || ids.length === 0) {
+                return new Set<string>();
+            }
+            return new Set(ids);
+        }
+
+        const resultIds = new Set<string>();
+        if (queryTermCount === 2) {
             const firstTerm = queryTerms[0];
             const secondTerm = queryTerms[1];
             const firstIds = index.terms[firstTerm];
