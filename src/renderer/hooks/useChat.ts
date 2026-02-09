@@ -513,7 +513,8 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         if (!sessionId || !currentModel) return;
 
         const timer = setTimeout(() => {
-            const needsSessionFallback = loadedMessageIndices.size < history.length;
+            const canPersistCurrentHistoryDirectly = loadedMessageIndices.size >= history.length;
+            const needsSessionFallback = !canPersistCurrentHistoryDirectly;
             const existingSessionMessages = needsSessionFallback
                 ? (HistoryService.getSession(sessionId)?.messages ?? [])
                 : [];
@@ -521,19 +522,20 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const persistedTitle = history.length > 0
                 ? (history[0].content.slice(0, 30) + (history[0].content.length > 30 ? '...' : ''))
                 : 'New Chat';
-            // Get full messages from cache for saving
-            const messagesToSave = history.map((msg, index) => {
-                // If message is in cache, use full version
-                if (loadedMessageIndices.has(index) && fullMessageCache.has(index)) {
-                    return fullMessageCache.get(index)!;
-                }
-                // Otherwise, retrieve from the session snapshot loaded once for this save pass.
-                if (existingSessionMessages[index]) {
-                    return existingSessionMessages[index];
-                }
-                // Fallback to current message
-                return msg;
-            });
+            const messagesToSave = canPersistCurrentHistoryDirectly
+                ? history
+                : history.map((msg, index) => {
+                    // If message is in cache, use full version
+                    if (loadedMessageIndices.has(index) && fullMessageCache.has(index)) {
+                        return fullMessageCache.get(index)!;
+                    }
+                    // Otherwise, retrieve from the session snapshot loaded once for this save pass.
+                    if (existingSessionMessages[index]) {
+                        return existingSessionMessages[index];
+                    }
+                    // Fallback to current message
+                    return msg;
+                });
 
             HistoryService.saveSession({
                 id: sessionId,
