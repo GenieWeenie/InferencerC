@@ -139,6 +139,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 70: in `searchIndex`, add an LRU-style cache for deduped query term arrays so repeated searches skip rebuilding unique-term lists from tokenized query text each call.
    - Pass 71: in `searchIndex` upserts, skip per-term `includes(sessionId)` checks for terms already present in the previous session-term set (after they were removed in the same cycle), while retaining checks for newly introduced terms.
    - Pass 72: in `searchIndex` batch apply, replace callback-based `operations.forEach` with indexed iteration and `continue` flow control, trimming closure/callback overhead on frequent deferred index flushes.
+   - Pass 73: in `searchIndex`, optimize per-term session-id removal by finding the first match before compaction and only rewriting the suffix, avoiding full-array rewrite work when no removal is needed.
 
 ## Release Checklist for v3.1.x
 

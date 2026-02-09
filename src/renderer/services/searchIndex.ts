@@ -143,20 +143,18 @@ const removeSessionIdFromTerm = (index: InvertedIndex, term: string, sessionId: 
         return;
     }
 
-    let writeIndex = 0;
-    let removed = false;
-    for (let readIndex = 0; readIndex < ids.length; readIndex++) {
-        const currentId = ids[readIndex];
-        if (currentId === sessionId) {
-            removed = true;
-            continue;
-        }
-        ids[writeIndex] = currentId;
-        writeIndex++;
+    const firstMatchIndex = ids.indexOf(sessionId);
+    if (firstMatchIndex === -1) {
+        return;
     }
 
-    if (!removed) {
-        return;
+    let writeIndex = firstMatchIndex;
+    for (let readIndex = firstMatchIndex + 1; readIndex < ids.length; readIndex++) {
+        const currentId = ids[readIndex];
+        if (currentId !== sessionId) {
+            ids[writeIndex] = currentId;
+            writeIndex++;
+        }
     }
 
     if (writeIndex === 0) {
