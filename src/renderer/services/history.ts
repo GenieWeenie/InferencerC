@@ -27,6 +27,7 @@ let searchIndexFlushIdleId: number | null = null;
 let sessionsMetadataCache: ChatSession[] | null = null;
 let sessionsMetadataCacheRaw: string | null = null;
 const messageContentWriteCache = new Map<string, string>();
+const messageContentKindCache = new Map<string, 'plain' | 'json'>();
 const chunkKeysBySession = new Map<string, Set<string>>();
 type SessionDataCacheEntry = {
   raw: string;
@@ -217,6 +218,7 @@ const pruneSessionChunkKeys = (sessionId: string, activeKeys: Set<string>): void
     if (!activeKeys.has(key)) {
       localStorage.removeItem(key);
       messageContentWriteCache.delete(key);
+      messageContentKindCache.delete(key);
       existing.delete(key);
     }
   });
@@ -253,7 +255,9 @@ const shouldChunkMessage = (message: ChatMessage): boolean => {
 const storeMessageContent = (sessionId: string, messageIndex: number, content: string | any): void => {
   const key = getChunkContentKey(sessionId, messageIndex);
   registerChunkKey(sessionId, key);
-  const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+  const isPlainContent = typeof content === 'string';
+  const contentStr = isPlainContent ? content : JSON.stringify(content);
+  messageContentKindCache.set(key, isPlainContent ? 'plain' : 'json');
   const cached = messageContentWriteCache.get(key);
   if (cached === contentStr) {
     return;
@@ -281,10 +285,28 @@ const loadMessageContent = (sessionId: string, messageIndex: number): string | a
   registerChunkKey(sessionId, key);
   messageContentWriteCache.set(key, content);
 
-  // Try to parse as JSON (for multimodal content), fallback to string
+  const knownKind = messageContentKindCache.get(key);
+  if (knownKind === 'plain') {
+    return content;
+  }
+
+  if (knownKind === 'json') {
+    try {
+      return JSON.parse(content);
+    } catch (e) {
+      // If the content was unexpectedly plain, recover gracefully.
+      messageContentKindCache.set(key, 'plain');
+      return content;
+    }
+  }
+
+  // Backward compatibility for chunk data saved before content-kind tracking existed.
   try {
-    return JSON.parse(content);
+    const parsed = JSON.parse(content);
+    messageContentKindCache.set(key, 'json');
+    return parsed;
   } catch (e) {
+    messageContentKindCache.set(key, 'plain');
     return content;
   }
 };
@@ -308,6 +330,7 @@ const deleteMessageContents = (sessionId: string): void => {
   keysToDelete.forEach((key) => {
     localStorage.removeItem(key);
     messageContentWriteCache.delete(key);
+    messageContentKindCache.delete(key);
   });
   chunkKeysBySession.delete(sessionId);
 };
