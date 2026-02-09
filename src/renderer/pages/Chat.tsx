@@ -561,8 +561,8 @@ const Chat: React.FC = () => {
     const [swipeSessionIndicator, setSwipeSessionIndicator] = React.useState<'previous' | 'next' | null>(null);
     const swipeSessionTimerRef = React.useRef<number | null>(null);
 
-    // Initialize conversation tree (always initialize, will sync when enabled)
-    const treeHook = useConversationTree();
+    // Initialize conversation tree only when branching is enabled.
+    const treeHook = useConversationTree(history, { enabled: branchingEnabled });
 
     // Responsive design subscription
     React.useEffect(() => {
@@ -4562,7 +4562,7 @@ const Chat: React.FC = () => {
             )}
 
             {/* Conversation Tree View */}
-            {branchingEnabled && showTreeView && (
+            {branchingEnabled && showTreeView && treeHook.treeManager && (
                 <React.Suspense fallback={null}>
                     <ConversationTreeView
                         isOpen={showTreeView}

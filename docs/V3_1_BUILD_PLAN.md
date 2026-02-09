@@ -82,6 +82,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 13: lazy-load the performance monitor overlay and mount it only when dev monitors are enabled.
    - Pass 14: remove uuid runtime usage from prompt storage hook and switch to native ID generation with lazy-safe localStorage hydration.
    - Pass 15: lazy-load gesture runtime service from `useGestures` so touch/trackpad gesture code is deferred until gesture hooks are enabled.
+   - Pass 16: defer conversation-tree manager module load until branching is enabled; keep tree sync/view hooks functional once enabled.
 
 ## Release Checklist for v3.1.x
 

@@ -1,138 +1,254 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { ChatMessage } from '../../shared/types';
-import { ConversationTreeManager, ConversationNode } from '../lib/conversationTree';
 
-export const useConversationTree = (initialMessages?: ChatMessage[]) => {
-    const [treeManager] = useState(() => new ConversationTreeManager(initialMessages));
+interface UseConversationTreeOptions {
+    enabled?: boolean;
+}
+
+type ConversationTreeModule = typeof import('../lib/conversationTree');
+type ConversationTreeManagerClass = ConversationTreeModule['ConversationTreeManager'];
+type ConversationTreeManagerInstance = InstanceType<ConversationTreeManagerClass>;
+type ExportedConversationTree = ReturnType<ConversationTreeManagerInstance['exportTree']>;
+
+let conversationTreeModulePromise: Promise<ConversationTreeModule> | null = null;
+
+const loadConversationTreeModule = async (): Promise<ConversationTreeModule> => {
+    if (!conversationTreeModulePromise) {
+        conversationTreeModulePromise = import('../lib/conversationTree').catch((error) => {
+            conversationTreeModulePromise = null;
+            throw error;
+        });
+    }
+    return conversationTreeModulePromise;
+};
+
+export const useConversationTree = (
+    initialMessages: ChatMessage[] = [],
+    options: UseConversationTreeOptions = {}
+) => {
+    const { enabled = true } = options;
+    const treeManagerRef = useRef<ConversationTreeManagerInstance | null>(null);
+    const initialMessagesRef = useRef<ChatMessage[]>(initialMessages);
+    const pendingReplaceMessagesRef = useRef<ChatMessage[] | null>(null);
+    const isLoadingRef = useRef(false);
     const [revision, setRevision] = useState(0); // Force re-renders when tree changes
 
-    // Force a re-render
+    useEffect(() => {
+        initialMessagesRef.current = initialMessages;
+    }, [initialMessages]);
+
     const forceUpdate = useCallback(() => {
         setRevision(prev => prev + 1);
     }, []);
 
+    const initializeTreeManager = useCallback(async () => {
+        if (!enabled || treeManagerRef.current || isLoadingRef.current) {
+            return;
+        }
+
+        isLoadingRef.current = true;
+        try {
+            const { ConversationTreeManager } = await loadConversationTreeModule();
+            const seedMessages = pendingReplaceMessagesRef.current ?? initialMessagesRef.current;
+            pendingReplaceMessagesRef.current = null;
+            treeManagerRef.current = new ConversationTreeManager(seedMessages);
+            forceUpdate();
+        } catch (error) {
+            console.warn('Failed to initialize conversation tree:', error);
+        } finally {
+            isLoadingRef.current = false;
+        }
+    }, [enabled, forceUpdate]);
+
+    useEffect(() => {
+        void initializeTreeManager();
+    }, [initializeTreeManager]);
+
+    const getTreeManager = useCallback(() => treeManagerRef.current, []);
+
     // Get current messages as linear array
     const messages = useMemo(() => {
-        return treeManager.getCurrentMessages();
-    }, [treeManager, revision]);
+        const manager = getTreeManager();
+        return manager ? manager.getCurrentMessages() : [];
+    }, [getTreeManager, revision]);
 
     // Get current path
     const currentPath = useMemo(() => {
-        return treeManager['tree'].currentPath;
-    }, [treeManager, revision]);
+        const manager = getTreeManager();
+        return manager ? manager['tree'].currentPath : ['root'];
+    }, [getTreeManager, revision]);
 
     // Get active node
     const activeNode = useMemo(() => {
-        const activeId = treeManager['tree'].activeBranchId;
-        return treeManager.getNode(activeId);
-    }, [treeManager, revision]);
+        const manager = getTreeManager();
+        if (!manager) return undefined;
+        const activeId = manager['tree'].activeBranchId;
+        return manager.getNode(activeId);
+    }, [getTreeManager, revision]);
 
     // Add a message to the current path
     const addMessage = useCallback((message: ChatMessage) => {
-        const activeId = treeManager['tree'].activeBranchId;
-        treeManager.addNode(message, activeId);
-        treeManager.navigateToNode(treeManager['tree'].activeBranchId);
+        const manager = getTreeManager();
+        if (!manager) {
+            void initializeTreeManager();
+            return;
+        }
+        const activeId = manager['tree'].activeBranchId;
+        manager.addNode(message, activeId);
+        manager.navigateToNode(manager['tree'].activeBranchId);
         forceUpdate();
-    }, [treeManager, forceUpdate]);
+    }, [getTreeManager, forceUpdate, initializeTreeManager]);
 
     // Create a branch from the current node
     const createBranch = useCallback((message: ChatMessage, branchName?: string) => {
-        const activeId = treeManager['tree'].activeBranchId;
-        const newNodeId = treeManager.createBranch(activeId, message, branchName);
+        const manager = getTreeManager();
+        if (!manager) {
+            void initializeTreeManager();
+            return null;
+        }
+        const activeId = manager['tree'].activeBranchId;
+        const newNodeId = manager.createBranch(activeId, message, branchName);
         forceUpdate();
         return newNodeId;
-    }, [treeManager, forceUpdate]);
+    }, [getTreeManager, forceUpdate, initializeTreeManager]);
 
     // Navigate to a specific node
     const navigateToNode = useCallback((nodeId: string) => {
-        treeManager.navigateToNode(nodeId);
+        const manager = getTreeManager();
+        if (!manager) return;
+        manager.navigateToNode(nodeId);
         forceUpdate();
-    }, [treeManager, forceUpdate]);
+    }, [getTreeManager, forceUpdate]);
 
     // Delete a branch
     const deleteBranch = useCallback((nodeId: string) => {
-        treeManager.deleteBranch(nodeId);
+        const manager = getTreeManager();
+        if (!manager) return;
+        manager.deleteBranch(nodeId);
         forceUpdate();
-    }, [treeManager, forceUpdate]);
+    }, [getTreeManager, forceUpdate]);
 
     // Merge branches
     const mergeBranch = useCallback((sourceBranchId: string, targetBranchId: string) => {
-        treeManager.mergeBranch(sourceBranchId, targetBranchId);
+        const manager = getTreeManager();
+        if (!manager) return;
+        manager.mergeBranch(sourceBranchId, targetBranchId);
         forceUpdate();
-    }, [treeManager, forceUpdate]);
+    }, [getTreeManager, forceUpdate]);
 
     // Get siblings of current node
     const getSiblings = useCallback((nodeId?: string) => {
-        const id = nodeId || treeManager['tree'].activeBranchId;
-        return treeManager.getSiblings(id);
-    }, [treeManager, revision]);
+        const manager = getTreeManager();
+        if (!manager) return [];
+        const id = nodeId || manager['tree'].activeBranchId;
+        return manager.getSiblings(id);
+    }, [getTreeManager, revision]);
 
     // Switch to a sibling branch
     const switchToSibling = useCallback((siblingIndex: number) => {
-        const activeId = treeManager['tree'].activeBranchId;
-        treeManager.switchToSibling(activeId, siblingIndex);
+        const manager = getTreeManager();
+        if (!manager) return;
+        const activeId = manager['tree'].activeBranchId;
+        manager.switchToSibling(activeId, siblingIndex);
         forceUpdate();
-    }, [treeManager, forceUpdate]);
+    }, [getTreeManager, forceUpdate]);
 
     // Get current sibling index
     const getCurrentSiblingIndex = useCallback(() => {
-        const activeId = treeManager['tree'].activeBranchId;
-        const activeNode = treeManager.getNode(activeId);
-        if (!activeNode || !activeNode.parentId) return 0;
+        const manager = getTreeManager();
+        if (!manager) return 0;
+        const activeId = manager['tree'].activeBranchId;
+        const active = manager.getNode(activeId);
+        if (!active || !active.parentId) return 0;
 
-        const parent = treeManager.getNode(activeNode.parentId);
+        const parent = manager.getNode(active.parentId);
         if (!parent) return 0;
 
         return parent.children.findIndex(child => child.id === activeId);
-    }, [treeManager, revision]);
+    }, [getTreeManager, revision]);
 
     // Check if a node is in the current path
     const isInCurrentPath = useCallback((nodeId: string) => {
-        return treeManager.isInCurrentPath(nodeId);
-    }, [treeManager, revision]);
+        const manager = getTreeManager();
+        return manager ? manager.isInCurrentPath(nodeId) : false;
+    }, [getTreeManager, revision]);
 
     // Get tree statistics
     const getStats = useCallback(() => {
-        return treeManager.getTreeStats();
-    }, [treeManager, revision]);
+        const manager = getTreeManager();
+        if (!manager) {
+            return {
+                totalNodes: 1,
+                totalBranches: 0,
+                maxDepth: 0,
+                currentDepth: 0,
+            };
+        }
+        return manager.getTreeStats();
+    }, [getTreeManager, revision]);
 
     // Export tree structure
     const exportTree = useCallback(() => {
-        return treeManager.exportTree();
-    }, [treeManager]);
+        const manager = getTreeManager();
+        return manager ? manager.exportTree() : null;
+    }, [getTreeManager]);
 
     // Import tree structure
-    const importTree = useCallback((treeData: ReturnType<typeof treeManager.exportTree>) => {
-        // This will replace the entire tree
-        // Note: Since we can't replace the treeManager instance, we'll need to clear and rebuild
-        const importedManager = ConversationTreeManager.importTree(treeData);
-        // Copy the imported tree into our current manager
-        treeManager['tree'] = importedManager['tree'];
+    const importTree = useCallback((treeData: ExportedConversationTree) => {
+        const manager = getTreeManager();
+        if (!manager) {
+            void loadConversationTreeModule()
+                .then(({ ConversationTreeManager }) => {
+                    treeManagerRef.current = ConversationTreeManager.importTree(treeData);
+                    forceUpdate();
+                })
+                .catch((error) => {
+                    console.warn('Failed to import conversation tree:', error);
+                });
+            return;
+        }
+
+        const importedManager = (manager.constructor as ConversationTreeManagerClass).importTree(treeData);
+        manager['tree'] = importedManager['tree'];
         forceUpdate();
-    }, [treeManager, forceUpdate]);
+    }, [getTreeManager, forceUpdate]);
 
     // Replace all messages (useful for loading from history)
     const replaceMessages = useCallback((newMessages: ChatMessage[]) => {
-        // Create a new tree manager with the new messages
-        const newManager = new ConversationTreeManager(newMessages);
-        // Copy into current manager
-        treeManager['tree'] = newManager['tree'];
+        const manager = getTreeManager();
+        if (!manager) {
+            pendingReplaceMessagesRef.current = newMessages;
+            void initializeTreeManager();
+            return;
+        }
+
+        const ManagerConstructor = manager.constructor as new (messages?: ChatMessage[]) => ConversationTreeManagerInstance;
+        const newManager = new ManagerConstructor(newMessages);
+        manager['tree'] = newManager['tree'];
         forceUpdate();
-    }, [treeManager, forceUpdate]);
+    }, [getTreeManager, forceUpdate, initializeTreeManager]);
 
     // Clear the tree
     const clearTree = useCallback(() => {
-        const newManager = new ConversationTreeManager();
-        treeManager['tree'] = newManager['tree'];
+        const manager = getTreeManager();
+        if (!manager) {
+            pendingReplaceMessagesRef.current = [];
+            void initializeTreeManager();
+            return;
+        }
+
+        const ManagerConstructor = manager.constructor as new () => ConversationTreeManagerInstance;
+        const newManager = new ManagerConstructor();
+        manager['tree'] = newManager['tree'];
         forceUpdate();
-    }, [treeManager, forceUpdate]);
+    }, [getTreeManager, forceUpdate, initializeTreeManager]);
 
     return {
         // State
         messages,
         currentPath,
         activeNode,
-        treeManager,
+        treeManager: treeManagerRef.current,
 
         // Actions
         addMessage,
