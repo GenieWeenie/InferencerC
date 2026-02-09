@@ -116,6 +116,7 @@ const CHAT_PERF_HISTORY_KEY = 'chat_message_perf_benchmarks_v1';
 const CHAT_DEV_MONITORS_ENABLED_KEY = 'chat_dev_monitors_enabled_v1';
 const ONBOARDING_COMPLETED_KEY = 'onboarding_completed';
 const ACTIVITY_LOG_COUNT_KEY = 'api_activity_log_count';
+const PROJECT_CONTEXT_FEATURE_ENABLED_KEY = 'project_context_feature_enabled_v1';
 const MAX_ACTIVITY_LOG_ENTRIES = 200;
 
 type OnboardingServiceModule = typeof import('../services/onboarding');
@@ -238,6 +239,26 @@ const estimateTokensFallback = (text: string): number => {
     const normalized = text.trim();
     if (!normalized) return 0;
     return Math.max(1, Math.ceil(normalized.length / 4));
+};
+
+const readPersistedProjectContextFeatureEnabled = (): boolean => {
+    try {
+        return localStorage.getItem(PROJECT_CONTEXT_FEATURE_ENABLED_KEY) === '1';
+    } catch {
+        return false;
+    }
+};
+
+const persistProjectContextFeatureEnabled = (enabled: boolean): void => {
+    try {
+        if (enabled) {
+            localStorage.setItem(PROJECT_CONTEXT_FEATURE_ENABLED_KEY, '1');
+        } else {
+            localStorage.removeItem(PROJECT_CONTEXT_FEATURE_ENABLED_KEY);
+        }
+    } catch {
+        // Ignore local persistence errors for this optional UI flag.
+    }
 };
 
 const getFallbackResponsiveConfig = (): ResponsiveConfig => {
@@ -522,7 +543,7 @@ const Chat: React.FC = () => {
     const [usageStats, setUsageStats] = React.useState<UsageStatsRecord[]>([]);
     const [comparisonIndex, setComparisonIndex] = React.useState<number | null>(null);
     const [projectContext, setProjectContext] = React.useState<ProjectContext | null>(null);
-    const [projectContextFeatureEnabled, setProjectContextFeatureEnabled] = React.useState(false);
+    const [projectContextFeatureEnabled, setProjectContextFeatureEnabled] = React.useState(readPersistedProjectContextFeatureEnabled);
     const [includeContextInMessages, setIncludeContextInMessages] = React.useState(true);
     const [showGithubInput, setShowGithubInput] = React.useState(false);
     const [githubUrl, setGithubUrl] = React.useState('');
@@ -1564,6 +1585,7 @@ const Chat: React.FC = () => {
 
     const enableProjectContextFeature = React.useCallback(() => {
         setProjectContextFeatureEnabled(true);
+        persistProjectContextFeatureEnabled(true);
     }, []);
 
     // Wrapper for sendMessage that processes variables and includes project context
@@ -1641,23 +1663,6 @@ const Chat: React.FC = () => {
             unsubscribe?.();
         };
     }, [projectContextFeatureEnabled]);
-
-    React.useEffect(() => {
-        let isMounted = true;
-        void loadProjectContextService()
-            .then((projectContextService) => {
-                if (!isMounted) return;
-                if (projectContextService.getContext()) {
-                    setProjectContextFeatureEnabled(true);
-                }
-            })
-            .catch(() => {
-                // Ignore project context preload errors.
-            });
-        return () => {
-            isMounted = false;
-        };
-    }, []);
 
     // Auto-categorization and auto-tagging
     React.useEffect(() => {

@@ -86,6 +86,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 17: defer analytics store import and usage-history hydration until the Analytics dashboard is opened.
    - Pass 18: defer activity-log service import until logs are opened or new entries arrive; keep badge count from lightweight persisted count.
    - Pass 19: defer context-management service import until context tooling is actually used (history present, controls opened, or project-context feature enabled).
+   - Pass 20: remove unconditional project-context service preload at chat mount; restore feature state via lightweight persisted flag and load service only when project context is used.
 
 ## Release Checklist for v3.1.x
 
