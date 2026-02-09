@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { ChatResponse, Message, TokenLogprob, Model, ChatMessage, ChatSession, ToolCall } from '../../shared/types';
 import { HistoryService } from '../services/history';
@@ -166,6 +166,9 @@ const filterModelsByWorkspacePolicy = (models: Model[]): Model[] => {
 };
 
 export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = true) => {
+    const didBootstrapSessionsRef = useRef(false);
+    const didApplyInitialModelSelectionRef = useRef(false);
+
     // Logic State
     const [input, setInput] = useState('');
     const [prefill, setPrefill] = useState<string | null>(null);
@@ -336,8 +339,6 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     };
 
     useEffect(() => {
-        let isInitialLoad = true;
-
         const fetchModels = async () => {
             let models: Model[] = [];
             let localStatus: 'online' | 'offline' = backendHealthService.isOnline() ? 'online' : 'offline';
@@ -394,12 +395,11 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             }
             setConnectionStatus({ local: localStatus, remote: remoteStatus });
 
-            // Restore last model selection from localStorage (only on initial load)
-            if (isInitialLoad) {
-                isInitialLoad = false;
+            // Restore last model selection from localStorage once, after models are first available.
+            if (!didApplyInitialModelSelectionRef.current && models.length > 0) {
+                didApplyInitialModelSelectionRef.current = true;
                 setCurrentModel(prevModel => {
-                    // Only set if not already set
-                    if (!prevModel && models.length > 0) {
+                    if (!prevModel) {
                         const lastModel = localStorage.getItem('app_last_model');
                         if (lastModel && models.some(m => m.id === lastModel)) {
                             return lastModel;
@@ -426,15 +426,6 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             window.addEventListener('chat-refresh-connections', handleConnectionRefresh as EventListener);
         }
 
-        setSavedSessions(HistoryService.getAllSessions());
-        const lastId = HistoryService.getLastActiveSessionId();
-
-        if (lastId) {
-            loadSession(lastId);
-        } else {
-            createNewSession();
-        }
-
         return () => {
             clearInterval(interval);
             if (typeof window !== 'undefined') {
@@ -443,6 +434,19 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             }
         };
     }, [openRouterApiKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        if (didBootstrapSessionsRef.current) return;
+        didBootstrapSessionsRef.current = true;
+
+        setSavedSessions(HistoryService.getAllSessions());
+        const lastId = HistoryService.getLastActiveSessionId();
+        if (lastId) {
+            loadSession(lastId);
+        } else {
+            createNewSession();
+        }
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Separate effect to handle model switching with proper history dependency
     useEffect(() => {

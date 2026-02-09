@@ -104,6 +104,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 35: in `useChat` autosave, bypass per-message reconstruction and persist `history` directly when all messages are already loaded, keeping the heavier merge path only for lazy-placeholder sessions.
    - Pass 36: in `useChat`, replace rename/pin post-action `getAllSessions()` reloads with local `savedSessions` patch updates to remove avoidable storage parse work during history management actions.
    - Pass 37: in `useChat`, replace new/delete session post-action `getAllSessions()` reloads with local `savedSessions` patch updates, reducing unnecessary full history reads on session lifecycle actions.
+   - Pass 38: in `useChat`, split one-time session bootstrap from model polling so OpenRouter credential refreshes no longer rerun `getAllSessions()` + `loadSession`, preventing redundant history rehydration and session churn on key updates.
 
 ## Release Checklist for v3.1.x
 
