@@ -19,12 +19,18 @@ import {
     normalizeChatSearchQuery,
 } from '../lib/chatSearch';
 import {
-    buildChatRowMetadata,
     buildSearchResultRows,
+    createChatRowMetadataCacheState,
     EXPERIMENTAL_FEATURE_MENU_ITEMS,
+    getCachedChatRowMetadata,
     type ExperimentalFeatureMenuItem,
     type SearchResultPreviewCacheEntry,
 } from '../lib/chatRenderModels';
+import {
+    getMessageActionCapabilities,
+    isLongPressActionAllowed,
+    type ChatMessageAction,
+} from '../lib/chatMessageActions';
 import {
     dispatchChatShortcutAction,
     isTypingShortcutTarget,
@@ -715,6 +721,10 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
         ? msg.tool_calls as ToolCallEntry[]
         : EMPTY_TOOL_CALLS;
     const hasToolCalls = toolCalls.length > 0;
+    const messageActionCapabilities = React.useMemo(
+        () => getMessageActionCapabilities(msg),
+        [msg.role, msg.isLoading]
+    );
 
     const comparisonDetails = React.useMemo(() => {
         if (!nextMessage) {
@@ -809,8 +819,8 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                     onToggleBookmark={handleToggleBookmark}
                     onCopy={handleCopyMessage}
                     onDelete={handleDeleteMessage}
-                    onEdit={msg.role === 'user' ? handleEditMessageAction : undefined}
-                    onRegenerate={msg.role === 'assistant' && !msg.isLoading ? handleRegenerateMessageAction : undefined}
+                    onEdit={messageActionCapabilities.canEdit ? handleEditMessageAction : undefined}
+                    onRegenerate={messageActionCapabilities.canRegenerate ? handleRegenerateMessageAction : undefined}
                     onBranch={handleBranchConversationAction}
                 />
                 {msg.role === 'assistant' ? (
@@ -1487,6 +1497,109 @@ const TopHeaderModelUtilityControls: React.FC<TopHeaderModelUtilityControlsProps
     prev.diagnosticsPopover === next.diagnosticsPopover
 ));
 
+interface HeaderConnectionStatusProps {
+    localStatus: 'online' | 'offline' | 'checking' | 'none';
+    remoteStatus: 'online' | 'offline' | 'checking' | 'none';
+}
+
+const getConnectionStatusDotClassName = (status: HeaderConnectionStatusProps['localStatus']): string => {
+    if (status === 'online') {
+        return 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]';
+    }
+    if (status === 'checking') {
+        return 'bg-amber-500 animate-pulse';
+    }
+    return 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.5)]';
+};
+
+const HeaderConnectionStatus: React.FC<HeaderConnectionStatusProps> = React.memo(({
+    localStatus,
+    remoteStatus,
+}) => (
+    <div className="flex items-center gap-2 pl-2 border-l border-slate-800 h-6 self-center flex-shrink-0">
+        <div className="flex flex-col items-center" title={`LM Studio: ${localStatus}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${getConnectionStatusDotClassName(localStatus)}`} />
+            <span className="text-[7px] uppercase font-bold text-slate-500 tracking-tighter">Local</span>
+        </div>
+        {remoteStatus !== 'none' && (
+            <div className="flex flex-col items-center" title={`OpenRouter: ${remoteStatus}`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${getConnectionStatusDotClassName(remoteStatus)}`} />
+                <span className="text-[7px] uppercase font-bold text-slate-500 tracking-tighter">OR</span>
+            </div>
+        )}
+    </div>
+), (prev, next) => (
+    prev.localStatus === next.localStatus &&
+    prev.remoteStatus === next.remoteStatus
+));
+
+interface SearchToolbarControlsProps {
+    hasResults: boolean;
+    currentSearchIndex: number;
+    searchResultsCount: number;
+    showSearchResultsList: boolean;
+    onToggleSearchResultsList: () => void;
+    onPreviousSearchResult: () => void;
+    onNextSearchResult: () => void;
+    onCloseSearch: () => void;
+}
+
+const SearchToolbarControls: React.FC<SearchToolbarControlsProps> = React.memo(({
+    hasResults,
+    currentSearchIndex,
+    searchResultsCount,
+    showSearchResultsList,
+    onToggleSearchResultsList,
+    onPreviousSearchResult,
+    onNextSearchResult,
+    onCloseSearch,
+}) => (
+    <>
+        {hasResults && (
+            <div className="flex items-center gap-2">
+                <button
+                    onClick={onToggleSearchResultsList}
+                    className="px-2 py-1.5 hover:bg-slate-700 rounded transition-colors text-sm text-slate-400 hover:text-white flex items-center gap-1"
+                    title="Show all results"
+                >
+                    <span>{currentSearchIndex + 1} / {searchResultsCount}</span>
+                    {showSearchResultsList ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+                <button
+                    onClick={onPreviousSearchResult}
+                    className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                    title="Previous result"
+                >
+                    <ChevronUp size={16} className="text-slate-400" />
+                </button>
+                <button
+                    onClick={onNextSearchResult}
+                    className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                    title="Next result"
+                >
+                    <ChevronDown size={16} className="text-slate-400" />
+                </button>
+            </div>
+        )}
+        <button
+            onClick={onCloseSearch}
+            className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+            title="Close search"
+        >
+            <X size={16} className="text-slate-400" />
+        </button>
+    </>
+), (prev, next) => (
+    prev.hasResults === next.hasResults &&
+    prev.currentSearchIndex === next.currentSearchIndex &&
+    prev.searchResultsCount === next.searchResultsCount &&
+    prev.showSearchResultsList === next.showSearchResultsList &&
+    prev.onToggleSearchResultsList === next.onToggleSearchResultsList &&
+    prev.onPreviousSearchResult === next.onPreviousSearchResult &&
+    prev.onNextSearchResult === next.onNextSearchResult &&
+    prev.onCloseSearch === next.onCloseSearch
+));
+
 const readPersistedApiLogCount = (): number => {
     try {
         const rawCount = localStorage.getItem(ACTIVITY_LOG_COUNT_KEY);
@@ -1640,6 +1753,7 @@ const Chat: React.FC = () => {
     const virtuosoRef = React.useRef<any>(null);
     const [VirtuosoComponent, setVirtuosoComponent] = React.useState<any>(null);
     const searchResultPreviewCacheRef = React.useRef<Map<number, SearchResultPreviewCacheEntry>>(new Map());
+    const rowMetadataCacheRef = React.useRef(createChatRowMetadataCacheState());
 
     // FPS monitoring refs
     const fpsFrameCount = React.useRef(0);
@@ -3778,51 +3892,51 @@ const Chat: React.FC = () => {
         setLongPressMenu(null);
     }, []);
 
-    const handleLongPressAction = React.useCallback((action: 'copy' | 'bookmark' | 'edit' | 'regenerate' | 'branch' | 'delete') => {
+    const longPressActionHandlers = React.useMemo<Record<ChatMessageAction, (index: number, message: any) => void>>(() => ({
+        copy: (_index, message) => {
+            navigator.clipboard.writeText(message.content || '');
+            toast.success('Copied to clipboard');
+        },
+        bookmark: (index) => {
+            toggleBookmark(index);
+        },
+        edit: (index) => {
+            handleEditMessage(index);
+        },
+        regenerate: (index) => {
+            handleRegenerateResponse(index);
+        },
+        branch: (index) => {
+            handleBranchConversation(index);
+        },
+        delete: (index) => {
+            deleteMessage(index);
+        },
+    }), [
+        deleteMessage,
+        handleBranchConversation,
+        handleEditMessage,
+        handleRegenerateResponse,
+        toggleBookmark,
+    ]);
+
+    const handleLongPressAction = React.useCallback((action: ChatMessageAction) => {
         if (!longPressMenu) return;
 
         const index = longPressMenu.messageIndex;
         const message = history[index];
         if (!message) return;
 
-        switch (action) {
-            case 'copy':
-                navigator.clipboard.writeText(message.content || '');
-                toast.success('Copied to clipboard');
-                break;
-            case 'bookmark':
-                toggleBookmark(index);
-                break;
-            case 'edit':
-                if (message.role === 'user') {
-                    handleEditMessage(index);
-                }
-                break;
-            case 'regenerate':
-                if (message.role === 'assistant' && !message.isLoading) {
-                    handleRegenerateResponse(index);
-                }
-                break;
-            case 'branch':
-                handleBranchConversation(index);
-                break;
-            case 'delete':
-                deleteMessage(index);
-                break;
-            default:
-                break;
+        if (isLongPressActionAllowed(action, message)) {
+            longPressActionHandlers[action](index, message);
         }
 
         closeLongPressMenu();
     }, [
         closeLongPressMenu,
-        deleteMessage,
-        handleBranchConversation,
-        handleEditMessage,
-        handleRegenerateResponse,
         history,
+        longPressActionHandlers,
         longPressMenu,
-        toggleBookmark,
     ]);
 
     usePinchZoom((event) => {
@@ -4104,7 +4218,21 @@ const Chat: React.FC = () => {
     const onEditingContentChange = React.useCallback((value: string) => {
         setEditedMessageContent(value);
     }, []);
-    const rowMetadataByIndex = React.useMemo(() => buildChatRowMetadata({
+    const handleToggleSearchResultsList = React.useCallback(() => {
+        setShowSearchResultsList((prev) => !prev);
+    }, []);
+    const handlePreviousSearchResult = React.useCallback(() => {
+        setCurrentSearchIndex((prev) => (prev > 0 ? prev - 1 : searchResults.length - 1));
+    }, [searchResults.length]);
+    const handleNextSearchResult = React.useCallback(() => {
+        setCurrentSearchIndex((prev) => (prev < searchResults.length - 1 ? prev + 1 : 0));
+    }, [searchResults.length]);
+    const handleCloseSearchPanel = React.useCallback(() => {
+        setShowSearch(false);
+        setSearchQuery('');
+        setShowSearchResultsList(false);
+    }, []);
+    const rowMetadataByIndex = React.useMemo(() => getCachedChatRowMetadata({
         history,
         editingMessageIndex,
         searchResultSet,
@@ -4115,7 +4243,7 @@ const Chat: React.FC = () => {
         messageRatings,
         editedMessageContent,
         loadedMessageIndices,
-    }), [
+    }, rowMetadataCacheRef.current), [
         history,
         editingMessageIndex,
         searchResultSet,
@@ -4227,6 +4355,10 @@ const Chat: React.FC = () => {
     }, [searchResultRows, currentSearchIndex, navigateToSearchResult]);
 
     const longPressMessage = longPressMenu ? history[longPressMenu.messageIndex] : null;
+    const longPressMessageCapabilities = React.useMemo(
+        () => getMessageActionCapabilities(longPressMessage),
+        [longPressMessage?.role, longPressMessage?.isLoading]
+    );
     const composerBottomInset = isCompactViewport ? 16 : 24;
     const messageListFooterHeight = Math.max(132, composerOverlayHeight + composerBottomInset + 16);
 
@@ -4309,19 +4441,10 @@ const Chat: React.FC = () => {
                         diagnosticsPopover={diagnosticsPopover}
                     />
 
-                    {/* Connection Status Indicator */}
-                    <div className="flex items-center gap-2 pl-2 border-l border-slate-800 h-6 self-center flex-shrink-0">
-                        <div className="flex flex-col items-center" title={`LM Studio: ${connectionStatus.local}`}>
-                            <div className={`w-1.5 h-1.5 rounded-full ${connectionStatus.local === 'online' ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]' : connectionStatus.local === 'checking' ? 'bg-amber-500 animate-pulse' : 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.5)]'}`} />
-                            <span className="text-[7px] uppercase font-bold text-slate-500 tracking-tighter">Local</span>
-                        </div>
-                        {connectionStatus.remote !== 'none' && (
-                            <div className="flex flex-col items-center" title={`OpenRouter: ${connectionStatus.remote}`}>
-                                <div className={`w-1.5 h-1.5 rounded-full ${connectionStatus.remote === 'online' ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]' : connectionStatus.remote === 'checking' ? 'bg-amber-500 animate-pulse' : 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.5)]'}`} />
-                                <span className="text-[7px] uppercase font-bold text-slate-500 tracking-tighter">OR</span>
-                            </div>
-                        )}
-                    </div>
+                    <HeaderConnectionStatus
+                        localStatus={connectionStatus.local}
+                        remoteStatus={connectionStatus.remote}
+                    />
                 </div>
 
                 {/* Search Bar */}
@@ -4347,43 +4470,16 @@ const Chat: React.FC = () => {
                                             autoFocus
                                         />
                                     </div>
-                                    {searchResults.length > 0 && (
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                onClick={() => setShowSearchResultsList(!showSearchResultsList)}
-                                                className="px-2 py-1.5 hover:bg-slate-700 rounded transition-colors text-sm text-slate-400 hover:text-white flex items-center gap-1"
-                                                title="Show all results"
-                                            >
-                                                <span>{currentSearchIndex + 1} / {searchResults.length}</span>
-                                                {showSearchResultsList ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                                            </button>
-                                            <button
-                                                onClick={() => setCurrentSearchIndex(prev => (prev > 0 ? prev - 1 : searchResults.length - 1))}
-                                                className="p-1.5 hover:bg-slate-700 rounded transition-colors"
-                                                title="Previous result"
-                                            >
-                                                <ChevronUp size={16} className="text-slate-400" />
-                                            </button>
-                                            <button
-                                                onClick={() => setCurrentSearchIndex(prev => (prev < searchResults.length - 1 ? prev + 1 : 0))}
-                                                className="p-1.5 hover:bg-slate-700 rounded transition-colors"
-                                                title="Next result"
-                                            >
-                                                <ChevronDown size={16} className="text-slate-400" />
-                                            </button>
-                                        </div>
-                                    )}
-                                    <button
-                                        onClick={() => {
-                                            setShowSearch(false);
-                                            setSearchQuery('');
-                                            setShowSearchResultsList(false);
-                                        }}
-                                        className="p-1.5 hover:bg-slate-700 rounded transition-colors"
-                                        title="Close search"
-                                    >
-                                        <X size={16} className="text-slate-400" />
-                                    </button>
+                                    <SearchToolbarControls
+                                        hasResults={searchResults.length > 0}
+                                        currentSearchIndex={currentSearchIndex}
+                                        searchResultsCount={searchResults.length}
+                                        showSearchResultsList={showSearchResultsList}
+                                        onToggleSearchResultsList={handleToggleSearchResultsList}
+                                        onPreviousSearchResult={handlePreviousSearchResult}
+                                        onNextSearchResult={handleNextSearchResult}
+                                        onCloseSearch={handleCloseSearchPanel}
+                                    />
                                 </div>
 
                                 {/* Virtualized search results list */}
@@ -4537,7 +4633,7 @@ const Chat: React.FC = () => {
                                 <Star size={14} className="text-yellow-400" />
                                 <span>{bookmarkedMessages.has(longPressMenu.messageIndex) ? 'Remove bookmark' : 'Bookmark message'}</span>
                             </button>
-                            {longPressMessage.role === 'user' && (
+                            {longPressMessageCapabilities.canEdit && (
                                 <button
                                     onClick={() => handleLongPressAction('edit')}
                                     className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 text-slate-200 text-sm transition-colors"
@@ -4546,7 +4642,7 @@ const Chat: React.FC = () => {
                                     <span>Edit message</span>
                                 </button>
                             )}
-                            {longPressMessage.role === 'assistant' && !longPressMessage.isLoading && (
+                            {longPressMessageCapabilities.canRegenerate && (
                                 <button
                                     onClick={() => handleLongPressAction('regenerate')}
                                     className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 text-slate-200 text-sm transition-colors"

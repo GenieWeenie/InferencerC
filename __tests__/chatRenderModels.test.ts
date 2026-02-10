@@ -2,7 +2,9 @@ import type { ChatMessage } from '../src/shared/types';
 import {
   buildChatRowMetadata,
   buildSearchResultRows,
+  createChatRowMetadataCacheState,
   EXPERIMENTAL_FEATURE_MENU_ITEMS,
+  getCachedChatRowMetadata,
 } from '../src/renderer/lib/chatRenderModels';
 
 describe('chatRenderModels', () => {
@@ -121,5 +123,56 @@ describe('chatRenderModels', () => {
     expect(rows[0].preview).toBe('new c...');
     expect(nextPreviewCache.get(0)).not.toBe(oldEntry);
     expect(nextPreviewCache.get(0)?.signature).toBe('assistant\u0000new content body');
+  });
+
+  it('reuses cached row metadata for identical history signature inputs', () => {
+    const history: ChatMessage[] = [
+      { role: 'user', content: 'a' },
+      { role: 'assistant', content: 'b' },
+    ];
+    const cacheState = createChatRowMetadataCacheState();
+    const params = {
+      history,
+      editingMessageIndex: null,
+      searchResultSet: new Set<number>([1]),
+      activeSearchMessageIndex: 1,
+      comparisonIndex: null,
+      bookmarkedMessages: new Set<number>(),
+      selectedToken: null,
+      messageRatings: {} as Record<number, 'up' | 'down'>,
+      editedMessageContent: '',
+      loadedMessageIndices: new Set<number>([0, 1]),
+    };
+
+    const first = getCachedChatRowMetadata(params, cacheState, 4);
+    const second = getCachedChatRowMetadata(params, cacheState, 4);
+
+    expect(second).toBe(first);
+    expect(cacheState.entries).toHaveLength(1);
+  });
+
+  it('bounds row metadata cache size with oldest-entry eviction', () => {
+    const history: ChatMessage[] = [{ role: 'assistant', content: 'm' }];
+    const cacheState = createChatRowMetadataCacheState();
+    const buildWithText = (text: string) => getCachedChatRowMetadata({
+      history,
+      editingMessageIndex: 0,
+      searchResultSet: new Set<number>(),
+      activeSearchMessageIndex: undefined,
+      comparisonIndex: null,
+      bookmarkedMessages: new Set<number>(),
+      selectedToken: null,
+      messageRatings: {} as Record<number, 'up' | 'down'>,
+      editedMessageContent: text,
+      loadedMessageIndices: new Set<number>(),
+    }, cacheState, 3);
+
+    buildWithText('one');
+    buildWithText('two');
+    buildWithText('three');
+    buildWithText('four');
+
+    expect(cacheState.entries).toHaveLength(3);
+    expect(cacheState.entries.some((entry) => entry.signature.includes(':one'))).toBe(false);
   });
 });

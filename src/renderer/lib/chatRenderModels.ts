@@ -47,6 +47,68 @@ interface BuildChatRowMetadataParams {
   loadedMessageIndices: Set<number>;
 }
 
+export interface ChatRowMetadataCacheEntry {
+  historyRef: ChatMessage[];
+  signature: string;
+  metadata: ChatRowMetadata[];
+}
+
+export interface ChatRowMetadataCacheState {
+  entries: ChatRowMetadataCacheEntry[];
+  objectIds: WeakMap<object, number>;
+  nextObjectId: number;
+}
+
+const DEFAULT_CHAT_ROW_METADATA_CACHE_LIMIT = 8;
+
+export const createChatRowMetadataCacheState = (): ChatRowMetadataCacheState => ({
+  entries: [],
+  objectIds: new WeakMap<object, number>(),
+  nextObjectId: 1,
+});
+
+const summarizeKeyText = (value: string): string => {
+  if (!value) {
+    return '0:';
+  }
+  if (value.length <= 24) {
+    return `${value.length}:${value}`;
+  }
+  return `${value.length}:${value.slice(0, 12)}:${value.slice(-12)}`;
+};
+
+const getObjectIdentity = (state: ChatRowMetadataCacheState, value: unknown): number => {
+  if (!value || (typeof value !== 'object' && typeof value !== 'function')) {
+    return 0;
+  }
+
+  const target = value as object;
+  const existing = state.objectIds.get(target);
+  if (existing) {
+    return existing;
+  }
+
+  const next = state.nextObjectId;
+  state.nextObjectId += 1;
+  state.objectIds.set(target, next);
+  return next;
+};
+
+const buildChatRowMetadataSignature = (
+  params: BuildChatRowMetadataParams,
+  cacheState: ChatRowMetadataCacheState
+): string => [
+  params.editingMessageIndex ?? -1,
+  params.activeSearchMessageIndex ?? -1,
+  params.comparisonIndex ?? -1,
+  summarizeKeyText(params.editedMessageContent),
+  getObjectIdentity(cacheState, params.searchResultSet),
+  getObjectIdentity(cacheState, params.bookmarkedMessages),
+  getObjectIdentity(cacheState, params.selectedToken),
+  getObjectIdentity(cacheState, params.messageRatings),
+  getObjectIdentity(cacheState, params.loadedMessageIndices),
+].join('|');
+
 export const buildChatRowMetadata = ({
   history,
   editingMessageIndex,
@@ -82,6 +144,39 @@ export const buildChatRowMetadata = ({
       editingContentForRow: isEditingRow ? editedMessageContent : '',
       isLazyLoaded: !loadedMessageIndices.has(index),
     };
+  }
+
+  return metadata;
+};
+
+export const getCachedChatRowMetadata = (
+  params: BuildChatRowMetadataParams,
+  cacheState: ChatRowMetadataCacheState,
+  maxEntries: number = DEFAULT_CHAT_ROW_METADATA_CACHE_LIMIT
+): ChatRowMetadata[] => {
+  const signature = buildChatRowMetadataSignature(params, cacheState);
+  const entries = cacheState.entries;
+
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry.historyRef === params.history && entry.signature === signature) {
+      if (index !== entries.length - 1) {
+        entries.splice(index, 1);
+        entries.push(entry);
+      }
+      return entry.metadata;
+    }
+  }
+
+  const metadata = buildChatRowMetadata(params);
+  entries.push({
+    historyRef: params.history,
+    signature,
+    metadata,
+  });
+
+  while (entries.length > maxEntries) {
+    entries.shift();
   }
 
   return metadata;
