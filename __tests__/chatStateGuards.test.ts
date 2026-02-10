@@ -5,6 +5,7 @@ import {
   buildChoiceSelectionUpdate,
   buildContextMessagesPatch,
   buildDeleteMessagePatch,
+  buildHistoryResetPatch,
   buildInitialLazySessionState,
   buildMessageLoadPatch,
   buildMessageReplacePatch,
@@ -180,6 +181,29 @@ describe('chatStateGuards', () => {
       expect(patch.nextFullMessageCache).toBe(cache);
       expect(patch.nextLoadedMessageIndices).toBe(loaded);
       expect(patch.nextHistory[1]).toBe(existing);
+    });
+  });
+
+  describe('buildHistoryResetPatch', () => {
+    it('creates consistent history/cache/index state from replacement history', () => {
+      const nextHistory = [
+        createMessage('first'),
+        createMessage('second'),
+        createMessage('third'),
+      ];
+
+      const patch = buildHistoryResetPatch(nextHistory);
+      expect(patch.nextHistory).toBe(nextHistory);
+      expect(Array.from(patch.nextLoadedMessageIndices).sort((a, b) => a - b)).toEqual([0, 1, 2]);
+      expect(patch.nextFullMessageCache.get(0)).toBe(nextHistory[0]);
+      expect(patch.nextFullMessageCache.get(2)).toBe(nextHistory[2]);
+    });
+
+    it('returns empty cache/index for empty history', () => {
+      const patch = buildHistoryResetPatch([]);
+      expect(patch.nextHistory).toEqual([]);
+      expect(patch.nextFullMessageCache.size).toBe(0);
+      expect(patch.nextLoadedMessageIndices.size).toBe(0);
     });
   });
 

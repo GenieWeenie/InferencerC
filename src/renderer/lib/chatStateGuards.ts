@@ -179,6 +179,28 @@ export const buildAppendMessagePatch = (
     };
 };
 
+export const buildHistoryResetPatch = (
+    nextHistory: ChatMessage[]
+): {
+    nextHistory: ChatMessage[];
+    nextFullMessageCache: Map<number, ChatMessage>;
+    nextLoadedMessageIndices: Set<number>;
+} => {
+    const nextFullMessageCache = new Map<number, ChatMessage>();
+    const nextLoadedMessageIndices = new Set<number>();
+
+    for (let index = 0; index < nextHistory.length; index += 1) {
+        nextFullMessageCache.set(index, nextHistory[index]);
+        nextLoadedMessageIndices.add(index);
+    }
+
+    return {
+        nextHistory,
+        nextFullMessageCache,
+        nextLoadedMessageIndices,
+    };
+};
+
 const areTopLogprobsEqual = (a?: TokenLogprob['top_logprobs'], b?: TokenLogprob['top_logprobs']): boolean => {
     if (a === b) return true;
     if (!a || !b) return !a && !b;

@@ -1134,7 +1134,10 @@ const Chat: React.FC = () => {
         updateMessageToken,
 
         sessionId,
-        history, setHistory,
+        history,
+        replaceHistory,
+        truncateHistory,
+        appendMessage,
         selectedToken, setSelectedToken,
         availableModels,
         currentModel, setCurrentModel,
@@ -1959,7 +1962,7 @@ const Chat: React.FC = () => {
 
             if (result.success && result.content) {
                 const content = `[CONTEXT FROM GITHUB: ${parsed.owner} /${parsed.repo}/${parsed.path}]\n\n\`\`\`${parsed.path.split('.').pop() || 'text'}\n${result.content}\n\`\`\``;
-                setHistory(prev => [...prev, { role: 'user', content }]);
+                appendMessage({ role: 'user', content });
                 toast.success("GitHub file added to conversation context.");
                 setGithubUrl('');
             } else {
@@ -2597,6 +2600,8 @@ const Chat: React.FC = () => {
         thinkingEnabled,
         editedMessageContent,
         sendMessageWithContext,
+        replaceHistory,
+        truncateHistory,
     });
 
     React.useEffect(() => {
@@ -2608,6 +2613,8 @@ const Chat: React.FC = () => {
             thinkingEnabled,
             editedMessageContent,
             sendMessageWithContext,
+            replaceHistory,
+            truncateHistory,
         };
     }, [
         history,
@@ -2617,6 +2624,8 @@ const Chat: React.FC = () => {
         thinkingEnabled,
         editedMessageContent,
         sendMessageWithContext,
+        replaceHistory,
+        truncateHistory,
     ]);
 
     // Message Actions Handlers
@@ -2629,27 +2638,26 @@ const Chat: React.FC = () => {
     }, []);
 
     const handleSaveEdit = React.useCallback((index: number) => {
-        const editContent = latestMessageActionsRef.current.editedMessageContent;
+        const {
+            history: currentHistory,
+            editedMessageContent: editContent,
+            replaceHistory: applyHistoryReplace,
+        } = latestMessageActionsRef.current;
         if (editContent.trim() === '') {
             toast.error('Message cannot be empty');
             return;
         }
 
-        let updated = false;
-        setHistory((prev) => {
-            if (!prev[index]) return prev;
-            const newHistory = [...prev];
-            newHistory[index] = {
-                ...newHistory[index],
-                content: editContent,
-            };
-            updated = true;
-            return newHistory.slice(0, index + 1);
-        });
-
-        if (!updated) {
+        if (!currentHistory[index]) {
             return;
         }
+
+        const nextHistory = currentHistory.slice(0, index + 1);
+        nextHistory[index] = {
+            ...nextHistory[index],
+            content: editContent,
+        };
+        applyHistoryReplace(nextHistory);
 
         setEditingMessageIndex(null);
         setEditedMessageContent('');
@@ -2658,7 +2666,7 @@ const Chat: React.FC = () => {
         setTimeout(() => {
             void latestMessageActionsRef.current.sendMessageWithContext();
         }, 100);
-    }, [setHistory, setEditedMessageContent]);
+    }, [setEditedMessageContent]);
 
     const handleCancelEdit = React.useCallback(() => {
         setEditingMessageIndex(null);
@@ -2666,22 +2674,23 @@ const Chat: React.FC = () => {
     }, [setEditedMessageContent]);
 
     const handleRegenerateResponse = React.useCallback((index: number) => {
-        let updated = false;
-        setHistory((prev) => {
-            if (index < 0 || index > prev.length) return prev;
-            updated = true;
-            return prev.slice(0, index);
-        });
-
-        if (!updated) {
+        const {
+            history: currentHistory,
+            truncateHistory: applyHistoryTruncate,
+        } = latestMessageActionsRef.current;
+        if (index < 0 || index > currentHistory.length) {
             return;
+        }
+
+        if (index < currentHistory.length) {
+            applyHistoryTruncate(index);
         }
 
         toast.info('Regenerating response...');
         setTimeout(() => {
             void latestMessageActionsRef.current.sendMessageWithContext();
         }, 100);
-    }, [setHistory]);
+    }, []);
 
     const handleBranchConversation = React.useCallback((index: number) => {
         const {
@@ -3225,10 +3234,10 @@ const Chat: React.FC = () => {
 
     const handleClearChat = React.useCallback(() => {
         if (history.length > 0 && window.confirm('Clear all messages in this chat?')) {
-            setHistory([]);
+            replaceHistory([]);
             toast.success('Chat cleared');
         }
-    }, [history.length, setHistory]);
+    }, [history.length, replaceHistory]);
 
     const handleCopyLastResponse = React.useCallback(() => {
         const lastAssistantMessage = [...history].reverse().find((message) => message.role === 'assistant');
@@ -5367,7 +5376,7 @@ const Chat: React.FC = () => {
 
                             // Apply initial messages
                             if (template.initialMessages.length > 0) {
-                                setHistory(template.initialMessages.map(m => ({
+                                replaceHistory(template.initialMessages.map(m => ({
                                     ...m,
                                     isLoading: false
                                 })));
@@ -5599,11 +5608,11 @@ const Chat: React.FC = () => {
                                 }
                             );
                             // Add response to conversation
-                            setHistory(prev => [...prev, {
+                            appendMessage({
                                 role: 'assistant',
                                 content: response.content,
                                 isLoading: false,
-                            }]);
+                            });
                         }}
                     />
                 </React.Suspense>

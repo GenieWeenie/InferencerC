@@ -7,6 +7,7 @@ import {
     buildAppendMessagePatch,
     buildContextMessagesPatch,
     buildDeleteMessagePatch,
+    buildHistoryResetPatch,
     buildInitialLazySessionState,
     buildMessageReplacePatch,
     buildOutgoingMessagePatch,
@@ -879,6 +880,42 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         setLoadedMessageIndices(patch.nextLoadedMessageIndices);
     }, []);
 
+    const replaceHistory = useCallback((nextHistory: ChatMessage[]) => {
+        const resetPatch = buildHistoryResetPatch(nextHistory);
+        historyRef.current = resetPatch.nextHistory;
+        fullMessageCacheRef.current = resetPatch.nextFullMessageCache;
+        loadedMessageIndicesRef.current = resetPatch.nextLoadedMessageIndices;
+        setHistory(resetPatch.nextHistory);
+        setFullMessageCache(resetPatch.nextFullMessageCache);
+        setLoadedMessageIndices(resetPatch.nextLoadedMessageIndices);
+        setSelectedToken((prevSelectedToken) => {
+            if (!prevSelectedToken || prevSelectedToken.messageIndex < nextHistory.length) {
+                return prevSelectedToken;
+            }
+            selectedTokenRef.current = null;
+            return null;
+        });
+    }, []);
+
+    const truncateHistory = useCallback((endExclusive: number) => {
+        const currentHistory = historyRef.current;
+        const boundedEnd = Math.max(0, Math.min(endExclusive, currentHistory.length));
+        if (boundedEnd === currentHistory.length) {
+            return;
+        }
+        replaceHistory(currentHistory.slice(0, boundedEnd));
+    }, [replaceHistory]);
+
+    const appendMessage = useCallback((message: ChatMessage) => {
+        const appendPatch = buildAppendMessagePatch(
+            historyRef.current,
+            fullMessageCacheRef.current,
+            loadedMessageIndicesRef.current,
+            message
+        );
+        applyAppendedMessagePatch(appendPatch);
+    }, [applyAppendedMessagePatch]);
+
     const executeWebFetch = useCallback(async () => {
         if (!urlInput) { setShowUrlInput(false); return; }
         const url = urlInput;
@@ -896,13 +933,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const data = await res.json();
             if (data.error) throw new Error(data.error);
             const content = `[CONTEXT FROM WEB: ${url}]\n\n${data.content}`;
-            const appendPatch = buildAppendMessagePatch(
-                historyRef.current,
-                fullMessageCacheRef.current,
-                loadedMessageIndicesRef.current,
-                { role: 'user', content }
-            );
-            applyAppendedMessagePatch(appendPatch);
+            appendMessage({ role: 'user', content });
             toast.success("Web content added to conversation context.");
             logComplianceEvent({
                 category: 'chat.tools',
@@ -923,7 +954,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         } finally {
             setIsFetchingWeb(false);
         }
-    }, [applyAppendedMessagePatch, logComplianceEvent, urlInput]);
+    }, [appendMessage, logComplianceEvent, urlInput]);
 
     const applyDeleteMessagePatch = useCallback((patch: NonNullable<ReturnType<typeof buildDeleteMessagePatch>>) => {
         historyRef.current = patch.nextHistory;
@@ -1657,6 +1688,9 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         expertMode, setExpertMode,
         sessionId,
         history, setHistory,
+        replaceHistory,
+        truncateHistory,
+        appendMessage,
         selectedToken, setSelectedToken,
         availableModels,
         currentModel, setCurrentModel,
