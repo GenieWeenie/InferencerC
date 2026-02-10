@@ -68,24 +68,68 @@ const MessageContent: React.FC<MessageContentProps> = ({
     const [displayContent, setDisplayContent] = React.useState(content);
     const [isLoadingContent, setIsLoadingContent] = React.useState(false);
     const lastLoadRequestKeyRef = React.useRef<string | null>(null);
+    const displayContentRef = React.useRef(content);
+    const displayLengthRef = React.useRef(content.length);
+    const streamTargetRef = React.useRef(content);
+    const animationFrameRef = React.useRef<number | null>(null);
+
+    const cancelStreamingAnimation = React.useCallback(() => {
+        if (animationFrameRef.current !== null) {
+            cancelAnimationFrame(animationFrameRef.current);
+            animationFrameRef.current = null;
+        }
+    }, []);
 
     React.useEffect(() => {
+        displayContentRef.current = displayContent;
+        displayLengthRef.current = displayContent.length;
+    }, [displayContent]);
+
+    React.useEffect(() => {
+        streamTargetRef.current = content;
+
         if (!isStreaming) {
+            cancelStreamingAnimation();
+            displayContentRef.current = content;
+            displayLengthRef.current = content.length;
             setDisplayContent(content);
+            return;
+        }
+
+        if (!content.startsWith(displayContentRef.current)) {
+            displayContentRef.current = '';
+            displayLengthRef.current = 0;
+            setDisplayContent('');
+        }
+
+        if (animationFrameRef.current !== null) {
             return;
         }
 
         let animationFrameId: number;
         const animate = () => {
-            if (displayContent.length < content.length) {
-                setDisplayContent((prev) => content.slice(0, prev.length + 1));
+            const target = streamTargetRef.current;
+            if (displayLengthRef.current < target.length) {
+                const nextLength = Math.min(displayLengthRef.current + 1, target.length);
+                displayLengthRef.current = nextLength;
+                setDisplayContent(target.slice(0, nextLength));
                 animationFrameId = requestAnimationFrame(animate);
+                animationFrameRef.current = animationFrameId;
+                return;
             }
+
+            animationFrameRef.current = null;
         };
 
         animationFrameId = requestAnimationFrame(animate);
-        return () => cancelAnimationFrame(animationFrameId);
-    }, [content, isStreaming, displayContent.length]);
+        animationFrameRef.current = animationFrameId;
+    }, [content, isStreaming, cancelStreamingAnimation]);
+
+    React.useEffect(() => {
+        return () => {
+            cancelStreamingAnimation();
+        };
+    }, [cancelStreamingAnimation]);
 
     React.useEffect(() => {
         const decision = getLazyLoadDecision({

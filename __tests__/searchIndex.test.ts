@@ -214,6 +214,34 @@ describe('SearchIndexService', () => {
     expect(result).toEqual(new Set(['s1']));
   });
 
+  it('keeps singleton-candidate intersections stable across repeated generic-path searches', () => {
+    const sessions: ChatSession[] = [
+      createSession(
+        's1',
+        'rareterm alpha beta gamma delta epsilon',
+        'zeta eta theta iota kappa'
+      ),
+      createSession(
+        's2',
+        'alpha beta gamma delta epsilon',
+        'zeta eta theta iota kappa'
+      ),
+      createSession(
+        's3',
+        'alpha beta gamma',
+        'delta epsilon zeta eta theta iota'
+      ),
+    ];
+    SearchIndexService.rebuildIndex(sessions);
+
+    const query = 'rareterm alpha beta gamma delta epsilon zeta eta theta iota';
+    const expected = new Set(['s1']);
+
+    for (let i = 0; i < 20; i++) {
+      expect(SearchIndexService.searchSessions(query)).toEqual(expected);
+    }
+  });
+
   it('returns all matching sessions for one-term queries', () => {
     const sessions: ChatSession[] = [
       createSession('s1', 'alpha beta', 'gamma'),

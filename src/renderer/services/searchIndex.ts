@@ -343,6 +343,7 @@ const createSingletonResult = (sessionId: string): Set<string> => {
 
 const singletonMatchesPostingLists = (
     sessionId: string,
+    queryTerms: string[],
     postingLists: string[][],
     smallestTermIndex: number
 ): boolean => {
@@ -350,7 +351,7 @@ const singletonMatchesPostingLists = (
         if (i === smallestTermIndex) {
             continue;
         }
-        if (!postingLists[i].includes(sessionId)) {
+        if (!getPostingSet(queryTerms[i], postingLists[i]).has(sessionId)) {
             return false;
         }
     }
@@ -398,7 +399,7 @@ const intersectBySmallestPostingList = (
 
     if (candidateIds.length === 1) {
         const sessionId = candidateIds[0];
-        return singletonMatchesPostingLists(sessionId, postingLists, smallestTermIndex)
+        return singletonMatchesPostingLists(sessionId, queryTerms, postingLists, smallestTermIndex)
             ? createSingletonResult(sessionId)
             : new Set<string>();
     }

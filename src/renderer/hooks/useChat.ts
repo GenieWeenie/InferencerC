@@ -881,11 +881,12 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             return;
         }
 
-        loadedMessageIndicesRef.current = patch.nextLoadedMessageIndices;
-        fullMessageCacheRef.current = patch.nextFullMessageCache;
-        setFullMessageCache(patch.nextFullMessageCache);
-        setLoadedMessageIndices(patch.nextLoadedMessageIndices);
-    }, [resolveLazyLoadSourceMessages]);
+        applyHistoryStatePatch({
+            nextHistory: historyRef.current,
+            nextFullMessageCache: patch.nextFullMessageCache,
+            nextLoadedMessageIndices: patch.nextLoadedMessageIndices,
+        });
+    }, [applyHistoryStatePatch, resolveLazyLoadSourceMessages]);
 
     // Load a range of messages (for scrolling/pagination)
     const loadMessageRange = useCallback((startIndex: number, endIndex: number) => {

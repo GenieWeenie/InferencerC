@@ -14,6 +14,11 @@ import { useConversationTree } from '../hooks/useConversationTree';
 import { useLongPress, usePinchZoom, useSwipeNavigation } from '../hooks/useGestures';
 import { calculateEntropy, compressImage } from '../lib/chatDisplayUtils';
 import {
+    areSearchResultIndicesEqual,
+    findChatSearchMatches,
+    normalizeChatSearchQuery,
+} from '../lib/chatSearch';
+import {
     dispatchChatShortcutAction,
     isTypingShortcutTarget,
     resolveChatShortcutAction,
@@ -455,14 +460,14 @@ const resolveBattleModelName = (
     content: string | undefined,
     pattern: RegExp,
     fallbackModelId: string,
-    availableModels: any[],
+    modelNameById: Map<string, string>,
     fallbackLabel: string
 ): string => {
     const match = content?.match(pattern);
     if (match?.[1]) {
         return match[1];
     }
-    return availableModels.find((m: any) => m.id === fallbackModelId)?.name || fallbackLabel;
+    return modelNameById.get(fallbackModelId) || fallbackLabel;
 };
 
 interface LogprobTokenListProps {
@@ -540,7 +545,7 @@ interface ChatMessageRowProps {
     setSelectedToken: (value: any) => void;
     setActiveTab: (value: 'inspector' | 'controls' | 'prompts' | 'documents') => void;
     setComparisonIndex: React.Dispatch<React.SetStateAction<number | null>>;
-    availableModels: any[];
+    modelNameById: Map<string, string>;
     currentModel: string;
     secondaryModel: string;
     handleRateMessage: (index: number, rating: 'up' | 'down') => void;
@@ -583,7 +588,7 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
     setSelectedToken,
     setActiveTab,
     setComparisonIndex,
-    availableModels,
+    modelNameById,
     currentModel,
     secondaryModel,
     handleRateMessage,
@@ -637,18 +642,18 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                 msg.content,
                 /\*\*Model A:\s*(.+?)\*\*/,
                 currentModel,
-                availableModels,
+                modelNameById,
                 'Model A'
             ),
             modelBName: resolveBattleModelName(
                 nextMessage.content,
                 /\*\*Model B:\s*(.+?)\*\*/,
                 secondaryModel,
-                availableModels,
+                modelNameById,
                 'Model B'
             ),
         };
-    }, [nextMessage, msg.content, currentModel, secondaryModel, availableModels]);
+    }, [nextMessage, msg.content, currentModel, secondaryModel, modelNameById]);
 
     const handleToggleBookmark = React.useCallback(() => {
         toggleBookmark(index);
@@ -968,7 +973,10 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
         prev.editingContentForRow === next.editingContentForRow &&
         prev.conversationFontSize === next.conversationFontSize &&
         prev.isCompactViewport === next.isCompactViewport &&
-        prev.isLazyLoaded === next.isLazyLoaded
+        prev.isLazyLoaded === next.isLazyLoaded &&
+        prev.modelNameById === next.modelNameById &&
+        prev.currentModel === next.currentModel &&
+        prev.secondaryModel === next.secondaryModel
     );
 });
 
@@ -1080,6 +1088,148 @@ const TopHeaderPrimaryActions: React.FC<TopHeaderPrimaryActionsProps> = React.me
     prev.showHistory === next.showHistory &&
     prev.onToggleHistory === next.onToggleHistory &&
     prev.actions === next.actions
+));
+
+interface TopHeaderSecondaryActionsProps {
+    hasHistory: boolean;
+    showTreeView: boolean;
+    integrationAvailability: IntegrationAvailability;
+    onOpenCodeIntegration: () => void;
+    onClearChat: () => void;
+    onOpenExportDialog: () => void;
+    onToggleTreeView: () => void;
+    onExportSessionToObsidian: () => void;
+    onSaveToNotion: () => void;
+    onSendToSlack: () => void;
+    onSendToDiscord: () => void;
+    onSendToEmail: () => void;
+    onOpenCalendarSchedule: () => void;
+}
+
+const TopHeaderSecondaryActions: React.FC<TopHeaderSecondaryActionsProps> = React.memo(({
+    hasHistory,
+    showTreeView,
+    integrationAvailability,
+    onOpenCodeIntegration,
+    onClearChat,
+    onOpenExportDialog,
+    onToggleTreeView,
+    onExportSessionToObsidian,
+    onSaveToNotion,
+    onSendToSlack,
+    onSendToDiscord,
+    onSendToEmail,
+    onOpenCalendarSchedule,
+}) => {
+    if (!hasHistory) {
+        return null;
+    }
+
+    return (
+        <>
+            <button
+                onClick={onOpenCodeIntegration}
+                title="Code Integration (Review, Refactor, Docs, Tests, Git)"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
+            >
+                <Code2 size={14} /> <span>Code</span>
+            </button>
+            <button
+                onClick={onClearChat}
+                title="Clear Chat"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
+            >
+                <Eraser size={14} /> <span>Clear</span>
+            </button>
+            <button
+                onClick={onOpenExportDialog}
+                title="Export Chat (Ctrl+Shift+E)"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
+            >
+                <Download size={14} /> <span>Export</span>
+            </button>
+            <button
+                onClick={onToggleTreeView}
+                title="Conversation Tree (Ctrl+T)"
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap ${showTreeView
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                    }`}
+            >
+                <Network size={14} /> <span>Tree</span>
+            </button>
+            <button
+                onClick={onExportSessionToObsidian}
+                title="Export to Obsidian"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
+            >
+                <FileText size={14} /> <span>Obsidian</span>
+            </button>
+            {integrationAvailability.notion && (
+                <button
+                    onClick={onSaveToNotion}
+                    title="Save to Notion"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
+                >
+                    <FileText size={14} /> <span>Notion</span>
+                </button>
+            )}
+            {integrationAvailability.slack && (
+                <button
+                    onClick={onSendToSlack}
+                    title="Send to Slack"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
+                >
+                    <MessageSquare size={14} /> <span>Slack</span>
+                </button>
+            )}
+            {integrationAvailability.discord && (
+                <button
+                    onClick={onSendToDiscord}
+                    title="Send to Discord"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
+                >
+                    <MessageSquare size={14} /> <span>Discord</span>
+                </button>
+            )}
+            {integrationAvailability.email && (
+                <button
+                    onClick={onSendToEmail}
+                    title="Email Conversation"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
+                >
+                    <Mail size={14} /> <span>Email</span>
+                </button>
+            )}
+            {integrationAvailability.calendar && (
+                <button
+                    onClick={onOpenCalendarSchedule}
+                    title="Schedule Reminder"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
+                >
+                    <Calendar size={14} /> <span>Schedule</span>
+                </button>
+            )}
+        </>
+    );
+}, (prev, next) => (
+    prev.hasHistory === next.hasHistory &&
+    prev.showTreeView === next.showTreeView &&
+    prev.integrationAvailability.notion === next.integrationAvailability.notion &&
+    prev.integrationAvailability.slack === next.integrationAvailability.slack &&
+    prev.integrationAvailability.discord === next.integrationAvailability.discord &&
+    prev.integrationAvailability.email === next.integrationAvailability.email &&
+    prev.integrationAvailability.calendar === next.integrationAvailability.calendar &&
+    prev.onOpenCodeIntegration === next.onOpenCodeIntegration &&
+    prev.onClearChat === next.onClearChat &&
+    prev.onOpenExportDialog === next.onOpenExportDialog &&
+    prev.onToggleTreeView === next.onToggleTreeView &&
+    prev.onExportSessionToObsidian === next.onExportSessionToObsidian &&
+    prev.onSaveToNotion === next.onSaveToNotion &&
+    prev.onSendToSlack === next.onSendToSlack &&
+    prev.onSendToDiscord === next.onSendToDiscord &&
+    prev.onSendToEmail === next.onSendToEmail &&
+    prev.onOpenCalendarSchedule === next.onOpenCalendarSchedule
 ));
 
 const readPersistedApiLogCount = (): number => {
@@ -2501,24 +2651,34 @@ const Chat: React.FC = () => {
 
     // Search within chat
     React.useEffect(() => {
-        if (debouncedSearchQuery.trim() === '') {
-            setSearchResults([]);
-            setCurrentSearchIndex(0);
+        const normalizedQuery = normalizeChatSearchQuery(debouncedSearchQuery);
+        if (!normalizedQuery) {
+            setSearchResults((prev) => (prev.length === 0 ? prev : []));
+            setCurrentSearchIndex((prev) => (prev === 0 ? prev : 0));
             return;
         }
 
-        const query = debouncedSearchQuery.toLowerCase();
-        const matches: number[] = [];
-
-        searchableMessageContent.forEach((content, index) => {
-            if (content.includes(query)) {
-                matches.push(index);
+        const nextMatches = findChatSearchMatches(searchableMessageContent, normalizedQuery);
+        const matchesChanged = !areSearchResultIndicesEqual(searchResults, nextMatches);
+        if (matchesChanged) {
+            setSearchResults(nextMatches);
+            if (currentSearchIndex !== 0) {
+                setCurrentSearchIndex(0);
             }
-        });
+            return;
+        }
 
-        setSearchResults(matches);
-        setCurrentSearchIndex(0);
-    }, [debouncedSearchQuery, searchableMessageContent]);
+        if (nextMatches.length === 0) {
+            if (currentSearchIndex !== 0) {
+                setCurrentSearchIndex(0);
+            }
+            return;
+        }
+
+        if (currentSearchIndex >= nextMatches.length) {
+            setCurrentSearchIndex(nextMatches.length - 1);
+        }
+    }, [debouncedSearchQuery, searchableMessageContent, searchResults, currentSearchIndex]);
 
     // Navigate to specific search result
     const navigateToSearchResult = React.useCallback((resultIndex: number) => {
@@ -2959,6 +3119,120 @@ const Chat: React.FC = () => {
         }
     }, [sessionId]);
 
+    const getCurrentSessionForIntegration = React.useCallback(() => {
+        const session = HistoryService.getSession(sessionId);
+        if (!session) {
+            toast.error('Session not found');
+            return null;
+        }
+        return session;
+    }, [sessionId]);
+
+    const mapSessionMessagesForExternalShare = React.useCallback((sessionMessages: Array<{ role: string; content?: string }>) => {
+        return sessionMessages.map((message) => ({
+            role: message.role,
+            content: message.content || '',
+        }));
+    }, []);
+
+    const handleSaveSessionToNotion = React.useCallback(async () => {
+        const session = getCurrentSessionForIntegration();
+        if (!session) return;
+
+        try {
+            const { notionService } = await import('../services/notion');
+            const result = await notionService.saveConversation(
+                session.title,
+                session.messages,
+                {
+                    model: session.modelId,
+                    date: new Date(session.lastModified).toLocaleString(),
+                }
+            );
+
+            if (result.success && result.page) {
+                toast.success('Saved to Notion!', {
+                    action: {
+                        label: 'Open',
+                        onClick: () => window.open(result.page!.url, '_blank'),
+                    },
+                });
+                return;
+            }
+
+            toast.error(result.error || 'Failed to save to Notion');
+        } catch (error: any) {
+            toast.error(error.message || 'Failed to save to Notion');
+        }
+    }, [getCurrentSessionForIntegration]);
+
+    const handleSendSessionToSlack = React.useCallback(async () => {
+        const session = getCurrentSessionForIntegration();
+        if (!session) return;
+
+        try {
+            const { slackService } = await import('../services/slack');
+            const result = await slackService.sendConversation(
+                session.title,
+                mapSessionMessagesForExternalShare(session.messages)
+            );
+
+            if (result.success) {
+                toast.success('Sent to Slack!');
+            } else {
+                toast.error(result.error || 'Failed to send to Slack');
+            }
+        } catch (error: any) {
+            toast.error(error.message || 'Failed to send to Slack');
+        }
+    }, [getCurrentSessionForIntegration, mapSessionMessagesForExternalShare]);
+
+    const handleSendSessionToDiscord = React.useCallback(async () => {
+        const session = getCurrentSessionForIntegration();
+        if (!session) return;
+
+        try {
+            const { discordService } = await import('../services/discord');
+            const result = await discordService.sendConversation(
+                session.title,
+                mapSessionMessagesForExternalShare(session.messages)
+            );
+
+            if (result.success) {
+                toast.success('Sent to Discord!');
+            } else {
+                toast.error(result.error || 'Failed to send to Discord');
+            }
+        } catch (error: any) {
+            toast.error(error.message || 'Failed to send to Discord');
+        }
+    }, [getCurrentSessionForIntegration, mapSessionMessagesForExternalShare]);
+
+    const handleSendSessionByEmail = React.useCallback(async () => {
+        const session = getCurrentSessionForIntegration();
+        if (!session) return;
+
+        try {
+            const { emailService } = await import('../services/email');
+            const result = await emailService.sendConversation(
+                session.title,
+                mapSessionMessagesForExternalShare(session.messages)
+            );
+
+            if (result.success) {
+                toast.success('Email client opened!');
+            } else {
+                toast.error(result.error || 'Failed to open email');
+            }
+        } catch (error: any) {
+            toast.error(error.message || 'Failed to send email');
+        }
+    }, [getCurrentSessionForIntegration, mapSessionMessagesForExternalShare]);
+
+    const handleOpenCalendarSchedule = React.useCallback(() => {
+        setShowCalendarSchedule(true);
+    }, []);
+
     const topHeaderPrimaryActions = React.useMemo<HeaderPrimaryActionConfig[]>(() => ([
         {
             key: 'new-chat',
@@ -3035,6 +3309,39 @@ const Chat: React.FC = () => {
         handleOpenWorkflows,
         handleOpenWorkspaceViews,
     ]);
+
+    const modelOptionItems = React.useMemo(
+        () => availableModels.map((model) => ({
+            id: model.id,
+            label: model.name || model.id,
+        })),
+        [availableModels]
+    );
+
+    const allModelOptionElements = React.useMemo(
+        () => modelOptionItems.map((model) => (
+            <option key={model.id} value={model.id}>{model.label}</option>
+        )),
+        [modelOptionItems]
+    );
+
+    const nonCurrentModelOptionElements = React.useMemo(
+        () => modelOptionItems
+            .filter((model) => model.id !== currentModel)
+            .map((model) => (
+                <option key={model.id} value={model.id}>{model.label}</option>
+            )),
+        [modelOptionItems, currentModel]
+    );
+
+    const modelNameById = React.useMemo(() => {
+        const next = new Map<string, string>();
+        for (let i = 0; i < modelOptionItems.length; i += 1) {
+            const model = modelOptionItems[i];
+            next.set(model.id, model.label);
+        }
+        return next;
+    }, [modelOptionItems]);
 
     const clampLongPressMenuPosition = React.useCallback((x: number, y: number) => {
         const margin = 8;
@@ -3465,7 +3772,7 @@ const Chat: React.FC = () => {
                 setSelectedToken={setSelectedToken}
                 setActiveTab={setActiveTab}
                 setComparisonIndex={setComparisonIndex}
-                availableModels={availableModels}
+                modelNameById={modelNameById}
                 currentModel={currentModel}
                 secondaryModel={secondaryModel}
                 handleRateMessage={handleRateMessage}
@@ -3498,7 +3805,7 @@ const Chat: React.FC = () => {
         setSelectedToken,
         setActiveTab,
         setComparisonIndex,
-        availableModels,
+        modelNameById,
         currentModel,
         secondaryModel,
         handleRateMessage,
@@ -3570,15 +3877,6 @@ const Chat: React.FC = () => {
                         onToggleHistory={handleToggleHistoryPanel}
                         actions={topHeaderPrimaryActions}
                     />
-                    {history.length > 0 && (
-                        <button
-                            onClick={handleOpenCodeIntegration}
-                            title="Code Integration (Review, Refactor, Docs, Tests, Git)"
-                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                        >
-                            <Code2 size={14} /> <span>Code</span>
-                        </button>
-                    )}
                     {/* Experimental Features Dropdown */}
                     <div className="relative group flex-shrink-0">
                         <button
@@ -3653,194 +3951,21 @@ const Chat: React.FC = () => {
                     >
                         <Cloud size={14} /> <span>{cloudSyncBadge.label}</span>
                     </button>
-                    {history.length > 0 && (
-                        <button
-                            onClick={handleClearChat}
-                            title="Clear Chat"
-                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                        >
-                            <Eraser size={14} /> <span>Clear</span>
-                        </button>
-                    )}
-                    {history.length > 0 && (
-                        <>
-                            <button
-                                onClick={handleOpenExportDialog}
-                                title="Export Chat (Ctrl+Shift+E)"
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                            >
-                                <Download size={14} /> <span>Export</span>
-                            </button>
-                            <button
-                                onClick={handleToggleTreeView}
-                                title="Conversation Tree (Ctrl+T)"
-                                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap ${showTreeView
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                                    }`}
-                            >
-                                <Network size={14} /> <span>Tree</span>
-                            </button>
-                            <button
-                                onClick={handleExportSessionToObsidian}
-                                title="Export to Obsidian"
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                            >
-                                <FileText size={14} /> <span>Obsidian</span>
-                            </button>
-                            {integrationAvailability.notion && (
-                                <button
-                                    onClick={async () => {
-                                        const session = HistoryService.getSession(sessionId);
-                                        if (!session) {
-                                            toast.error('Session not found');
-                                            return;
-                                        }
-
-                                        try {
-                                            const { notionService } = await import('../services/notion');
-                                            const result = await notionService.saveConversation(
-                                                session.title,
-                                                session.messages,
-                                                {
-                                                    model: session.modelId,
-                                                    date: new Date(session.lastModified).toLocaleString(),
-                                                }
-                                            );
-
-                                            if (result.success && result.page) {
-                                                toast.success('Saved to Notion!', {
-                                                    action: {
-                                                        label: 'Open',
-                                                        onClick: () => window.open(result.page!.url, '_blank')
-                                                    }
-                                                });
-                                            } else {
-                                                toast.error(result.error || 'Failed to save to Notion');
-                                            }
-                                        } catch (error: any) {
-                                            toast.error(error.message || 'Failed to save to Notion');
-                                    }
-                                }}
-                                title="Save to Notion"
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                            >
-                                <FileText size={14} /> <span>Notion</span>
-                            </button>
-                            )}
-                            {integrationAvailability.slack && (
-                                <button
-                                    onClick={async () => {
-                                        const session = HistoryService.getSession(sessionId);
-                                        if (!session) {
-                                            toast.error('Session not found');
-                                            return;
-                                        }
-
-                                        try {
-                                            const { slackService } = await import('../services/slack');
-                                            const result = await slackService.sendConversation(
-                                                session.title,
-                                                session.messages.map(m => ({
-                                                    role: m.role,
-                                                    content: m.content || '',
-                                                }))
-                                            );
-
-                                            if (result.success) {
-                                                toast.success('Sent to Slack!');
-                                            } else {
-                                                toast.error(result.error || 'Failed to send to Slack');
-                                            }
-                                        } catch (error: any) {
-                                            toast.error(error.message || 'Failed to send to Slack');
-                                        }
-                                    }}
-                                    title="Send to Slack"
-                                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                                >
-                                    <MessageSquare size={14} /> <span>Slack</span>
-                                </button>
-                            )}
-                            {integrationAvailability.discord && (
-                                <button
-                                    onClick={async () => {
-                                        const session = HistoryService.getSession(sessionId);
-                                        if (!session) {
-                                            toast.error('Session not found');
-                                            return;
-                                        }
-
-                                        try {
-                                            const { discordService } = await import('../services/discord');
-                                            const result = await discordService.sendConversation(
-                                                session.title,
-                                                session.messages.map(m => ({
-                                                    role: m.role,
-                                                    content: m.content || '',
-                                                }))
-                                            );
-
-                                            if (result.success) {
-                                                toast.success('Sent to Discord!');
-                                            } else {
-                                                toast.error(result.error || 'Failed to send to Discord');
-                                            }
-                                        } catch (error: any) {
-                                            toast.error(error.message || 'Failed to send to Discord');
-                                        }
-                                    }}
-                                    title="Send to Discord"
-                                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                                >
-                                    <MessageSquare size={14} /> <span>Discord</span>
-                                </button>
-                            )}
-                            {integrationAvailability.email && (
-                                <button
-                                    onClick={async () => {
-                                        const session = HistoryService.getSession(sessionId);
-                                        if (!session) {
-                                            toast.error('Session not found');
-                                            return;
-                                        }
-
-                                        try {
-                                            const { emailService } = await import('../services/email');
-                                            const result = await emailService.sendConversation(
-                                                session.title,
-                                                session.messages.map(m => ({
-                                                    role: m.role,
-                                                    content: m.content || '',
-                                                }))
-                                            );
-
-                                            if (result.success) {
-                                                toast.success('Email client opened!');
-                                            } else {
-                                                toast.error(result.error || 'Failed to open email');
-                                            }
-                                        } catch (error: any) {
-                                            toast.error(error.message || 'Failed to send email');
-                                        }
-                                    }}
-                                    title="Email Conversation"
-                                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                                >
-                                    <Mail size={14} /> <span>Email</span>
-                                </button>
-                            )}
-                            {integrationAvailability.calendar && (
-                                <button
-                                    onClick={() => setShowCalendarSchedule(true)}
-                                    title="Schedule Reminder"
-                                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                                >
-                                    <Calendar size={14} /> <span>Schedule</span>
-                                </button>
-                            )}
-                        </>
-                    )}
+                    <TopHeaderSecondaryActions
+                        hasHistory={history.length > 0}
+                        showTreeView={showTreeView}
+                        integrationAvailability={integrationAvailability}
+                        onOpenCodeIntegration={handleOpenCodeIntegration}
+                        onClearChat={handleClearChat}
+                        onOpenExportDialog={handleOpenExportDialog}
+                        onToggleTreeView={handleToggleTreeView}
+                        onExportSessionToObsidian={handleExportSessionToObsidian}
+                        onSaveToNotion={handleSaveSessionToNotion}
+                        onSendToSlack={handleSendSessionToSlack}
+                        onSendToDiscord={handleSendSessionToDiscord}
+                        onSendToEmail={handleSendSessionByEmail}
+                        onOpenCalendarSchedule={handleOpenCalendarSchedule}
+                    />
                     <div className="h-6 w-px bg-slate-700 mx-1 flex-shrink-0"></div>
                     <div className="flex items-center gap-2 min-w-0 max-w-[200px] flex-shrink-0">
                         {!battleMode ? (
@@ -3848,7 +3973,7 @@ const Chat: React.FC = () => {
                                 <span className="font-medium text-slate-400 text-xs whitespace-nowrap flex-shrink-0">Model:</span>
                                 <div className="relative min-w-0 flex-1">
                                     <select value={currentModel} onChange={e => setCurrentModel(e.target.value)} className="w-full bg-slate-800 border-none text-white text-xs rounded-md px-2 py-1 focus:ring-2 focus:ring-primary/50 appearance-none cursor-pointer hover:bg-slate-700 transition-colors truncate">
-                                        {availableModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                        {allModelOptionElements}
                                     </select>
                                     <ChevronRight className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none rotate-90" size={10} />
                                 </div>
@@ -3858,12 +3983,12 @@ const Chat: React.FC = () => {
                                 <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-red-500 text-xs flex items-center gap-1 flex-shrink-0"><Users size={12} /> VS</span>
                                 <div className="relative flex-1 min-w-0">
                                     <select value={currentModel} onChange={e => setCurrentModel(e.target.value)} className="w-full bg-slate-800 border-l-2 border-l-blue-500 text-white text-xs rounded px-1.5 py-1 appearance-none cursor-pointer hover:bg-slate-700 truncate">
-                                        {availableModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                        {allModelOptionElements}
                                     </select>
                                 </div>
                                 <div className="relative flex-1 min-w-0">
                                     <select value={secondaryModel} onChange={e => setSecondaryModel(e.target.value)} className="w-full bg-slate-800 border-l-2 border-l-orange-500 text-white text-xs rounded px-1.5 py-1 appearance-none cursor-pointer hover:bg-slate-700 truncate">
-                                        {availableModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                        {allModelOptionElements}
                                     </select>
                                 </div>
                             </div>
@@ -4919,8 +5044,8 @@ const Chat: React.FC = () => {
                                         onClick={() => {
                                             const newVal = !battleMode;
                                             setBattleMode(newVal);
-                                            if (newVal && !secondaryModel && availableModels.length > 1) {
-                                                setSecondaryModel(availableModels.find(m => m.id !== currentModel)?.id || '');
+                                            if (newVal && !secondaryModel && modelOptionItems.length > 1) {
+                                                setSecondaryModel(modelOptionItems.find((model) => model.id !== currentModel)?.id || '');
                                             }
                                         }}
                                         className={`relative w-11 h-6 rounded-full transition-colors ${battleMode ? 'bg-primary' : 'bg-slate-700'}`}
@@ -4932,7 +5057,7 @@ const Chat: React.FC = () => {
                                     <div className="space-y-2 animate-in slide-in-from-top-1 fade-in duration-200">
                                         <label className="text-xs text-slate-400 flex justify-between">
                                             <span>Opponent Model</span>
-                                            <span className="text-primary font-mono">{availableModels.find(m => m.id === secondaryModel)?.name || 'Select...'}</span>
+                                            <span className="text-primary font-mono">{modelNameById.get(secondaryModel) || 'Select...'}</span>
                                         </label>
                                         <select
                                             value={secondaryModel}
@@ -4940,9 +5065,7 @@ const Chat: React.FC = () => {
                                             className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:ring-1 focus:ring-primary outline-none"
                                         >
                                             <option value="">Select Model...</option>
-                                            {availableModels.filter(m => m.id !== currentModel).map(m => (
-                                                <option key={m.id} value={m.id}>{m.name || m.id}</option>
-                                            ))}
+                                            {nonCurrentModelOptionElements}
                                         </select>
                                     </div>
                                 )}
