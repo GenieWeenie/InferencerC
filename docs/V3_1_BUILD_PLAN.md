@@ -203,6 +203,12 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 134: in two-to-seven-term `searchSessions` fast paths, add singleton-candidate short-circuits to avoid unnecessary set construction while preserving results.
    - Pass 135: in `applyOperations` upserts, directly assign `[sessionId]` for missing posting lists to skip unnecessary duplicate checks on first insert.
    - Pass 136: expand `searchIndex` tests to cover seven-term intersections and singleton-candidate multi-term behavior.
+   - Pass 137: in generic 8+ term `searchSessions`, add a singleton-candidate short-circuit before membership-set setup to avoid unnecessary set construction.
+   - Pass 138: in `searchSessions`, add a dedicated eight-term intersection fast path using smallest-list scan plus cached membership sets.
+   - Pass 139: in `searchSessions`, add a dedicated nine-term intersection fast path using smallest-list scan plus cached membership sets.
+   - Pass 140: bound `postingSetCache` with LRU-style eviction to prevent unbounded memory growth during long-lived search sessions.
+   - Pass 141: expand `searchIndex` tests to cover eight-term and nine-term fast paths.
+   - Pass 142: add `searchIndex` coverage for singleton-candidate behavior in the generic ten-term path.
 
 ## Release Checklist for v3.1.x
 

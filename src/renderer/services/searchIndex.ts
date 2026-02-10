@@ -21,6 +21,7 @@ type SearchIndexBatchOperation =
 const INDEX_STORAGE_KEY = 'app_search_index';
 const TOKEN_CACHE_LIMIT = 512;
 const QUERY_TERM_CACHE_LIMIT = 256;
+const POSTING_SET_CACHE_LIMIT = 1024;
 const EMPTY_TERMS: string[] = [];
 const STOP_WORDS = new Set([
     'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
@@ -2481,10 +2482,19 @@ const clearPostingSetCache = (): void => {
 const getPostingSet = (term: string, ids: string[]): Set<string> => {
     const cached = postingSetCache.get(term);
     if (cached && cached.idsRef === ids) {
+        postingSetCache.delete(term);
+        postingSetCache.set(term, cached);
         return cached.idsSet;
     }
     const idsSet = new Set(ids);
+    postingSetCache.delete(term);
     postingSetCache.set(term, { idsRef: ids, idsSet });
+    if (postingSetCache.size > POSTING_SET_CACHE_LIMIT) {
+        const oldestKey = postingSetCache.keys().next().value;
+        if (oldestKey !== undefined) {
+            postingSetCache.delete(oldestKey);
+        }
+    }
     return idsSet;
 };
 
@@ -3371,6 +3381,234 @@ export const SearchIndexService = {
             }
             return resultIds ?? new Set<string>();
         }
+        if (queryTermCount === 8) {
+            const term0 = queryTerms[0];
+            const term1 = queryTerms[1];
+            const term2 = queryTerms[2];
+            const term3 = queryTerms[3];
+            const term4 = queryTerms[4];
+            const term5 = queryTerms[5];
+            const term6 = queryTerms[6];
+            const term7 = queryTerms[7];
+            const ids0 = index.terms[term0];
+            const ids1 = index.terms[term1];
+            const ids2 = index.terms[term2];
+            const ids3 = index.terms[term3];
+            const ids4 = index.terms[term4];
+            const ids5 = index.terms[term5];
+            const ids6 = index.terms[term6];
+            const ids7 = index.terms[term7];
+
+            if (
+                !ids0 || ids0.length === 0 ||
+                !ids1 || ids1.length === 0 ||
+                !ids2 || ids2.length === 0 ||
+                !ids3 || ids3.length === 0 ||
+                !ids4 || ids4.length === 0 ||
+                !ids5 || ids5.length === 0 ||
+                !ids6 || ids6.length === 0 ||
+                !ids7 || ids7.length === 0
+            ) {
+                return new Set<string>();
+            }
+
+            let smallestIndex = 0;
+            let candidateIds = ids0;
+            if (ids1.length < candidateIds.length) {
+                smallestIndex = 1;
+                candidateIds = ids1;
+            }
+            if (ids2.length < candidateIds.length) {
+                smallestIndex = 2;
+                candidateIds = ids2;
+            }
+            if (ids3.length < candidateIds.length) {
+                smallestIndex = 3;
+                candidateIds = ids3;
+            }
+            if (ids4.length < candidateIds.length) {
+                smallestIndex = 4;
+                candidateIds = ids4;
+            }
+            if (ids5.length < candidateIds.length) {
+                smallestIndex = 5;
+                candidateIds = ids5;
+            }
+            if (ids6.length < candidateIds.length) {
+                smallestIndex = 6;
+                candidateIds = ids6;
+            }
+            if (ids7.length < candidateIds.length) {
+                smallestIndex = 7;
+                candidateIds = ids7;
+            }
+
+            if (candidateIds.length === 1) {
+                const sessionId = candidateIds[0];
+                if (
+                    (smallestIndex === 0 || ids0.includes(sessionId)) &&
+                    (smallestIndex === 1 || ids1.includes(sessionId)) &&
+                    (smallestIndex === 2 || ids2.includes(sessionId)) &&
+                    (smallestIndex === 3 || ids3.includes(sessionId)) &&
+                    (smallestIndex === 4 || ids4.includes(sessionId)) &&
+                    (smallestIndex === 5 || ids5.includes(sessionId)) &&
+                    (smallestIndex === 6 || ids6.includes(sessionId)) &&
+                    (smallestIndex === 7 || ids7.includes(sessionId))
+                ) {
+                    return createSingletonResult(sessionId);
+                }
+                return new Set<string>();
+            }
+
+            const membershipSet0 = smallestIndex === 0 ? null : getPostingSet(term0, ids0);
+            const membershipSet1 = smallestIndex === 1 ? null : getPostingSet(term1, ids1);
+            const membershipSet2 = smallestIndex === 2 ? null : getPostingSet(term2, ids2);
+            const membershipSet3 = smallestIndex === 3 ? null : getPostingSet(term3, ids3);
+            const membershipSet4 = smallestIndex === 4 ? null : getPostingSet(term4, ids4);
+            const membershipSet5 = smallestIndex === 5 ? null : getPostingSet(term5, ids5);
+            const membershipSet6 = smallestIndex === 6 ? null : getPostingSet(term6, ids6);
+            const membershipSet7 = smallestIndex === 7 ? null : getPostingSet(term7, ids7);
+
+            let resultIds: Set<string> | null = null;
+            for (let i = 0; i < candidateIds.length; i++) {
+                const sessionId = candidateIds[i];
+                if (
+                    (membershipSet0 === null || membershipSet0.has(sessionId)) &&
+                    (membershipSet1 === null || membershipSet1.has(sessionId)) &&
+                    (membershipSet2 === null || membershipSet2.has(sessionId)) &&
+                    (membershipSet3 === null || membershipSet3.has(sessionId)) &&
+                    (membershipSet4 === null || membershipSet4.has(sessionId)) &&
+                    (membershipSet5 === null || membershipSet5.has(sessionId)) &&
+                    (membershipSet6 === null || membershipSet6.has(sessionId)) &&
+                    (membershipSet7 === null || membershipSet7.has(sessionId))
+                ) {
+                    if (!resultIds) {
+                        resultIds = new Set<string>();
+                    }
+                    resultIds.add(sessionId);
+                }
+            }
+            return resultIds ?? new Set<string>();
+        }
+        if (queryTermCount === 9) {
+            const term0 = queryTerms[0];
+            const term1 = queryTerms[1];
+            const term2 = queryTerms[2];
+            const term3 = queryTerms[3];
+            const term4 = queryTerms[4];
+            const term5 = queryTerms[5];
+            const term6 = queryTerms[6];
+            const term7 = queryTerms[7];
+            const term8 = queryTerms[8];
+            const ids0 = index.terms[term0];
+            const ids1 = index.terms[term1];
+            const ids2 = index.terms[term2];
+            const ids3 = index.terms[term3];
+            const ids4 = index.terms[term4];
+            const ids5 = index.terms[term5];
+            const ids6 = index.terms[term6];
+            const ids7 = index.terms[term7];
+            const ids8 = index.terms[term8];
+
+            if (
+                !ids0 || ids0.length === 0 ||
+                !ids1 || ids1.length === 0 ||
+                !ids2 || ids2.length === 0 ||
+                !ids3 || ids3.length === 0 ||
+                !ids4 || ids4.length === 0 ||
+                !ids5 || ids5.length === 0 ||
+                !ids6 || ids6.length === 0 ||
+                !ids7 || ids7.length === 0 ||
+                !ids8 || ids8.length === 0
+            ) {
+                return new Set<string>();
+            }
+
+            let smallestIndex = 0;
+            let candidateIds = ids0;
+            if (ids1.length < candidateIds.length) {
+                smallestIndex = 1;
+                candidateIds = ids1;
+            }
+            if (ids2.length < candidateIds.length) {
+                smallestIndex = 2;
+                candidateIds = ids2;
+            }
+            if (ids3.length < candidateIds.length) {
+                smallestIndex = 3;
+                candidateIds = ids3;
+            }
+            if (ids4.length < candidateIds.length) {
+                smallestIndex = 4;
+                candidateIds = ids4;
+            }
+            if (ids5.length < candidateIds.length) {
+                smallestIndex = 5;
+                candidateIds = ids5;
+            }
+            if (ids6.length < candidateIds.length) {
+                smallestIndex = 6;
+                candidateIds = ids6;
+            }
+            if (ids7.length < candidateIds.length) {
+                smallestIndex = 7;
+                candidateIds = ids7;
+            }
+            if (ids8.length < candidateIds.length) {
+                smallestIndex = 8;
+                candidateIds = ids8;
+            }
+
+            if (candidateIds.length === 1) {
+                const sessionId = candidateIds[0];
+                if (
+                    (smallestIndex === 0 || ids0.includes(sessionId)) &&
+                    (smallestIndex === 1 || ids1.includes(sessionId)) &&
+                    (smallestIndex === 2 || ids2.includes(sessionId)) &&
+                    (smallestIndex === 3 || ids3.includes(sessionId)) &&
+                    (smallestIndex === 4 || ids4.includes(sessionId)) &&
+                    (smallestIndex === 5 || ids5.includes(sessionId)) &&
+                    (smallestIndex === 6 || ids6.includes(sessionId)) &&
+                    (smallestIndex === 7 || ids7.includes(sessionId)) &&
+                    (smallestIndex === 8 || ids8.includes(sessionId))
+                ) {
+                    return createSingletonResult(sessionId);
+                }
+                return new Set<string>();
+            }
+
+            const membershipSet0 = smallestIndex === 0 ? null : getPostingSet(term0, ids0);
+            const membershipSet1 = smallestIndex === 1 ? null : getPostingSet(term1, ids1);
+            const membershipSet2 = smallestIndex === 2 ? null : getPostingSet(term2, ids2);
+            const membershipSet3 = smallestIndex === 3 ? null : getPostingSet(term3, ids3);
+            const membershipSet4 = smallestIndex === 4 ? null : getPostingSet(term4, ids4);
+            const membershipSet5 = smallestIndex === 5 ? null : getPostingSet(term5, ids5);
+            const membershipSet6 = smallestIndex === 6 ? null : getPostingSet(term6, ids6);
+            const membershipSet7 = smallestIndex === 7 ? null : getPostingSet(term7, ids7);
+            const membershipSet8 = smallestIndex === 8 ? null : getPostingSet(term8, ids8);
+
+            let resultIds: Set<string> | null = null;
+            for (let i = 0; i < candidateIds.length; i++) {
+                const sessionId = candidateIds[i];
+                if (
+                    (membershipSet0 === null || membershipSet0.has(sessionId)) &&
+                    (membershipSet1 === null || membershipSet1.has(sessionId)) &&
+                    (membershipSet2 === null || membershipSet2.has(sessionId)) &&
+                    (membershipSet3 === null || membershipSet3.has(sessionId)) &&
+                    (membershipSet4 === null || membershipSet4.has(sessionId)) &&
+                    (membershipSet5 === null || membershipSet5.has(sessionId)) &&
+                    (membershipSet6 === null || membershipSet6.has(sessionId)) &&
+                    (membershipSet7 === null || membershipSet7.has(sessionId)) &&
+                    (membershipSet8 === null || membershipSet8.has(sessionId))
+                ) {
+                    if (!resultIds) {
+                        resultIds = new Set<string>();
+                    }
+                    resultIds.add(sessionId);
+                }
+            }
+            return resultIds ?? new Set<string>();
+        }
 
         const initialIds = index.terms[queryTerms[0]];
         if (!initialIds || initialIds.length === 0) {
@@ -3387,6 +3625,20 @@ export const SearchIndexService = {
                 smallestTermIndex = i;
                 firstIds = ids;
             }
+        }
+
+        if (firstIds.length === 1) {
+            const sessionId = firstIds[0];
+            for (let i = 0; i < queryTerms.length; i++) {
+                if (i === smallestTermIndex) {
+                    continue;
+                }
+                const ids = index.terms[queryTerms[i]]!;
+                if (!ids.includes(sessionId)) {
+                    return new Set<string>();
+                }
+            }
+            return createSingletonResult(sessionId);
         }
 
         const remainingTermCount = queryTerms.length - 1;

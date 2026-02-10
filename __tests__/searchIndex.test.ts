@@ -148,6 +148,32 @@ describe('SearchIndexService', () => {
     expect(result).toEqual(new Set(['s1', 's3']));
   });
 
+  it('intersects eight-term queries correctly', () => {
+    const sessions: ChatSession[] = [
+      createSession('s1', 'alpha beta gamma delta', 'epsilon zeta eta theta'),
+      createSession('s2', 'alpha beta gamma delta', 'epsilon zeta eta'),
+      createSession('s3', 'alpha beta gamma', 'delta epsilon zeta eta theta'),
+    ];
+    SearchIndexService.rebuildIndex(sessions);
+
+    const result = SearchIndexService.searchSessions('alpha beta gamma delta epsilon zeta eta theta');
+
+    expect(result).toEqual(new Set(['s1', 's3']));
+  });
+
+  it('intersects nine-term queries correctly', () => {
+    const sessions: ChatSession[] = [
+      createSession('s1', 'alpha beta gamma delta epsilon', 'zeta eta theta iota'),
+      createSession('s2', 'alpha beta gamma delta epsilon', 'zeta eta theta'),
+      createSession('s3', 'alpha beta gamma delta', 'epsilon zeta eta theta iota'),
+    ];
+    SearchIndexService.rebuildIndex(sessions);
+
+    const result = SearchIndexService.searchSessions('alpha beta gamma delta epsilon zeta eta theta iota');
+
+    expect(result).toEqual(new Set(['s1', 's3']));
+  });
+
   it('handles singleton-candidate intersections without changing results', () => {
     const sessions: ChatSession[] = [
       createSession('s1', 'rareterm alpha beta', 'gamma delta epsilon'),
@@ -157,6 +183,33 @@ describe('SearchIndexService', () => {
     SearchIndexService.rebuildIndex(sessions);
 
     const result = SearchIndexService.searchSessions('rareterm alpha beta gamma delta epsilon');
+
+    expect(result).toEqual(new Set(['s1']));
+  });
+
+  it('handles singleton-candidate intersections in generic 10-term path', () => {
+    const sessions: ChatSession[] = [
+      createSession(
+        's1',
+        'rareterm alpha beta gamma delta epsilon',
+        'zeta eta theta iota kappa'
+      ),
+      createSession(
+        's2',
+        'alpha beta gamma delta epsilon',
+        'zeta eta theta iota kappa'
+      ),
+      createSession(
+        's3',
+        'alpha beta gamma',
+        'delta epsilon zeta eta theta iota'
+      ),
+    ];
+    SearchIndexService.rebuildIndex(sessions);
+
+    const result = SearchIndexService.searchSessions(
+      'rareterm alpha beta gamma delta epsilon zeta eta theta iota'
+    );
 
     expect(result).toEqual(new Set(['s1']));
   });
