@@ -95,11 +95,16 @@ function tokenize(query: string, caseSensitive: boolean): string[] {
     const text = caseSensitive ? query : query.toLowerCase();
     const splitTerms = text.split(/\s+/);
     const tokens: string[] = [];
+    const seenTerms = new Set<string>();
     for (let i = 0; i < splitTerms.length; i++) {
         const term = splitTerms[i];
         if (term.length < 2 || STOP_WORDS.has(term)) {
             continue;
         }
+        if (seenTerms.has(term)) {
+            continue;
+        }
+        seenTerms.add(term);
         tokens.push(term);
     }
 
@@ -273,26 +278,12 @@ function performSearch(
         ...options
     };
 
-    let filteredSessions = sessions;
     let messagesSearched = 0;
-
-    // Apply session filter
-    if (filters.sessionId) {
-        filteredSessions = filteredSessions.filter(s => s.id === filters.sessionId);
-    }
-
-    // Apply date filters
-    if (filters.dateFrom) {
-        filteredSessions = filteredSessions.filter(s => s.lastModified >= filters.dateFrom!);
-    }
-    if (filters.dateTo) {
-        filteredSessions = filteredSessions.filter(s => s.lastModified <= filters.dateTo!);
-    }
-
-    // Apply model filter
-    if (filters.model) {
-        filteredSessions = filteredSessions.filter(s => s.modelId === filters.model);
-    }
+    const fromTime = filters.dateFrom;
+    const toTime = filters.dateTo;
+    const sessionIdFilter = filters.sessionId;
+    const modelFilter = filters.model;
+    let sessionsSearched = 0;
 
     const maxResults = Math.max(1, opts.maxResults || 50);
     const maxBufferSize = maxResults * 2;
@@ -316,7 +307,22 @@ function performSearch(
     const queryTerms = tokenize(query, opts.caseSensitive || false);
     const queryLower = opts.caseSensitive ? query : query.toLowerCase();
 
-    for (const session of filteredSessions) {
+    for (let sessionIndex = 0; sessionIndex < sessions.length; sessionIndex++) {
+        const session = sessions[sessionIndex];
+        if (sessionIdFilter && session.id !== sessionIdFilter) {
+            continue;
+        }
+        if (fromTime !== undefined && session.lastModified < fromTime) {
+            continue;
+        }
+        if (toTime !== undefined && session.lastModified > toTime) {
+            continue;
+        }
+        if (modelFilter && session.modelId !== modelFilter) {
+            continue;
+        }
+
+        sessionsSearched++;
         if (session.encrypted) continue;
 
         // Search in session title
@@ -394,7 +400,7 @@ function performSearch(
         results: limitedResults,
         stats: {
             totalResults: results.length,
-            sessionsSearched: filteredSessions.length,
+            sessionsSearched,
             messagesSearched,
             searchTimeMs: Math.round(endTime - startTime),
             topKeywords,

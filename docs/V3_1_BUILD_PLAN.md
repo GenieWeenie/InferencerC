@@ -215,6 +215,12 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 146: in `search.worker`, optimize tokenization/keyword extraction loops and add a small bounded query-token cache to reduce repeated split/filter overhead.
    - Pass 147: add `SearchService.searchAsync` tests validating index-prefilter session reduction and zero-candidate early return behavior.
    - Pass 148: normalize async stats shape in `SearchService.searchAsync` and consistently report async search timings through `performanceService`.
+   - Pass 150: in `autoTaggingService`, add raw-value-keyed in-memory cache for parsed conversation-tag payloads and a bulk session-tag lookup map.
+   - Pass 151: in `SearchService`, switch tag filtering to consume `autoTaggingService.getTagsLookup()` once per search instead of per-session `getTags` reads.
+   - Pass 152: in `SearchService`, consolidate metadata filtering (session/date/model/tag) into a single predicate pass shared by sync and async search paths.
+   - Pass 153: in `search.worker`, remove pre-filter array rebuilding and evaluate session/date/model filters inline during the main session loop.
+   - Pass 154: in `search.worker` tokenization, dedupe query terms while preserving first-seen order to avoid redundant term matching work.
+   - Pass 155: expand `SearchService.searchAsync` tests to cover tag-filtered and combined model/date/tag filter behavior before worker dispatch.
 
 ## Release Checklist for v3.1.x
 

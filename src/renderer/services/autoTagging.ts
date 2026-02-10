@@ -82,6 +82,9 @@ export class AutoTaggingService {
     private static instance: AutoTaggingService;
     private readonly STORAGE_KEY = 'conversation_tags';
     private customTags: Map<string, Tag> = new Map();
+    private tagsCacheRaw: string | null = null;
+    private tagsCacheList: ConversationTags[] = [];
+    private tagsBySessionCache: Map<string, ConversationTags> = new Map();
 
     private constructor() {
         this.loadCustomTags();
@@ -205,18 +208,40 @@ export class AutoTaggingService {
      */
     private saveTags(tags: ConversationTags): void {
         try {
-            const stored = localStorage.getItem(this.STORAGE_KEY);
-            const allTags: ConversationTags[] = stored ? JSON.parse(stored) : [];
+            const allTags = this.readAllTags();
             const index = allTags.findIndex(t => t.sessionId === tags.sessionId);
             if (index >= 0) {
                 allTags[index] = tags;
             } else {
                 allTags.push(tags);
             }
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(allTags));
+            const nextRaw = JSON.stringify(allTags);
+            localStorage.setItem(this.STORAGE_KEY, nextRaw);
+            this.tagsCacheRaw = nextRaw;
+            this.tagsCacheList = allTags;
+            this.tagsBySessionCache = new Map(allTags.map((entry) => [entry.sessionId, entry]));
         } catch (error) {
             console.error('Failed to save tags:', error);
         }
+    }
+
+    private readAllTags(): ConversationTags[] {
+        const stored = localStorage.getItem(this.STORAGE_KEY);
+        if (!stored) {
+            this.tagsCacheRaw = stored;
+            this.tagsCacheList = [];
+            this.tagsBySessionCache = new Map();
+            return [];
+        }
+        if (stored === this.tagsCacheRaw) {
+            return this.tagsCacheList;
+        }
+
+        const parsed: ConversationTags[] = JSON.parse(stored);
+        this.tagsCacheRaw = stored;
+        this.tagsCacheList = parsed;
+        this.tagsBySessionCache = new Map(parsed.map((entry) => [entry.sessionId, entry]));
+        return parsed;
     }
 
     /**
@@ -224,13 +249,24 @@ export class AutoTaggingService {
      */
     getTags(sessionId: string): ConversationTags | null {
         try {
-            const stored = localStorage.getItem(this.STORAGE_KEY);
-            if (!stored) return null;
-            const allTags: ConversationTags[] = JSON.parse(stored);
-            return allTags.find(t => t.sessionId === sessionId) || null;
+            this.readAllTags();
+            return this.tagsBySessionCache.get(sessionId) || null;
         } catch (error) {
             console.error('Failed to load tags:', error);
             return null;
+        }
+    }
+
+    /**
+     * Get a bulk lookup of sessionId -> tags entry
+     */
+    getTagsLookup(): Map<string, ConversationTags> {
+        try {
+            this.readAllTags();
+            return this.tagsBySessionCache;
+        } catch (error) {
+            console.error('Failed to load tags lookup:', error);
+            return new Map();
         }
     }
 
@@ -252,9 +288,7 @@ export class AutoTaggingService {
      */
     getAllTags(): string[] {
         try {
-            const stored = localStorage.getItem(this.STORAGE_KEY);
-            if (!stored) return [];
-            const allTags: ConversationTags[] = JSON.parse(stored);
+            const allTags = this.readAllTags();
             const uniqueTags = new Set<string>();
             allTags.forEach(ct => {
                 ct.tags.forEach(tag => uniqueTags.add(tag));
@@ -271,9 +305,7 @@ export class AutoTaggingService {
      */
     getConversationsByTag(tagId: string): string[] {
         try {
-            const stored = localStorage.getItem(this.STORAGE_KEY);
-            if (!stored) return [];
-            const allTags: ConversationTags[] = JSON.parse(stored);
+            const allTags = this.readAllTags();
             return allTags
                 .filter(ct => ct.tags.includes(tagId))
                 .map(ct => ct.sessionId);

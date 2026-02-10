@@ -12,7 +12,7 @@
 import { HistoryService } from './history';
 import { ChatSession } from '../../shared/types';
 import { SearchIndexService } from './searchIndex';
-import { autoTaggingService } from './autoTagging';
+import { autoTaggingService, type ConversationTags } from './autoTagging';
 import { workerManager } from './workerManager';
 import { performanceService } from './performance';
 
@@ -84,6 +84,70 @@ export class SearchService {
         };
     }
 
+    private static filterSessions(
+        sessions: ChatSession[],
+        filters?: SearchFilters,
+        tagsLookup?: Map<string, ConversationTags>
+    ): ChatSession[] {
+        if (!filters) {
+            return sessions;
+        }
+
+        const fromTime = filters.dateFrom?.getTime();
+        const toTime = filters.dateTo?.getTime();
+        const selectedTags = filters.tags && filters.tags.length > 0
+            ? new Set(filters.tags)
+            : null;
+        const hasAnyFilter = Boolean(
+            filters.sessionId ||
+            fromTime !== undefined ||
+            toTime !== undefined ||
+            filters.model ||
+            selectedTags
+        );
+        if (!hasAnyFilter) {
+            return sessions;
+        }
+
+        const filtered: ChatSession[] = [];
+        for (let i = 0; i < sessions.length; i++) {
+            const session = sessions[i];
+            if (filters.sessionId && session.id !== filters.sessionId) {
+                continue;
+            }
+            if (fromTime !== undefined && session.lastModified < fromTime) {
+                continue;
+            }
+            if (toTime !== undefined && session.lastModified > toTime) {
+                continue;
+            }
+            if (filters.model && session.modelId !== filters.model) {
+                continue;
+            }
+
+            if (selectedTags) {
+                const conversationTags = tagsLookup?.get(session.id)?.tags;
+                if (!conversationTags || conversationTags.length === 0) {
+                    continue;
+                }
+                let hasSelectedTag = false;
+                for (let tagIndex = 0; tagIndex < conversationTags.length; tagIndex++) {
+                    if (selectedTags.has(conversationTags[tagIndex])) {
+                        hasSelectedTag = true;
+                        break;
+                    }
+                }
+                if (!hasSelectedTag) {
+                    continue;
+                }
+            }
+
+            filtered.push(session);
+        }
+
+        return filtered;
+    }
+
     /**
      * Search across all conversations
      */
@@ -104,35 +168,10 @@ export class SearchService {
 
         let sessions = HistoryService.getAllSessions();
         let messagesSearched = 0;
-
-        // Apply session filter
-        if (filters?.sessionId) {
-            sessions = sessions.filter(s => s.id === filters.sessionId);
-        }
-
-        // Apply date filters
-        if (filters?.dateFrom) {
-            const fromTime = filters.dateFrom.getTime();
-            sessions = sessions.filter(s => s.lastModified >= fromTime);
-        }
-        if (filters?.dateTo) {
-            const toTime = filters.dateTo.getTime();
-            sessions = sessions.filter(s => s.lastModified <= toTime);
-        }
-
-        // Apply model filter
-        if (filters?.model) {
-            sessions = sessions.filter(s => s.modelId === filters.model);
-        }
-
-        // Apply tag filter (any selected tag)
-        if (filters?.tags && filters.tags.length > 0) {
-            const selectedTags = new Set(filters.tags);
-            sessions = sessions.filter(session => {
-                const conversationTags = autoTaggingService.getTags(session.id)?.tags || [];
-                return conversationTags.some(tag => selectedTags.has(tag));
-            });
-        }
+        const tagsLookup = filters?.tags && filters.tags.length > 0
+            ? autoTaggingService.getTagsLookup()
+            : undefined;
+        sessions = this.filterSessions(sessions, filters, tagsLookup);
 
         let regex: RegExp | null = null;
         if (filters?.useRegex) {
@@ -307,28 +346,10 @@ export class SearchService {
         };
 
         let sessions = HistoryService.getAllSessions();
-
-        if (filters?.sessionId) {
-            sessions = sessions.filter(s => s.id === filters.sessionId);
-        }
-        if (filters?.dateFrom) {
-            const fromTime = filters.dateFrom.getTime();
-            sessions = sessions.filter(s => s.lastModified >= fromTime);
-        }
-        if (filters?.dateTo) {
-            const toTime = filters.dateTo.getTime();
-            sessions = sessions.filter(s => s.lastModified <= toTime);
-        }
-        if (filters?.model) {
-            sessions = sessions.filter(s => s.modelId === filters.model);
-        }
-        if (filters?.tags && filters.tags.length > 0) {
-            const selectedTags = new Set(filters.tags);
-            sessions = sessions.filter(session => {
-                const conversationTags = autoTaggingService.getTags(session.id)?.tags || [];
-                return conversationTags.some(tag => selectedTags.has(tag));
-            });
-        }
+        const tagsLookup = filters?.tags && filters.tags.length > 0
+            ? autoTaggingService.getTagsLookup()
+            : undefined;
+        sessions = this.filterSessions(sessions, filters, tagsLookup);
 
         if (query.trim().length > 2) {
             const candidateIds = SearchIndexService.searchSessions(query);
