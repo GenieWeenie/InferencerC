@@ -19,6 +19,13 @@ import {
     normalizeChatSearchQuery,
 } from '../lib/chatSearch';
 import {
+    buildChatRowMetadata,
+    buildSearchResultRows,
+    EXPERIMENTAL_FEATURE_MENU_ITEMS,
+    type ExperimentalFeatureMenuItem,
+    type SearchResultPreviewCacheEntry,
+} from '../lib/chatRenderModels';
+import {
     dispatchChatShortcutAction,
     isTypingShortcutTarget,
     resolveChatShortcutAction,
@@ -131,6 +138,7 @@ const MCP_SERVERS_CONFIG_KEY = 'mcp_servers';
 const GITHUB_CREDENTIAL_MARKER_KEY = 'secure_marker_github_api_key';
 const GITHUB_CREDENTIAL_LEGACY_KEY = 'github_api_key';
 const MAX_ACTIVITY_LOG_ENTRIES = 200;
+const NOOP = () => {};
 
 type OnboardingServiceModule = typeof import('../services/onboarding');
 type CloudSyncService = typeof import('../services/cloudSync')['cloudSyncService'];
@@ -380,6 +388,18 @@ const EMPTY_INTEGRATION_AVAILABILITY: IntegrationAvailability = {
     calendar: false,
 };
 
+const EXPERIMENTAL_FEATURE_ICON_MAP: Record<ExperimentalFeatureMenuItem['icon'], React.ComponentType<{ size?: number }>> = {
+    brain: Brain,
+    multimodal: Video,
+    collaboration: Users,
+    cloud: Cloud,
+    workspaces: Shield,
+    compliance: ClipboardList,
+    blockchain: Link,
+    agents: Bot,
+    federated: Shield,
+};
+
 const parseStorageConfig = (key: string): Record<string, any> | null => {
     try {
         const raw = localStorage.getItem(key);
@@ -455,6 +475,71 @@ const ToolCallsList: React.FC<ToolCallsListProps> = React.memo(({
         ))}
     </div>
 ), (prev, next) => prev.toolCalls === next.toolCalls && prev.animated === next.animated);
+
+interface MessageHoverActionsProps {
+    isBookmarked: boolean;
+    messageContent: string;
+    messageIndex: number;
+    messageRole: string;
+    isLoading: boolean;
+    onToggleBookmark: () => void;
+    onCopy: () => void;
+    onDelete: () => void;
+    onEdit?: () => void;
+    onRegenerate?: () => void;
+    onBranch: () => void;
+}
+
+const MessageHoverActions: React.FC<MessageHoverActionsProps> = React.memo(({
+    isBookmarked,
+    messageContent,
+    messageIndex,
+    messageRole,
+    isLoading,
+    onToggleBookmark,
+    onCopy,
+    onDelete,
+    onEdit,
+    onRegenerate,
+    onBranch,
+}) => (
+    <div className="absolute top-2 right-2 flex items-center gap-1.5 rounded-xl border border-slate-700/70 bg-slate-900/85 px-1 py-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto transition-opacity z-20 backdrop-blur-sm">
+        <button
+            onClick={onToggleBookmark}
+            className={`h-8 w-8 rounded-lg text-white flex items-center justify-center shadow-sm cursor-pointer transition-colors ${isBookmarked
+                ? 'bg-yellow-500 hover:bg-yellow-600'
+                : 'bg-slate-700/90 hover:bg-slate-600'
+                }`}
+            title={isBookmarked ? 'Remove bookmark' : 'Bookmark message'}
+        >
+            <Star size={12} fill={isBookmarked ? 'currentColor' : 'none'} />
+        </button>
+        <React.Suspense fallback={null}>
+            <MessageActionsMenu
+                messageContent={messageContent}
+                messageIndex={messageIndex}
+                messageRole={messageRole}
+                onCopy={onCopy}
+                onDelete={onDelete}
+                onEdit={onEdit}
+                onRegenerate={onRegenerate}
+                onBranch={onBranch}
+            />
+        </React.Suspense>
+    </div>
+), (prev, next) => (
+    prev.isBookmarked === next.isBookmarked &&
+    prev.messageContent === next.messageContent &&
+    prev.messageIndex === next.messageIndex &&
+    prev.messageRole === next.messageRole &&
+    prev.isLoading === next.isLoading &&
+    prev.onToggleBookmark === next.onToggleBookmark &&
+    prev.onCopy === next.onCopy &&
+    prev.onDelete === next.onDelete &&
+    prev.onEdit === next.onEdit &&
+    prev.onRegenerate === next.onRegenerate &&
+    prev.onBranch === next.onBranch
+));
 
 const resolveBattleModelName = (
     content: string | undefined,
@@ -715,30 +800,19 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                 } ${msg.role === 'user' ? 'bg-primary/20 text-white rounded-tr-sm border border-primary/20' : 'bg-slate-800/80 text-slate-200 rounded-tl-sm border border-slate-700/50 backdrop-blur-sm'}`}
             data-message-bubble-index={index}
             style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', fontSize: `${conversationFontSize}px`, maxWidth: isCompactViewport ? '95%' : '85%' }}>
-                <div className="absolute top-2 right-2 flex items-center gap-1.5 rounded-xl border border-slate-700/70 bg-slate-900/85 px-1 py-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto transition-opacity z-20 backdrop-blur-sm">
-                    <button
-                        onClick={handleToggleBookmark}
-                        className={`h-8 w-8 rounded-lg text-white flex items-center justify-center shadow-sm cursor-pointer transition-colors ${isBookmarked
-                            ? 'bg-yellow-500 hover:bg-yellow-600'
-                            : 'bg-slate-700/90 hover:bg-slate-600'
-                            }`}
-                        title={isBookmarked ? 'Remove bookmark' : 'Bookmark message'}
-                    >
-                        <Star size={12} fill={isBookmarked ? 'currentColor' : 'none'} />
-                    </button>
-                    <React.Suspense fallback={null}>
-                        <MessageActionsMenu
-                            messageContent={msg.content || ''}
-                            messageIndex={index}
-                            messageRole={msg.role}
-                            onCopy={handleCopyMessage}
-                            onDelete={handleDeleteMessage}
-                            onEdit={msg.role === 'user' ? handleEditMessageAction : undefined}
-                            onRegenerate={msg.role === 'assistant' && !msg.isLoading ? handleRegenerateMessageAction : undefined}
-                            onBranch={handleBranchConversationAction}
-                        />
-                    </React.Suspense>
-                </div>
+                <MessageHoverActions
+                    isBookmarked={isBookmarked}
+                    messageContent={msg.content || ''}
+                    messageIndex={index}
+                    messageRole={msg.role}
+                    isLoading={Boolean(msg.isLoading)}
+                    onToggleBookmark={handleToggleBookmark}
+                    onCopy={handleCopyMessage}
+                    onDelete={handleDeleteMessage}
+                    onEdit={msg.role === 'user' ? handleEditMessageAction : undefined}
+                    onRegenerate={msg.role === 'assistant' && !msg.isLoading ? handleRegenerateMessageAction : undefined}
+                    onBranch={handleBranchConversationAction}
+                />
                 {msg.role === 'assistant' ? (
                     <div>
                         {msg.isLoading ? (
@@ -1232,6 +1306,187 @@ const TopHeaderSecondaryActions: React.FC<TopHeaderSecondaryActionsProps> = Reac
     prev.onOpenCalendarSchedule === next.onOpenCalendarSchedule
 ));
 
+interface ExperimentalFeatureAction {
+    key: string;
+    label: string;
+    icon: React.ComponentType<{ size?: number }>;
+    onClick: () => void;
+}
+
+interface ExperimentalFeaturesDropdownProps {
+    actions: ExperimentalFeatureAction[];
+}
+
+const ExperimentalFeaturesDropdown: React.FC<ExperimentalFeaturesDropdownProps> = React.memo(({
+    actions,
+}) => (
+    <div className="relative group flex-shrink-0">
+        <button
+            title="Experimental Features"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs whitespace-nowrap"
+        >
+            <Sparkles size={14} /> <span>Experimental</span> <ChevronDown size={12} />
+        </button>
+        <div className="absolute top-full left-0 mt-1 w-64 bg-slate-800 border border-slate-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+            <div className="p-2 space-y-1">
+                {actions.map((action) => {
+                    const Icon = action.icon;
+                    return (
+                        <button
+                            key={action.key}
+                            onClick={action.onClick}
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700 text-slate-300 rounded text-sm text-left"
+                        >
+                            <Icon size={14} /> <span>{action.label}</span>
+                        </button>
+                    );
+                })}
+            </div>
+        </div>
+    </div>
+), (prev, next) => prev.actions === next.actions);
+
+interface TopHeaderModelUtilityControlsProps {
+    battleMode: boolean;
+    currentModel: string;
+    secondaryModel: string;
+    allModelOptionElements: React.ReactNode;
+    onCurrentModelChange: (value: string) => void;
+    onSecondaryModelChange: (value: string) => void;
+    showRequestLog: boolean;
+    onToggleRequestLog: () => void;
+    apiLogCount: number;
+    hasHistory: boolean;
+    showSearch: boolean;
+    onToggleSearch: () => void;
+    diagnosticsPanelRef: React.RefObject<HTMLDivElement | null>;
+    diagnosticsButtonRef: React.RefObject<HTMLButtonElement | null>;
+    diagnosticsStatusClassName: string;
+    diagnosticsStatusLabel: string;
+    diagnosticsReady: boolean;
+    showDiagnosticsPanel: boolean;
+    onToggleDiagnosticsPanel: () => void;
+    diagnosticsPopover: React.ReactNode;
+}
+
+const TopHeaderModelUtilityControls: React.FC<TopHeaderModelUtilityControlsProps> = React.memo(({
+    battleMode,
+    currentModel,
+    secondaryModel,
+    allModelOptionElements,
+    onCurrentModelChange,
+    onSecondaryModelChange,
+    showRequestLog,
+    onToggleRequestLog,
+    apiLogCount,
+    hasHistory,
+    showSearch,
+    onToggleSearch,
+    diagnosticsPanelRef,
+    diagnosticsButtonRef,
+    diagnosticsStatusClassName,
+    diagnosticsStatusLabel,
+    diagnosticsReady,
+    showDiagnosticsPanel,
+    onToggleDiagnosticsPanel,
+    diagnosticsPopover,
+}) => {
+    const handleCurrentModelSelect = React.useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+        onCurrentModelChange(event.target.value);
+    }, [onCurrentModelChange]);
+
+    const handleSecondaryModelSelect = React.useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+        onSecondaryModelChange(event.target.value);
+    }, [onSecondaryModelChange]);
+
+    return (
+        <>
+            <div className="h-6 w-px bg-slate-700 mx-1 flex-shrink-0"></div>
+            <div className="flex items-center gap-2 min-w-0 max-w-[200px] flex-shrink-0">
+                {!battleMode ? (
+                    <>
+                        <span className="font-medium text-slate-400 text-xs whitespace-nowrap flex-shrink-0">Model:</span>
+                        <div className="relative min-w-0 flex-1">
+                            <select value={currentModel} onChange={handleCurrentModelSelect} className="w-full bg-slate-800 border-none text-white text-xs rounded-md px-2 py-1 focus:ring-2 focus:ring-primary/50 appearance-none cursor-pointer hover:bg-slate-700 transition-colors truncate">
+                                {allModelOptionElements}
+                            </select>
+                            <ChevronRight className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none rotate-90" size={10} />
+                        </div>
+                    </>
+                ) : (
+                    <div className="flex items-center gap-1.5 w-full animate-in fade-in slide-in-from-top-1">
+                        <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-red-500 text-xs flex items-center gap-1 flex-shrink-0"><Users size={12} /> VS</span>
+                        <div className="relative flex-1 min-w-0">
+                            <select value={currentModel} onChange={handleCurrentModelSelect} className="w-full bg-slate-800 border-l-2 border-l-blue-500 text-white text-xs rounded px-1.5 py-1 appearance-none cursor-pointer hover:bg-slate-700 truncate">
+                                {allModelOptionElements}
+                            </select>
+                        </div>
+                        <div className="relative flex-1 min-w-0">
+                            <select value={secondaryModel} onChange={handleSecondaryModelSelect} className="w-full bg-slate-800 border-l-2 border-l-orange-500 text-white text-xs rounded px-1.5 py-1 appearance-none cursor-pointer hover:bg-slate-700 truncate">
+                                {allModelOptionElements}
+                            </select>
+                        </div>
+                    </div>
+                )}
+            </div>
+            <button
+                onClick={onToggleRequestLog}
+                title="View Request/Response Log"
+                className={`p-1.5 rounded-md transition-colors border border-slate-700 relative flex-shrink-0 ${showRequestLog ? 'bg-slate-800 text-white' : 'hover:bg-slate-800 text-slate-400'}`}
+            >
+                <FileText size={14} />
+                {apiLogCount > 0 && (
+                    <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-primary text-white text-[8px] font-bold rounded-full flex items-center justify-center">
+                        {apiLogCount > 9 ? '9+' : apiLogCount}
+                    </span>
+                )}
+            </button>
+            {hasHistory && (
+                <button
+                    onClick={onToggleSearch}
+                    title="Search in chat (Ctrl+F)"
+                    className={`p-1.5 rounded-md transition-colors border border-slate-700 flex-shrink-0 ${showSearch ? 'bg-slate-800 text-white' : 'hover:bg-slate-800 text-slate-400'}`}
+                >
+                    <Search size={14} />
+                </button>
+            )}
+            <div ref={diagnosticsPanelRef} className="relative flex-shrink-0">
+                <button
+                    ref={diagnosticsButtonRef}
+                    onClick={onToggleDiagnosticsPanel}
+                    title="Startup diagnostics and quick fixes"
+                    className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors border text-xs ${diagnosticsStatusClassName}`}
+                >
+                    {diagnosticsReady ? <Check size={12} /> : <AlertTriangle size={12} />}
+                    <span>{diagnosticsStatusLabel}</span>
+                </button>
+                {showDiagnosticsPanel && diagnosticsPopover}
+            </div>
+        </>
+    );
+}, (prev, next) => (
+    prev.battleMode === next.battleMode &&
+    prev.currentModel === next.currentModel &&
+    prev.secondaryModel === next.secondaryModel &&
+    prev.allModelOptionElements === next.allModelOptionElements &&
+    prev.onCurrentModelChange === next.onCurrentModelChange &&
+    prev.onSecondaryModelChange === next.onSecondaryModelChange &&
+    prev.showRequestLog === next.showRequestLog &&
+    prev.onToggleRequestLog === next.onToggleRequestLog &&
+    prev.apiLogCount === next.apiLogCount &&
+    prev.hasHistory === next.hasHistory &&
+    prev.showSearch === next.showSearch &&
+    prev.onToggleSearch === next.onToggleSearch &&
+    prev.diagnosticsPanelRef === next.diagnosticsPanelRef &&
+    prev.diagnosticsButtonRef === next.diagnosticsButtonRef &&
+    prev.diagnosticsStatusClassName === next.diagnosticsStatusClassName &&
+    prev.diagnosticsStatusLabel === next.diagnosticsStatusLabel &&
+    prev.diagnosticsReady === next.diagnosticsReady &&
+    prev.showDiagnosticsPanel === next.showDiagnosticsPanel &&
+    prev.onToggleDiagnosticsPanel === next.onToggleDiagnosticsPanel &&
+    prev.diagnosticsPopover === next.diagnosticsPopover
+));
+
 const readPersistedApiLogCount = (): number => {
     try {
         const rawCount = localStorage.getItem(ACTIVITY_LOG_COUNT_KEY);
@@ -1384,6 +1639,7 @@ const Chat: React.FC = () => {
     const [showSearchResultsList, setShowSearchResultsList] = React.useState(false);
     const virtuosoRef = React.useRef<any>(null);
     const [VirtuosoComponent, setVirtuosoComponent] = React.useState<any>(null);
+    const searchResultPreviewCacheRef = React.useRef<Map<number, SearchResultPreviewCacheEntry>>(new Map());
 
     // FPS monitoring refs
     const fpsFrameCount = React.useRef(0);
@@ -2249,6 +2505,85 @@ const Chat: React.FC = () => {
             window.removeEventListener('scroll', updateDiagnosticsPanelPosition, true);
         };
     }, [showDiagnosticsPanel, updateDiagnosticsPanelPosition]);
+
+    const handleToggleDevMonitors = React.useCallback(() => {
+        setDevMonitorsEnabled((prev) => !prev);
+    }, []);
+
+    const handleCloseDiagnosticsPanel = React.useCallback(() => {
+        setShowDiagnosticsPanel(false);
+    }, []);
+
+    const handleDiagnosticsOpenSettings = React.useCallback(() => {
+        setShowDiagnosticsPanel(false);
+        navigateToTab('settings');
+    }, [navigateToTab]);
+
+    const handleDiagnosticsOpenModels = React.useCallback(() => {
+        setShowDiagnosticsPanel(false);
+        navigateToTab('models');
+    }, [navigateToTab]);
+
+    const handleDiagnosticsInsertStarterPrompt = React.useCallback(() => {
+        insertStarterPrompt();
+        setShowDiagnosticsPanel(false);
+    }, [insertStarterPrompt]);
+
+    const diagnosticsPopover = React.useMemo(() => {
+        if (!showDiagnosticsPanel) {
+            return null;
+        }
+
+        return (
+            <React.Suspense fallback={null}>
+                <ChatDiagnosticsPopover
+                    ref={diagnosticsPopoverRef}
+                    position={diagnosticsPanelPosition}
+                    status={diagnosticsStatus}
+                    activePerfBenchmark={activePerfBenchmark}
+                    recentPerfBenchmarksCount={recentPerfBenchmarks.length}
+                    latestPerfBenchmark={latestPerfBenchmark}
+                    perfSummary={perfSummary}
+                    formatPerfMs={formatPerfMs}
+                    devMonitorsEnabled={devMonitorsEnabled}
+                    providerReady={providerReady}
+                    modelReady={modelReady}
+                    historyLength={history.length}
+                    promptReady={promptReady}
+                    onClose={handleCloseDiagnosticsPanel}
+                    onClearPerfHistory={clearPerfHistory}
+                    onToggleDevMonitors={handleToggleDevMonitors}
+                    onRequestConnectionRefresh={requestConnectionRefresh}
+                    onAutoSelectFirstModel={selectFirstModel}
+                    onOpenSettings={handleDiagnosticsOpenSettings}
+                    onOpenModels={handleDiagnosticsOpenModels}
+                    onInsertStarterPrompt={handleDiagnosticsInsertStarterPrompt}
+                />
+            </React.Suspense>
+        );
+    }, [
+        showDiagnosticsPanel,
+        diagnosticsPanelPosition,
+        diagnosticsStatus,
+        activePerfBenchmark,
+        recentPerfBenchmarks.length,
+        latestPerfBenchmark,
+        perfSummary,
+        formatPerfMs,
+        devMonitorsEnabled,
+        providerReady,
+        modelReady,
+        history.length,
+        promptReady,
+        handleCloseDiagnosticsPanel,
+        clearPerfHistory,
+        handleToggleDevMonitors,
+        requestConnectionRefresh,
+        selectFirstModel,
+        handleDiagnosticsOpenSettings,
+        handleDiagnosticsOpenModels,
+        handleDiagnosticsInsertStarterPrompt,
+    ]);
 
     const finalizePerfBenchmark = React.useCallback((pending: PendingChatPerfBenchmark) => {
         if (pendingPerfBenchmarkRef.current !== pending || pending.inputToRenderMs === undefined) return;
@@ -3343,6 +3678,91 @@ const Chat: React.FC = () => {
         return next;
     }, [modelOptionItems]);
 
+    const handleCurrentModelChange = React.useCallback((nextModelId: string) => {
+        setCurrentModel(nextModelId);
+    }, [setCurrentModel]);
+
+    const handleSecondaryModelChange = React.useCallback((nextModelId: string) => {
+        setSecondaryModel(nextModelId);
+    }, [setSecondaryModel]);
+
+    const handleToggleRequestLog = React.useCallback(() => {
+        setShowRequestLog((prev) => !prev);
+    }, []);
+
+    const handleToggleSearch = React.useCallback(() => {
+        setShowSearch((prev) => !prev);
+    }, []);
+
+    const handleToggleDiagnosticsPanel = React.useCallback(() => {
+        setShowDiagnosticsPanel((prev) => !prev);
+    }, []);
+
+    const handleOpenBCI = React.useCallback(() => {
+        setShowBCI(true);
+    }, []);
+
+    const handleOpenMultiModal = React.useCallback(() => {
+        setShowMultiModal(true);
+    }, []);
+
+    const handleOpenCollaboration = React.useCallback(() => {
+        setShowCollaboration(true);
+    }, []);
+
+    const handleOpenTeamWorkspaces = React.useCallback(() => {
+        setShowTeamWorkspaces(true);
+    }, []);
+
+    const handleOpenEnterpriseCompliance = React.useCallback(() => {
+        setShowEnterpriseCompliance(true);
+    }, []);
+
+    const handleOpenBlockchain = React.useCallback(() => {
+        setShowBlockchain(true);
+    }, []);
+
+    const handleOpenAIAgents = React.useCallback(() => {
+        setShowAIAgents(true);
+    }, []);
+
+    const handleOpenFederatedLearning = React.useCallback(() => {
+        setShowFederatedLearning(true);
+    }, []);
+
+    const experimentalFeatureOpeners = React.useMemo<Record<string, () => void>>(() => ({
+        bci: handleOpenBCI,
+        multimodal: handleOpenMultiModal,
+        collaboration: handleOpenCollaboration,
+        cloudSync: handleOpenCloudSyncPanel,
+        teamWorkspaces: handleOpenTeamWorkspaces,
+        enterpriseCompliance: handleOpenEnterpriseCompliance,
+        blockchain: handleOpenBlockchain,
+        aiAgents: handleOpenAIAgents,
+        federatedLearning: handleOpenFederatedLearning,
+    }), [
+        handleOpenAIAgents,
+        handleOpenBCI,
+        handleOpenBlockchain,
+        handleOpenCloudSyncPanel,
+        handleOpenCollaboration,
+        handleOpenEnterpriseCompliance,
+        handleOpenFederatedLearning,
+        handleOpenMultiModal,
+        handleOpenTeamWorkspaces,
+    ]);
+
+    const experimentalFeatureActions = React.useMemo<ExperimentalFeatureAction[]>(
+        () =>
+            EXPERIMENTAL_FEATURE_MENU_ITEMS.map((item) => ({
+                key: item.key,
+                label: item.label,
+                icon: EXPERIMENTAL_FEATURE_ICON_MAP[item.icon],
+                onClick: experimentalFeatureOpeners[item.key] || NOOP,
+            })),
+        [experimentalFeatureOpeners]
+    );
+
     const clampLongPressMenuPosition = React.useCallback((x: number, y: number) => {
         const margin = 8;
         const menuWidth = 240;
@@ -3618,7 +4038,7 @@ const Chat: React.FC = () => {
                 newChat: createNewSession,
                 toggleHistory: handleToggleHistoryPanel,
                 clearChat: handleClearChat,
-                toggleSearch: () => setShowSearch((prev) => !prev),
+                toggleSearch: handleToggleSearch,
                 copyLastResponse: handleCopyLastResponse,
                 openExportDialog: handleOpenExportDialogShortcut,
                 openGlobalSearch: () => setShowGlobalSearch(true),
@@ -3636,6 +4056,7 @@ const Chat: React.FC = () => {
         handleNavigateBranch,
         handleOpenExportDialogShortcut,
         handleShortcutEscape,
+        handleToggleSearch,
         handleToggleBranching,
         handleToggleHistoryPanel,
         handleToggleTreeView,
@@ -3668,68 +4089,33 @@ const Chat: React.FC = () => {
         () => (currentSearchIndex >= 0 ? searchResults[currentSearchIndex] : undefined),
         [searchResults, currentSearchIndex]
     );
-    const searchResultRows = React.useMemo(() => (
-        searchResults.map((messageIndex, resultIndex) => {
-            const message = history[messageIndex];
-            if (!message) {
-                return null;
-            }
-            const content = message.content || '';
-            const preview = content.substring(0, 100) + (content.length > 100 ? '...' : '');
-            const isUser = message.role === 'user';
-            return {
-                resultIndex,
-                messageIndex,
-                preview,
-                roleLabel: isUser ? 'You' : 'Assistant',
-                roleClass: isUser ? 'text-blue-400' : 'text-emerald-400',
-            };
-        })
-    ), [searchResults, history]);
+    const searchResultRows = React.useMemo(() => {
+        const { rows, nextPreviewCache } = buildSearchResultRows({
+            searchResults,
+            history,
+            previewCache: searchResultPreviewCacheRef.current,
+        });
+        searchResultPreviewCacheRef.current = nextPreviewCache;
+        return rows;
+    }, [searchResults, history]);
     const loadMessageAtIndex = React.useCallback((messageIndex: number) => {
         loadMessageRange(messageIndex, messageIndex);
     }, [loadMessageRange]);
     const onEditingContentChange = React.useCallback((value: string) => {
         setEditedMessageContent(value);
     }, []);
-    const rowMetadataByIndex = React.useMemo(() => {
-        const metadata = new Map<number, {
-            previousMessage: any | null;
-            nextMessage: any | null;
-            isSearchResult: boolean;
-            isCurrentSearchResult: boolean;
-            isLastMessage: boolean;
-            isShowingComparison: boolean;
-            isComparisonPartnerHidden: boolean;
-            isBookmarked: boolean;
-            selectedTokenForMessage: typeof selectedToken;
-            messageRating: 'up' | 'down' | undefined;
-            isEditingRow: boolean;
-            editingContentForRow: string;
-            isLazyLoaded: boolean;
-        }>();
-
-        for (let index = 0; index < history.length; index += 1) {
-            const isEditingRow = editingMessageIndex === index;
-            metadata.set(index, {
-                previousMessage: index > 0 ? history[index - 1] : null,
-                nextMessage: index < history.length - 1 ? history[index + 1] : null,
-                isSearchResult: searchResultSet.has(index),
-                isCurrentSearchResult: activeSearchMessageIndex === index,
-                isLastMessage: index === history.length - 1,
-                isShowingComparison: comparisonIndex === index,
-                isComparisonPartnerHidden: comparisonIndex === index - 1,
-                isBookmarked: bookmarkedMessages.has(index),
-                selectedTokenForMessage: selectedToken?.messageIndex === index ? selectedToken : null,
-                messageRating: messageRatings[index],
-                isEditingRow,
-                editingContentForRow: isEditingRow ? editedMessageContent : '',
-                isLazyLoaded: !loadedMessageIndices.has(index),
-            });
-        }
-
-        return metadata;
-    }, [
+    const rowMetadataByIndex = React.useMemo(() => buildChatRowMetadata({
+        history,
+        editingMessageIndex,
+        searchResultSet,
+        activeSearchMessageIndex,
+        comparisonIndex,
+        bookmarkedMessages,
+        selectedToken,
+        messageRatings,
+        editedMessageContent,
+        loadedMessageIndices,
+    }), [
         history,
         editingMessageIndex,
         searchResultSet,
@@ -3744,7 +4130,7 @@ const Chat: React.FC = () => {
 
     // Memoized itemContent callback to prevent recreation on every render
     const renderItemContent = React.useCallback((index: number, msg: any) => {
-        const rowMetadata = rowMetadataByIndex.get(index);
+        const rowMetadata = rowMetadataByIndex[index];
         if (!rowMetadata) {
             return null;
         }
@@ -3877,73 +4263,7 @@ const Chat: React.FC = () => {
                         onToggleHistory={handleToggleHistoryPanel}
                         actions={topHeaderPrimaryActions}
                     />
-                    {/* Experimental Features Dropdown */}
-                    <div className="relative group flex-shrink-0">
-                        <button
-                            title="Experimental Features"
-                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs whitespace-nowrap"
-                        >
-                            <Sparkles size={14} /> <span>Experimental</span> <ChevronDown size={12} />
-                        </button>
-                        <div className="absolute top-full left-0 mt-1 w-64 bg-slate-800 border border-slate-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
-                            <div className="p-2 space-y-1">
-                                <button
-                                    onClick={() => setShowBCI(true)}
-                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700 text-slate-300 rounded text-sm text-left"
-                                >
-                                    <Brain size={14} /> <span>Brain-Computer Interface</span>
-                                </button>
-                                <button
-                                    onClick={() => setShowMultiModal(true)}
-                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700 text-slate-300 rounded text-sm text-left"
-                                >
-                                    <Video size={14} /> <span>Multi-Modal AI</span>
-                                </button>
-                                <button
-                                    onClick={() => setShowCollaboration(true)}
-                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700 text-slate-300 rounded text-sm text-left"
-                                >
-                                    <Users size={14} /> <span>Real-Time Collaboration</span>
-                                </button>
-                                <button
-                                    onClick={() => setShowCloudSync(true)}
-                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700 text-slate-300 rounded text-sm text-left"
-                                >
-                                    <Cloud size={14} /> <span>Cloud Sync</span>
-                                </button>
-                                <button
-                                    onClick={() => setShowTeamWorkspaces(true)}
-                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700 text-slate-300 rounded text-sm text-left"
-                                >
-                                    <Shield size={14} /> <span>Team Workspaces</span>
-                                </button>
-                                <button
-                                    onClick={() => setShowEnterpriseCompliance(true)}
-                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700 text-slate-300 rounded text-sm text-left"
-                                >
-                                    <ClipboardList size={14} /> <span>Enterprise SSO & Audit</span>
-                                </button>
-                                <button
-                                    onClick={() => setShowBlockchain(true)}
-                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700 text-slate-300 rounded text-sm text-left"
-                                >
-                                    <Link size={14} /> <span>Blockchain Integration</span>
-                                </button>
-                                <button
-                                    onClick={() => setShowAIAgents(true)}
-                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700 text-slate-300 rounded text-sm text-left"
-                                >
-                                    <Bot size={14} /> <span>AI Agents</span>
-                                </button>
-                                <button
-                                    onClick={() => setShowFederatedLearning(true)}
-                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-700 text-slate-300 rounded text-sm text-left"
-                                >
-                                    <Shield size={14} /> <span>Federated Learning</span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+                    <ExperimentalFeaturesDropdown actions={experimentalFeatureActions} />
                     <button
                         onClick={handleOpenCloudSyncPanel}
                         title={cloudSyncBadge.title}
@@ -3966,106 +4286,28 @@ const Chat: React.FC = () => {
                         onSendToEmail={handleSendSessionByEmail}
                         onOpenCalendarSchedule={handleOpenCalendarSchedule}
                     />
-                    <div className="h-6 w-px bg-slate-700 mx-1 flex-shrink-0"></div>
-                    <div className="flex items-center gap-2 min-w-0 max-w-[200px] flex-shrink-0">
-                        {!battleMode ? (
-                            <>
-                                <span className="font-medium text-slate-400 text-xs whitespace-nowrap flex-shrink-0">Model:</span>
-                                <div className="relative min-w-0 flex-1">
-                                    <select value={currentModel} onChange={e => setCurrentModel(e.target.value)} className="w-full bg-slate-800 border-none text-white text-xs rounded-md px-2 py-1 focus:ring-2 focus:ring-primary/50 appearance-none cursor-pointer hover:bg-slate-700 transition-colors truncate">
-                                        {allModelOptionElements}
-                                    </select>
-                                    <ChevronRight className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none rotate-90" size={10} />
-                                </div>
-                            </>
-                        ) : (
-                            <div className="flex items-center gap-1.5 w-full animate-in fade-in slide-in-from-top-1">
-                                <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-red-500 text-xs flex items-center gap-1 flex-shrink-0"><Users size={12} /> VS</span>
-                                <div className="relative flex-1 min-w-0">
-                                    <select value={currentModel} onChange={e => setCurrentModel(e.target.value)} className="w-full bg-slate-800 border-l-2 border-l-blue-500 text-white text-xs rounded px-1.5 py-1 appearance-none cursor-pointer hover:bg-slate-700 truncate">
-                                        {allModelOptionElements}
-                                    </select>
-                                </div>
-                                <div className="relative flex-1 min-w-0">
-                                    <select value={secondaryModel} onChange={e => setSecondaryModel(e.target.value)} className="w-full bg-slate-800 border-l-2 border-l-orange-500 text-white text-xs rounded px-1.5 py-1 appearance-none cursor-pointer hover:bg-slate-700 truncate">
-                                        {allModelOptionElements}
-                                    </select>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Request Log Button */}
-                    <button
-                        onClick={() => setShowRequestLog(!showRequestLog)}
-                        title="View Request/Response Log"
-                        className={`p-1.5 rounded-md transition-colors border border-slate-700 relative flex-shrink-0 ${showRequestLog ? 'bg-slate-800 text-white' : 'hover:bg-slate-800 text-slate-400'}`}
-                    >
-                        <FileText size={14} />
-                        {apiLogCount > 0 && (
-                            <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-primary text-white text-[8px] font-bold rounded-full flex items-center justify-center">
-                                {apiLogCount > 9 ? '9+' : apiLogCount}
-                            </span>
-                        )}
-                    </button>
-
-                    {/* Search Button */}
-                    {history.length > 0 && (
-                        <button
-                            onClick={() => setShowSearch(!showSearch)}
-                            title="Search in chat (Ctrl+F)"
-                            className={`p-1.5 rounded-md transition-colors border border-slate-700 flex-shrink-0 ${showSearch ? 'bg-slate-800 text-white' : 'hover:bg-slate-800 text-slate-400'}`}
-                        >
-                            <Search size={14} />
-                        </button>
-                    )}
-                    <div ref={diagnosticsPanelRef} className="relative flex-shrink-0">
-                        <button
-                            ref={diagnosticsButtonRef}
-                            onClick={() => setShowDiagnosticsPanel(prev => !prev)}
-                            title="Startup diagnostics and quick fixes"
-                            className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors border text-xs ${diagnosticsStatus.className}`}
-                        >
-                            {!providerReady || !modelReady ? <AlertTriangle size={12} /> : <Check size={12} />}
-                            <span>{diagnosticsStatus.label}</span>
-                        </button>
-                        {showDiagnosticsPanel && (
-                            <React.Suspense fallback={null}>
-                                <ChatDiagnosticsPopover
-                                    ref={diagnosticsPopoverRef}
-                                    position={diagnosticsPanelPosition}
-                                    status={diagnosticsStatus}
-                                    activePerfBenchmark={activePerfBenchmark}
-                                    recentPerfBenchmarksCount={recentPerfBenchmarks.length}
-                                    latestPerfBenchmark={latestPerfBenchmark}
-                                    perfSummary={perfSummary}
-                                    formatPerfMs={formatPerfMs}
-                                    devMonitorsEnabled={devMonitorsEnabled}
-                                    providerReady={providerReady}
-                                    modelReady={modelReady}
-                                    historyLength={history.length}
-                                    promptReady={promptReady}
-                                    onClose={() => setShowDiagnosticsPanel(false)}
-                                    onClearPerfHistory={clearPerfHistory}
-                                    onToggleDevMonitors={() => setDevMonitorsEnabled((prev) => !prev)}
-                                    onRequestConnectionRefresh={requestConnectionRefresh}
-                                    onAutoSelectFirstModel={selectFirstModel}
-                                    onOpenSettings={() => {
-                                        setShowDiagnosticsPanel(false);
-                                        navigateToTab('settings');
-                                    }}
-                                    onOpenModels={() => {
-                                        setShowDiagnosticsPanel(false);
-                                        navigateToTab('models');
-                                    }}
-                                    onInsertStarterPrompt={() => {
-                                        insertStarterPrompt();
-                                        setShowDiagnosticsPanel(false);
-                                    }}
-                                />
-                            </React.Suspense>
-                        )}
-                    </div>
+                    <TopHeaderModelUtilityControls
+                        battleMode={battleMode}
+                        currentModel={currentModel}
+                        secondaryModel={secondaryModel}
+                        allModelOptionElements={allModelOptionElements}
+                        onCurrentModelChange={handleCurrentModelChange}
+                        onSecondaryModelChange={handleSecondaryModelChange}
+                        showRequestLog={showRequestLog}
+                        onToggleRequestLog={handleToggleRequestLog}
+                        apiLogCount={apiLogCount}
+                        hasHistory={history.length > 0}
+                        showSearch={showSearch}
+                        onToggleSearch={handleToggleSearch}
+                        diagnosticsPanelRef={diagnosticsPanelRef}
+                        diagnosticsButtonRef={diagnosticsButtonRef}
+                        diagnosticsStatusClassName={diagnosticsStatus.className}
+                        diagnosticsStatusLabel={diagnosticsStatus.label}
+                        diagnosticsReady={providerReady && modelReady}
+                        showDiagnosticsPanel={showDiagnosticsPanel}
+                        onToggleDiagnosticsPanel={handleToggleDiagnosticsPanel}
+                        diagnosticsPopover={diagnosticsPopover}
+                    />
 
                     {/* Connection Status Indicator */}
                     <div className="flex items-center gap-2 pl-2 border-l border-slate-800 h-6 self-center flex-shrink-0">
