@@ -148,6 +148,13 @@ export class SearchService {
         return filtered;
     }
 
+    private static resolveTagLookup(filters?: SearchFilters): Map<string, ConversationTags> | undefined {
+        if (!filters?.tags || filters.tags.length === 0) {
+            return undefined;
+        }
+        return autoTaggingService.getTagsLookup();
+    }
+
     /**
      * Search across all conversations
      */
@@ -168,9 +175,7 @@ export class SearchService {
 
         let sessions = HistoryService.getAllSessions();
         let messagesSearched = 0;
-        const tagsLookup = filters?.tags && filters.tags.length > 0
-            ? autoTaggingService.getTagsLookup()
-            : undefined;
+        const tagsLookup = this.resolveTagLookup(filters);
         sessions = this.filterSessions(sessions, filters, tagsLookup);
 
         let regex: RegExp | null = null;
@@ -346,9 +351,7 @@ export class SearchService {
         };
 
         let sessions = HistoryService.getAllSessions();
-        const tagsLookup = filters?.tags && filters.tags.length > 0
-            ? autoTaggingService.getTagsLookup()
-            : undefined;
+        const tagsLookup = this.resolveTagLookup(filters);
         sessions = this.filterSessions(sessions, filters, tagsLookup);
 
         if (query.trim().length > 2) {

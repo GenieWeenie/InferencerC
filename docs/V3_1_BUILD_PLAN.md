@@ -221,6 +221,14 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 153: in `search.worker`, remove pre-filter array rebuilding and evaluate session/date/model filters inline during the main session loop.
    - Pass 154: in `search.worker` tokenization, dedupe query terms while preserving first-seen order to avoid redundant term matching work.
    - Pass 155: expand `SearchService.searchAsync` tests to cover tag-filtered and combined model/date/tag filter behavior before worker dispatch.
+   - Pass 157: add a deterministic search-index micro-benchmark harness in `performanceBenchmark` for key query lengths (1/2/3/5/8/12/20/33) with warmup + iteration stats to compare before/after optimization slices.
+   - Pass 158: collapse `getUniqueQueryTerms` token-length branches for 10+ tokens into one ordered dedupe path, removing large duplicated branch logic while preserving short-query fast paths.
+   - Pass 159: add table-driven query-term dedupe tests (including 10/20/33/40-token shapes) to lock first-seen dedupe behavior and long-query fallback correctness.
+   - Pass 160: replace duplicated 8-term/9-term search intersection branches with one shared smallest-posting-list helper used for 8+ term queries.
+   - Pass 161: add one shared singleton-membership helper for multi-term intersections so singleton candidate checks use a single consistent path.
+   - Pass 162: in `autoTaggingService`, add reverse cache (`tag -> sessionIds`) refreshed with raw/tag caches so `getConversationsByTag` is lookup-based instead of full-array scans.
+   - Pass 163: in `SearchService`, centralize tag-lookup resolution for filter paths so sync/async searches consistently consume one cached bulk lookup per request.
+   - Pass 164: expand regression coverage for large-query stability and tag-heavy filtering behavior (single bulk tag lookup + limited session hydration).
 
 ## Release Checklist for v3.1.x
 

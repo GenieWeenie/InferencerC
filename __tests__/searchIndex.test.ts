@@ -1,4 +1,4 @@
-import { SearchIndexService } from '../src/renderer/services/searchIndex';
+import { SearchIndexService, __searchIndexInternals } from '../src/renderer/services/searchIndex';
 import { ChatSession } from '../src/shared/types';
 
 class InMemoryStorage implements Storage {
@@ -236,5 +236,58 @@ describe('SearchIndexService', () => {
     const result = SearchIndexService.searchSessions('alpha beta gamma epsilon');
 
     expect(result.size).toBe(0);
+  });
+
+  it('dedupes query terms in first-seen order across long token lengths', () => {
+    const cases: Array<{ name: string; tokens: string[] }> = [
+      {
+        name: '10-token branch shape',
+        tokens: ['alpha', 'beta', 'alpha', 'gamma', 'beta', 'delta', 'epsilon', 'gamma', 'zeta', 'alpha'],
+      },
+      {
+        name: '20-token branch shape',
+        tokens: [
+          'one', 'two', 'three', 'one', 'four', 'two', 'five', 'six', 'three', 'seven',
+          'eight', 'nine', 'five', 'ten', 'eleven', 'twelve', 'seven', 'thirteen', 'fourteen', 'eight',
+        ],
+      },
+      {
+        name: '33-token branch shape',
+        tokens: [
+          't01', 't02', 't03', 't04', 't05', 't06', 't07', 't08', 't09', 't10', 't11',
+          't12', 't13', 't14', 't15', 't16', 't17', 't18', 't19', 't20', 't21', 't22',
+          't23', 't24', 't25', 't26', 't27', 't28', 't29', 't30', 't31', 't32', 't33',
+        ].flatMap((token, index) => (index % 3 === 0 ? [token, token] : [token])),
+      },
+      {
+        name: '40-token fallback shape',
+        tokens: Array.from({ length: 40 }, (_, index) => `tok${(index % 12) + 1}`),
+      },
+    ];
+
+    for (let i = 0; i < cases.length; i++) {
+      const testCase = cases[i];
+      const query = testCase.tokens.join(' ');
+      const expected = Array.from(new Set(testCase.tokens));
+      expect(__searchIndexInternals.getUniqueQueryTerms(query)).toEqual(expected);
+    }
+  });
+
+  it('keeps large-query (40 tokens) intersections stable across repeated runs', () => {
+    const allTerms = Array.from({ length: 15 }, (_, i) => `term${i + 1}`);
+    const sessions: ChatSession[] = [
+      createSession('s1', allTerms.slice(0, 8).join(' '), allTerms.slice(8).join(' ')),
+      createSession('s2', allTerms.slice(0, 7).join(' '), allTerms.slice(8).join(' ')),
+      createSession('s3', allTerms.slice(0, 10).join(' '), allTerms.slice(10).join(' ')),
+    ];
+    SearchIndexService.rebuildIndex(sessions);
+
+    const longQuery = Array.from({ length: 40 }, (_, i) => `term${(i % 15) + 1}`).join(' ');
+    const firstRun = SearchIndexService.searchSessions(longQuery);
+    expect(firstRun).toEqual(new Set(['s1', 's3']));
+
+    for (let i = 0; i < 20; i++) {
+      expect(SearchIndexService.searchSessions(longQuery)).toEqual(firstRun);
+    }
   });
 });

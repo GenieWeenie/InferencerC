@@ -85,6 +85,7 @@ export class AutoTaggingService {
     private tagsCacheRaw: string | null = null;
     private tagsCacheList: ConversationTags[] = [];
     private tagsBySessionCache: Map<string, ConversationTags> = new Map();
+    private sessionsByTagCache: Map<string, string[]> = new Map();
 
     private constructor() {
         this.loadCustomTags();
@@ -217,20 +218,37 @@ export class AutoTaggingService {
             }
             const nextRaw = JSON.stringify(allTags);
             localStorage.setItem(this.STORAGE_KEY, nextRaw);
-            this.tagsCacheRaw = nextRaw;
-            this.tagsCacheList = allTags;
-            this.tagsBySessionCache = new Map(allTags.map((entry) => [entry.sessionId, entry]));
+            this.updateTagCaches(allTags, nextRaw);
         } catch (error) {
             console.error('Failed to save tags:', error);
         }
     }
 
+    private updateTagCaches(entries: ConversationTags[], rawValue: string | null): void {
+        this.tagsCacheRaw = rawValue;
+        this.tagsCacheList = entries;
+        this.tagsBySessionCache = new Map(entries.map((entry) => [entry.sessionId, entry]));
+
+        const sessionsByTag = new Map<string, string[]>();
+        for (let i = 0; i < entries.length; i++) {
+            const entry = entries[i];
+            for (let tagIndex = 0; tagIndex < entry.tags.length; tagIndex++) {
+                const tag = entry.tags[tagIndex];
+                const sessions = sessionsByTag.get(tag);
+                if (sessions) {
+                    sessions.push(entry.sessionId);
+                } else {
+                    sessionsByTag.set(tag, [entry.sessionId]);
+                }
+            }
+        }
+        this.sessionsByTagCache = sessionsByTag;
+    }
+
     private readAllTags(): ConversationTags[] {
         const stored = localStorage.getItem(this.STORAGE_KEY);
         if (!stored) {
-            this.tagsCacheRaw = stored;
-            this.tagsCacheList = [];
-            this.tagsBySessionCache = new Map();
+            this.updateTagCaches([], stored);
             return [];
         }
         if (stored === this.tagsCacheRaw) {
@@ -238,9 +256,7 @@ export class AutoTaggingService {
         }
 
         const parsed: ConversationTags[] = JSON.parse(stored);
-        this.tagsCacheRaw = stored;
-        this.tagsCacheList = parsed;
-        this.tagsBySessionCache = new Map(parsed.map((entry) => [entry.sessionId, entry]));
+        this.updateTagCaches(parsed, stored);
         return parsed;
     }
 
@@ -305,10 +321,9 @@ export class AutoTaggingService {
      */
     getConversationsByTag(tagId: string): string[] {
         try {
-            const allTags = this.readAllTags();
-            return allTags
-                .filter(ct => ct.tags.includes(tagId))
-                .map(ct => ct.sessionId);
+            this.readAllTags();
+            const sessions = this.sessionsByTagCache.get(tagId);
+            return sessions ? [...sessions] : [];
         } catch (error) {
             console.error('Failed to load tags:', error);
             return [];

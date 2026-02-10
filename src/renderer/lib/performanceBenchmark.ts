@@ -15,6 +15,7 @@
 import { generateChatSession } from './testDataGenerator';
 import { ChatSession } from '../../shared/types';
 import { performanceService } from '../services/performance';
+import { SearchIndexService } from '../services/searchIndex';
 
 export interface BenchmarkResult {
     testName: string;
@@ -35,6 +36,102 @@ export interface BenchmarkSuite {
         totalTests: number;
         passed: number;
         failed: number;
+    };
+}
+
+export interface SearchIndexBenchmarkSample {
+    queryLength: number;
+    iterations: number;
+    avgMs: number;
+    minMs: number;
+    maxMs: number;
+    resultCount: number;
+}
+
+export interface SearchIndexBenchmarkSuite {
+    timestamp: number;
+    queryLengths: number[];
+    iterations: number;
+    warmupRuns: number;
+    samples: SearchIndexBenchmarkSample[];
+}
+
+export interface SearchIndexBenchmarkOptions {
+    queryLengths?: number[];
+    iterations?: number;
+    warmupRuns?: number;
+    searchFn?: (query: string) => Set<string>;
+}
+
+const DEFAULT_SEARCH_INDEX_QUERY_LENGTHS = [1, 2, 3, 5, 8, 12, 20, 33];
+
+const buildSyntheticQuery = (queryLength: number): string => {
+    const terms = new Array<string>(queryLength);
+    for (let i = 0; i < queryLength; i++) {
+        terms[i] = `term${i + 1}`;
+    }
+    return terms.join(' ');
+};
+
+/**
+ * Run a deterministic search-index micro-benchmark for key query lengths.
+ * Intended for before/after optimization comparisons (same machine/build).
+ */
+export function runSearchIndexBaseline(
+    options: SearchIndexBenchmarkOptions = {}
+): SearchIndexBenchmarkSuite {
+    const queryLengths = options.queryLengths && options.queryLengths.length > 0
+        ? options.queryLengths
+        : DEFAULT_SEARCH_INDEX_QUERY_LENGTHS;
+    const iterations = Math.max(1, options.iterations ?? 25);
+    const warmupRuns = Math.max(0, options.warmupRuns ?? 3);
+    const searchFn = options.searchFn ?? ((query: string) => SearchIndexService.searchSessions(query));
+    const samples: SearchIndexBenchmarkSample[] = [];
+
+    for (let i = 0; i < queryLengths.length; i++) {
+        const queryLength = queryLengths[i];
+        const normalizedLength = Math.max(1, Math.floor(queryLength));
+        const query = buildSyntheticQuery(normalizedLength);
+
+        for (let warmup = 0; warmup < warmupRuns; warmup++) {
+            searchFn(query);
+        }
+
+        let totalMs = 0;
+        let minMs = Number.POSITIVE_INFINITY;
+        let maxMs = 0;
+        let resultCount = 0;
+
+        for (let iteration = 0; iteration < iterations; iteration++) {
+            const start = performance.now();
+            const result = searchFn(query);
+            const elapsedMs = performance.now() - start;
+            totalMs += elapsedMs;
+            if (elapsedMs < minMs) {
+                minMs = elapsedMs;
+            }
+            if (elapsedMs > maxMs) {
+                maxMs = elapsedMs;
+            }
+            resultCount = result.size;
+        }
+
+        samples.push({
+            queryLength: normalizedLength,
+            iterations,
+            avgMs: Number((totalMs / iterations).toFixed(3)),
+            minMs: Number(minMs.toFixed(3)),
+            maxMs: Number(maxMs.toFixed(3)),
+            resultCount,
+        });
+    }
+
+    return {
+        timestamp: Date.now(),
+        queryLengths: samples.map((sample) => sample.queryLength),
+        iterations,
+        warmupRuns,
+        samples,
     };
 }
 

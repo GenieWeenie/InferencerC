@@ -3,7 +3,8 @@ import {
     measureFPS,
     measureExecutionTime,
     generateBenchmarkSession,
-    wait
+    wait,
+    runSearchIndexBaseline,
 } from '../performanceBenchmark';
 
 // Mock requestAnimationFrame for Node environment
@@ -202,6 +203,46 @@ describe('performanceBenchmark', () => {
             // Verify first and last messages
             expect(session.messages[0]).toBeDefined();
             expect(session.messages[4999]).toBeDefined();
+        });
+    });
+
+    describe('runSearchIndexBaseline', () => {
+        it('returns benchmark samples for configured query lengths', () => {
+            const searchFn = jest.fn((query: string) => new Set([query]));
+            const report = runSearchIndexBaseline({
+                queryLengths: [1, 3, 5],
+                iterations: 2,
+                warmupRuns: 1,
+                searchFn,
+            });
+
+            expect(report.queryLengths).toEqual([1, 3, 5]);
+            expect(report.samples).toHaveLength(3);
+            expect(searchFn).toHaveBeenCalledTimes((1 + 2) * 3);
+
+            for (let i = 0; i < report.samples.length; i++) {
+                const sample = report.samples[i];
+                expect(sample.queryLength).toBe(report.queryLengths[i]);
+                expect(sample.iterations).toBe(2);
+                expect(sample.resultCount).toBe(1);
+                expect(sample.minMs).toBeGreaterThanOrEqual(0);
+                expect(sample.maxMs).toBeGreaterThanOrEqual(sample.minMs);
+                expect(sample.avgMs).toBeGreaterThanOrEqual(sample.minMs);
+                expect(sample.avgMs).toBeLessThanOrEqual(sample.maxMs);
+            }
+        });
+
+        it('normalizes invalid query lengths and iteration counts', () => {
+            const report = runSearchIndexBaseline({
+                queryLengths: [0, -2, 4.8],
+                iterations: 0,
+                warmupRuns: -3,
+                searchFn: () => new Set<string>(),
+            });
+
+            expect(report.iterations).toBe(1);
+            expect(report.warmupRuns).toBe(0);
+            expect(report.queryLengths).toEqual([1, 1, 4]);
         });
     });
 });
