@@ -460,6 +460,59 @@ const resolveBattleModelName = (
     return availableModels.find((m: any) => m.id === fallbackModelId)?.name || fallbackLabel;
 };
 
+interface LogprobTokenListProps {
+    currentLogprobs: any[];
+    messageIndex: number;
+    selectedTokenForMessage: any;
+    setSelectedToken: (value: any) => void;
+    setActiveTab: (value: 'inspector' | 'controls' | 'prompts' | 'documents') => void;
+}
+
+const LogprobTokenList: React.FC<LogprobTokenListProps> = React.memo(({
+    currentLogprobs,
+    messageIndex,
+    selectedTokenForMessage,
+    setSelectedToken,
+    setActiveTab,
+}) => (
+    <div className="leading-relaxed font-mono text-[15px] animate-in fade-in duration-300">
+        {currentLogprobs.map((lp: any, i: number) => {
+            if (!lp || typeof lp !== 'object') return null;
+            const entropy = calculateEntropy(lp.top_logprobs);
+            const isSelected = selectedTokenForMessage?.logprob === lp;
+            const redIntensity = Math.min(255, entropy * 100);
+            const bgAlpha = entropy > 0.5 ? 0.3 : 0.05;
+
+            const style = {
+                backgroundColor: isSelected ? 'rgba(251, 191, 36, 0.9)' : `rgba(${redIntensity}, 50, 50, ${bgAlpha})`,
+                color: isSelected ? '#000' : 'inherit',
+                borderBottom: entropy > 1.0 ? '1px dotted #ef4444' : 'none',
+            };
+
+            return (
+                <span
+                    key={i}
+                    onClick={() => {
+                        setSelectedToken({ logprob: lp, messageIndex, tokenIndex: i });
+                        setActiveTab('inspector');
+                    }}
+                    title={`Token: "${lp.token}"\nLogprob: ${lp.logprob}`}
+                    className={`cursor-pointer rounded-[2px] px-[1px] transition-colors ${isSelected ? 'font-bold ring-2 ring-yellow-400 z-10 relative' : 'hover:bg-slate-700'}`}
+                    style={style}
+                >
+                    {lp.token}
+                </span>
+            );
+        })}
+    </div>
+), (prev, next) => {
+    return (
+        prev.currentLogprobs === next.currentLogprobs &&
+        prev.messageIndex === next.messageIndex &&
+        prev.selectedTokenForMessage === next.selectedTokenForMessage
+    );
+});
+
 interface ChatMessageRowProps {
     index: number;
     msg: any;
@@ -490,9 +543,9 @@ interface ChatMessageRowProps {
     showInspector: boolean;
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
     setInput: React.Dispatch<React.SetStateAction<string>>;
-    editingMessageIndex: number | null;
-    editedMessageContent: string;
-    setEditedMessageContent: React.Dispatch<React.SetStateAction<string>>;
+    isEditingRow: boolean;
+    editingContentForRow: string;
+    onEditingContentChange: (value: string) => void;
     handleCancelEdit: () => void;
     handleSaveEdit: (index: number) => void;
     selectChoice: (messageIndex: number, choiceIndex: number) => void;
@@ -533,9 +586,9 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
     showInspector,
     textareaRef,
     setInput,
-    editingMessageIndex,
-    editedMessageContent,
-    setEditedMessageContent,
+    isEditingRow,
+    editingContentForRow,
+    onEditingContentChange,
     handleCancelEdit,
     handleSaveEdit,
     selectChoice,
@@ -624,6 +677,10 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
     const handleRateDown = React.useCallback(() => {
         handleRateMessage(index, 'down');
     }, [handleRateMessage, index]);
+
+    const handleEditContentChange = React.useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        onEditingContentChange(e.target.value);
+    }, [onEditingContentChange]);
 
     if (isLoadingMessages) {
         return <MessageSkeleton isUser={index % 2 === 0} />;
@@ -719,27 +776,13 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                 )}
 
                                 {showInspector && hasLogprobs && (
-                                    <div className="leading-relaxed font-mono text-[15px] animate-in fade-in duration-300">
-                                        {currentLogprobs.map((lp: any, i: number) => {
-                                            if (!lp || typeof lp !== 'object') return null;
-                                            const entropy = calculateEntropy(lp.top_logprobs);
-                                            const isSelected = selectedTokenForMessage?.logprob === lp;
-                                            const redIntensity = Math.min(255, entropy * 100);
-                                            const bgAlpha = entropy > 0.5 ? 0.3 : 0.05;
-
-                                            const style = {
-                                                backgroundColor: isSelected ? 'rgba(251, 191, 36, 0.9)' : `rgba(${redIntensity}, 50, 50, ${bgAlpha})`,
-                                                color: isSelected ? '#000' : 'inherit',
-                                                borderBottom: entropy > 1.0 ? '1px dotted #ef4444' : 'none',
-                                            };
-
-                                            return (
-                                                <span key={i} onClick={() => { setSelectedToken({ logprob: lp, messageIndex: index, tokenIndex: i }); setActiveTab('inspector'); }}
-                                                    title={`Token: "${lp.token}"\nLogprob: ${lp.logprob}`}
-                                                    className={`cursor-pointer rounded-[2px] px-[1px] transition-colors ${isSelected ? 'font-bold ring-2 ring-yellow-400 z-10 relative' : 'hover:bg-slate-700'}`} style={style}>{lp.token}</span>
-                                            );
-                                        })}
-                                    </div>
+                                    <LogprobTokenList
+                                        currentLogprobs={currentLogprobs}
+                                        messageIndex={index}
+                                        selectedTokenForMessage={selectedTokenForMessage}
+                                        setSelectedToken={setSelectedToken}
+                                        setActiveTab={setActiveTab}
+                                    />
                                 )}
                             </>
                         )}
@@ -821,11 +864,11 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                     </div>
                 ) : (
                     <>
-                        {editingMessageIndex === index ? (
+                        {isEditingRow ? (
                             <div className="flex flex-col gap-2">
                                 <textarea
-                                    value={editedMessageContent}
-                                    onChange={(e) => setEditedMessageContent(e.target.value)}
+                                    value={editingContentForRow}
+                                    onChange={handleEditContentChange}
                                     className="w-full min-h-[100px] p-2 bg-slate-900/50 border border-primary/30 rounded-lg text-white resize-y focus:outline-none focus:border-primary/60"
                                     autoFocus
                                 />
@@ -916,8 +959,8 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
         prev.selectedTokenForMessage === next.selectedTokenForMessage &&
         prev.messageRating === next.messageRating &&
         prev.showInspector === next.showInspector &&
-        prev.editingMessageIndex === next.editingMessageIndex &&
-        prev.editedMessageContent === next.editedMessageContent &&
+        prev.isEditingRow === next.isEditingRow &&
+        prev.editingContentForRow === next.editingContentForRow &&
         prev.conversationFontSize === next.conversationFontSize &&
         prev.isCompactViewport === next.isCompactViewport &&
         prev.isLazyLoaded === next.isLazyLoaded
@@ -3060,14 +3103,36 @@ const Chat: React.FC = () => {
         () => (currentSearchIndex >= 0 ? searchResults[currentSearchIndex] : undefined),
         [searchResults, currentSearchIndex]
     );
+    const searchResultRows = React.useMemo(() => (
+        searchResults.map((messageIndex, resultIndex) => {
+            const message = history[messageIndex];
+            if (!message) {
+                return null;
+            }
+            const content = message.content || '';
+            const preview = content.substring(0, 100) + (content.length > 100 ? '...' : '');
+            const isUser = message.role === 'user';
+            return {
+                resultIndex,
+                messageIndex,
+                preview,
+                roleLabel: isUser ? 'You' : 'Assistant',
+                roleClass: isUser ? 'text-blue-400' : 'text-emerald-400',
+            };
+        })
+    ), [searchResults, history]);
     const loadMessageAtIndex = React.useCallback((messageIndex: number) => {
         loadMessageRange(messageIndex, messageIndex);
     }, [loadMessageRange]);
+    const onEditingContentChange = React.useCallback((value: string) => {
+        setEditedMessageContent(value);
+    }, []);
 
     // Memoized itemContent callback to prevent recreation on every render
     const renderItemContent = React.useCallback((index: number, msg: any) => {
         const nextMessage = index < history.length - 1 ? history[index + 1] : null;
         const previousMessage = index > 0 ? history[index - 1] : null;
+        const isEditingRow = editingMessageIndex === index;
         return (
             <ChatMessageRow
                 index={index}
@@ -3099,9 +3164,9 @@ const Chat: React.FC = () => {
                 showInspector={showInspector}
                 textareaRef={textareaRef}
                 setInput={setInput}
-                editingMessageIndex={editingMessageIndex}
-                editedMessageContent={editedMessageContent}
-                setEditedMessageContent={setEditedMessageContent}
+                isEditingRow={isEditingRow}
+                editingContentForRow={isEditingRow ? editedMessageContent : ''}
+                onEditingContentChange={onEditingContentChange}
                 handleCancelEdit={handleCancelEdit}
                 handleSaveEdit={handleSaveEdit}
                 selectChoice={selectChoice}
@@ -3139,7 +3204,7 @@ const Chat: React.FC = () => {
         setInput,
         editingMessageIndex,
         editedMessageContent,
-        setEditedMessageContent,
+        onEditingContentChange,
         handleCancelEdit,
         handleSaveEdit,
         selectChoice,
@@ -3151,26 +3216,22 @@ const Chat: React.FC = () => {
     ]);
 
     const renderSearchResultItem = React.useCallback((resultIndex: number) => {
-        const messageIndex = searchResults[resultIndex];
-        const message = history[messageIndex];
-        if (!message) {
+        const row = searchResultRows[resultIndex];
+        if (!row) {
             return null;
         }
-        const content = message.content || '';
-        const preview = content.substring(0, 100) + (content.length > 100 ? '...' : '');
-        const isUser = message.role === 'user';
         return (
             <SearchResultRow
-                resultIndex={resultIndex}
-                messageIndex={messageIndex}
-                preview={preview}
-                roleLabel={isUser ? 'You' : 'Assistant'}
-                roleClass={isUser ? 'text-blue-400' : 'text-emerald-400'}
+                resultIndex={row.resultIndex}
+                messageIndex={row.messageIndex}
+                preview={row.preview}
+                roleLabel={row.roleLabel}
+                roleClass={row.roleClass}
                 isActive={resultIndex === currentSearchIndex}
                 onNavigate={navigateToSearchResult}
             />
         );
-    }, [searchResults, history, currentSearchIndex, navigateToSearchResult]);
+    }, [searchResultRows, currentSearchIndex, navigateToSearchResult]);
 
     const longPressMessage = longPressMenu ? history[longPressMenu.messageIndex] : null;
     const composerBottomInset = isCompactViewport ? 16 : 24;

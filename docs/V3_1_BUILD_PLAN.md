@@ -255,6 +255,12 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 188: force streaming assistant messages down the plain-text rendering path and defer rich-markdown classification until streaming settles.
    - Pass 189: stabilize chat row hover-action handlers (`copy/delete/edit/regenerate/branch/bookmark/rate`) with memoized callbacks to reduce callback churn inside hot message rows.
    - Pass 190: add deterministic unit coverage for message render-mode classification and lazy-load request dedupe decision logic via `messageContentSyntax` helper tests.
+   - Pass 191: replace global edit-state props in chat rows with row-scoped edit props (`isEditingRow`, row content, row change handler) so editing one message no longer invalidates all rows.
+   - Pass 192: precompute search-result row view models with `useMemo` and keep search list `itemContent` index-only, reducing repeated preview/role derivation during search panel rerenders.
+   - Pass 193: extract logprob token span rendering into memoized `LogprobTokenList`, isolating heavy token-map rendering from unrelated row updates.
+   - Pass 194: add guarded lazy-load patching in `useChat` (`collectMessageIndicesToLoad`, `buildMessageLoadPatch`) so message-cache/index state updates are skipped when no new messages are loaded.
+   - Pass 195: add message patch no-op guard in `useChat` via `buildUpdatedMessageContent`, skipping redundant history/cache writes when streaming updates are semantically unchanged.
+   - Pass 196: add deterministic unit coverage for chat state-guard helpers (`chatStateGuards`) covering load-range patching and message-content no-op/update behavior.
 
 ## Release Checklist for v3.1.x
 

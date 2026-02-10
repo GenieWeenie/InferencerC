@@ -3,6 +3,11 @@ import { toast } from 'sonner';
 import { ChatResponse, Message, TokenLogprob, Model, ChatMessage, ChatSession, ToolCall } from '../../shared/types';
 import { HistoryService } from '../services/history';
 import { simulateLogprobs, detectIntent, findBestModelForIntent } from '../lib/chatUtils';
+import {
+    buildMessageLoadPatch,
+    buildUpdatedMessageContent,
+    collectMessageIndicesToLoad,
+} from '../lib/chatStateGuards';
 import { AVAILABLE_TOOLS } from '../lib/tools';
 import { crashRecoveryService } from '../services/crashRecovery';
 import { performanceService } from '../services/performance';
@@ -815,30 +820,24 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     // Lazy loading: Load message content on demand
     const loadMessageContent = (indices: number[]) => {
         const allMessages = resolveLazyLoadSourceMessages();
-        const newCache = new Map(fullMessageCache);
-        const newLoadedIndices = new Set(loadedMessageIndices);
+        const patch = buildMessageLoadPatch(allMessages, loadedMessageIndices, fullMessageCache, indices);
+        if (!patch) {
+            return;
+        }
 
-        indices.forEach(index => {
-            if (index >= 0 && index < allMessages.length && !loadedMessageIndices.has(index)) {
-                // Store full message in cache
-                newCache.set(index, allMessages[index]);
-                newLoadedIndices.add(index);
-            }
-        });
-
-        setFullMessageCache(newCache);
-        setLoadedMessageIndices(newLoadedIndices);
+        setFullMessageCache(patch.nextFullMessageCache);
+        setLoadedMessageIndices(patch.nextLoadedMessageIndices);
     };
 
     // Load a range of messages (for scrolling/pagination)
     const loadMessageRange = (startIndex: number, endIndex: number) => {
         const allMessages = resolveLazyLoadSourceMessages();
-        const indicesToLoad: number[] = [];
-        for (let i = startIndex; i <= Math.min(endIndex, allMessages.length - 1); i++) {
-            if (!loadedMessageIndices.has(i)) {
-                indicesToLoad.push(i);
-            }
-        }
+        const indicesToLoad = collectMessageIndicesToLoad(
+            startIndex,
+            endIndex,
+            allMessages.length,
+            loadedMessageIndices
+        );
         if (indicesToLoad.length > 0) {
             loadMessageContent(indicesToLoad);
         }
@@ -942,22 +941,24 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             if (!newHistory[index]) return prev;
 
             const existing = newHistory[index];
-            const updatedMessage: ChatMessage = {
-                ...existing,
+            const updatedMessage = buildUpdatedMessageContent({
+                existing,
                 content,
                 isLoading,
-                generationTime: generationTime !== undefined ? generationTime : existing.generationTime,
-                tool_calls: toolCalls || existing.tool_calls,
-                choices: logprobs ? [{
-                    message: { role: 'assistant' as const, content },
-                    index: 0,
-                    logprobs: { content: logprobs }
-                }] : existing.choices
-            };
+                logprobs,
+                generationTime,
+                toolCalls,
+            });
+            if (!updatedMessage) {
+                return prev;
+            }
             newHistory[index] = updatedMessage;
 
             // Update cache for lazy loading
             setFullMessageCache(cache => {
+                if (cache.get(index) === updatedMessage) {
+                    return cache;
+                }
                 const newCache = new Map(cache);
                 newCache.set(index, updatedMessage);
                 return newCache;
