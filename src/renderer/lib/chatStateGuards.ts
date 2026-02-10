@@ -142,6 +142,43 @@ export const buildMessageReplacePatch = (
     };
 };
 
+export const buildAppendMessagePatch = (
+    history: ChatMessage[],
+    fullMessageCache: Map<number, ChatMessage>,
+    loadedMessageIndices: Set<number>,
+    appendedMessage: ChatMessage
+): {
+    nextHistory: ChatMessage[];
+    nextFullMessageCache: Map<number, ChatMessage>;
+    nextLoadedMessageIndices: Set<number>;
+    appendedIndex: number;
+} => {
+    const appendedIndex = history.length;
+    const nextHistory = [...history, appendedMessage];
+
+    const hasCachedMessageAtIndex = fullMessageCache.has(appendedIndex);
+    const hasLoadedIndex = loadedMessageIndices.has(appendedIndex);
+
+    let nextFullMessageCache = fullMessageCache;
+    if (!hasCachedMessageAtIndex || fullMessageCache.get(appendedIndex) !== appendedMessage) {
+        nextFullMessageCache = new Map(fullMessageCache);
+        nextFullMessageCache.set(appendedIndex, appendedMessage);
+    }
+
+    let nextLoadedMessageIndices = loadedMessageIndices;
+    if (!hasLoadedIndex) {
+        nextLoadedMessageIndices = new Set(loadedMessageIndices);
+        nextLoadedMessageIndices.add(appendedIndex);
+    }
+
+    return {
+        nextHistory,
+        nextFullMessageCache,
+        nextLoadedMessageIndices,
+        appendedIndex,
+    };
+};
+
 const areTopLogprobsEqual = (a?: TokenLogprob['top_logprobs'], b?: TokenLogprob['top_logprobs']): boolean => {
     if (a === b) return true;
     if (!a || !b) return !a && !b;

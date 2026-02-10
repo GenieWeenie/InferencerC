@@ -4,6 +4,7 @@ import { ChatResponse, Message, TokenLogprob, Model, ChatMessage, ChatSession, T
 import { HistoryService } from '../services/history';
 import { simulateLogprobs, detectIntent, findBestModelForIntent } from '../lib/chatUtils';
 import {
+    buildAppendMessagePatch,
     buildContextMessagesPatch,
     buildDeleteMessagePatch,
     buildInitialLazySessionState,
@@ -869,7 +870,16 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         }
     }, [loadMessageContent, resolveLazyLoadSourceMessages]);
 
-    const executeWebFetch = async () => {
+    const applyAppendedMessagePatch = useCallback((patch: ReturnType<typeof buildAppendMessagePatch>) => {
+        historyRef.current = patch.nextHistory;
+        fullMessageCacheRef.current = patch.nextFullMessageCache;
+        loadedMessageIndicesRef.current = patch.nextLoadedMessageIndices;
+        setHistory(patch.nextHistory);
+        setFullMessageCache(patch.nextFullMessageCache);
+        setLoadedMessageIndices(patch.nextLoadedMessageIndices);
+    }, []);
+
+    const executeWebFetch = useCallback(async () => {
         if (!urlInput) { setShowUrlInput(false); return; }
         const url = urlInput;
         setShowUrlInput(false);
@@ -886,7 +896,13 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const data = await res.json();
             if (data.error) throw new Error(data.error);
             const content = `[CONTEXT FROM WEB: ${url}]\n\n${data.content}`;
-            setHistory(prev => [...prev, { role: 'user', content }]);
+            const appendPatch = buildAppendMessagePatch(
+                historyRef.current,
+                fullMessageCacheRef.current,
+                loadedMessageIndicesRef.current,
+                { role: 'user', content }
+            );
+            applyAppendedMessagePatch(appendPatch);
             toast.success("Web content added to conversation context.");
             logComplianceEvent({
                 category: 'chat.tools',
@@ -907,7 +923,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         } finally {
             setIsFetchingWeb(false);
         }
-    };
+    }, [applyAppendedMessagePatch, logComplianceEvent, urlInput]);
 
     const applyDeleteMessagePatch = useCallback((patch: NonNullable<ReturnType<typeof buildDeleteMessagePatch>>) => {
         historyRef.current = patch.nextHistory;
@@ -1344,15 +1360,21 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         }
     };
 
-    const stopGeneration = () => {
+    const applyStopGenerationPatch = useCallback((patch: NonNullable<ReturnType<typeof buildStopGenerationPatch>>) => {
+        historyRef.current = patch.nextHistory;
+        fullMessageCacheRef.current = patch.nextFullMessageCache;
+        setHistory(patch.nextHistory);
+        setFullMessageCache(patch.nextFullMessageCache);
+    }, []);
+
+    const stopGeneration = useCallback(() => {
         abortControllers.forEach(c => c.abort());
-        setAbortControllers([]);
+        if (abortControllers.length > 0) {
+            setAbortControllers([]);
+        }
         const stopPatch = buildStopGenerationPatch(historyRef.current, fullMessageCacheRef.current);
         if (stopPatch) {
-            historyRef.current = stopPatch.nextHistory;
-            fullMessageCacheRef.current = stopPatch.nextFullMessageCache;
-            setHistory(stopPatch.nextHistory);
-            setFullMessageCache(stopPatch.nextFullMessageCache);
+            applyStopGenerationPatch(stopPatch);
         }
         toast.info("Generation stopped.");
         logComplianceEvent({
@@ -1365,26 +1387,26 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                 activeControllers: abortControllers.length,
             },
         });
-    };
+    }, [abortControllers, applyStopGenerationPatch, logComplianceEvent, sessionId]);
 
     const [attachments, setAttachments] = useState<{ id: string, name: string, content: string }[]>([]);
     const [imageAttachments, setImageAttachments] = useState<{ id: string, name: string, mimeType: string, base64: string, thumbnailUrl: string }[]>([]);
 
-    const addAttachment = (file: { name: string, content: string }) => {
+    const addAttachment = useCallback((file: { name: string, content: string }) => {
         setAttachments(prev => [...prev, { id: crypto.randomUUID(), ...file }]);
-    };
+    }, []);
 
-    const removeAttachment = (id: string) => {
+    const removeAttachment = useCallback((id: string) => {
         setAttachments(prev => prev.filter(a => a.id !== id));
-    };
+    }, []);
 
-    const addImageAttachment = (file: { name: string, mimeType: string, base64: string, thumbnailUrl: string }) => {
+    const addImageAttachment = useCallback((file: { name: string, mimeType: string, base64: string, thumbnailUrl: string }) => {
         setImageAttachments(prev => [...prev, { id: crypto.randomUUID(), ...file }]);
-    };
+    }, []);
 
-    const removeImageAttachment = (id: string) => {
+    const removeImageAttachment = useCallback((id: string) => {
         setImageAttachments(prev => prev.filter(a => a.id !== id));
-    };
+    }, []);
 
     const applyOutgoingPatch = useCallback((outgoingPatch: ReturnType<typeof buildOutgoingMessagePatch>) => {
         historyRef.current = outgoingPatch.nextHistory;
@@ -1584,6 +1606,46 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         }
     };
 
+    const renameSession = useCallback((id: string, newTitle: string) => {
+        HistoryService.renameSession(id, newTitle);
+        setSavedSessions((prev) => {
+            const patch = buildSavedSessionsPatch(prev, {
+                type: 'updateById',
+                id,
+                updater: (session) => ({ ...session, title: newTitle }),
+            });
+            return patch ?? prev;
+        });
+        logComplianceEvent({
+            category: 'chat.session',
+            action: 'renamed',
+            result: 'success',
+            resourceType: 'session',
+            resourceId: id,
+            details: { newTitle },
+        });
+    }, [logComplianceEvent]);
+
+    const togglePinSession = useCallback((id: string) => {
+        HistoryService.togglePinSession(id);
+        setSavedSessions((prev) => {
+            const patch = buildSavedSessionsPatch(prev, {
+                type: 'updateById',
+                id,
+                updater: (session) => ({ ...session, pinned: !Boolean(session.pinned) }),
+            });
+            return patch ?? prev;
+        });
+        logComplianceEvent({
+            category: 'chat.session',
+            action: 'pin_toggled',
+            result: 'success',
+            resourceType: 'session',
+            resourceId: id,
+            details: {},
+        });
+    }, [logComplianceEvent]);
+
     return {
         input, setInput,
         prefill, setPrefill,
@@ -1615,44 +1677,8 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         createNewSession,
         loadSession,
         deleteSession,
-        renameSession: (id: string, newTitle: string) => {
-            HistoryService.renameSession(id, newTitle);
-            setSavedSessions((prev) => {
-                const patch = buildSavedSessionsPatch(prev, {
-                    type: 'updateById',
-                    id,
-                    updater: (session) => ({ ...session, title: newTitle }),
-                });
-                return patch ?? prev;
-            });
-            logComplianceEvent({
-                category: 'chat.session',
-                action: 'renamed',
-                result: 'success',
-                resourceType: 'session',
-                resourceId: id,
-                details: { newTitle },
-            });
-        },
-        togglePinSession: (id: string) => {
-            HistoryService.togglePinSession(id);
-            setSavedSessions((prev) => {
-                const patch = buildSavedSessionsPatch(prev, {
-                    type: 'updateById',
-                    id,
-                    updater: (session) => ({ ...session, pinned: !Boolean(session.pinned) }),
-                });
-                return patch ?? prev;
-            });
-            logComplianceEvent({
-                category: 'chat.session',
-                action: 'pin_toggled',
-                result: 'success',
-                resourceType: 'session',
-                resourceId: id,
-                details: {},
-            });
-        },
+        renameSession,
+        togglePinSession,
         executeWebFetch,
         deleteMessage,
         selectChoice,

@@ -1,6 +1,7 @@
 import { ChatMessage, ChatSession, ToolCall } from '../src/shared/types';
 import {
   areToolCallsEquivalent,
+  buildAppendMessagePatch,
   buildChoiceSelectionUpdate,
   buildContextMessagesPatch,
   buildDeleteMessagePatch,
@@ -136,6 +137,49 @@ describe('chatStateGuards', () => {
       expect(patch).not.toBeNull();
       expect(patch!.nextHistory).toBe(history);
       expect(patch!.nextFullMessageCache.get(0)).toBe(updated);
+    });
+  });
+
+  describe('buildAppendMessagePatch', () => {
+    it('appends a new message and updates cache/index tracking', () => {
+      const history = [createMessage('a')];
+      const cache = new Map<number, ChatMessage>([[0, history[0]]]);
+      const loaded = new Set<number>([0]);
+      const appended = createMessage('b');
+
+      const patch = buildAppendMessagePatch(history, cache, loaded, appended);
+      expect(patch.nextHistory).toHaveLength(2);
+      expect(patch.nextHistory[1]).toBe(appended);
+      expect(patch.nextFullMessageCache.get(1)).toBe(appended);
+      expect(Array.from(patch.nextLoadedMessageIndices).sort((a, b) => a - b)).toEqual([0, 1]);
+      expect(patch.appendedIndex).toBe(1);
+    });
+
+    it('reuses loaded-index set when appended index is already marked loaded', () => {
+      const history = [createMessage('a')];
+      const cache = new Map<number, ChatMessage>([[0, history[0]]]);
+      const loaded = new Set<number>([0, 1]);
+      const appended = createMessage('b');
+
+      const patch = buildAppendMessagePatch(history, cache, loaded, appended);
+      expect(patch.nextLoadedMessageIndices).toBe(loaded);
+      expect(patch.nextFullMessageCache).not.toBe(cache);
+      expect(patch.nextFullMessageCache.get(1)).toBe(appended);
+    });
+
+    it('reuses cache when appended index already points at the same message object', () => {
+      const existing = createMessage('existing');
+      const history = [createMessage('a')];
+      const cache = new Map<number, ChatMessage>([
+        [0, history[0]],
+        [1, existing],
+      ]);
+      const loaded = new Set<number>([0, 1]);
+
+      const patch = buildAppendMessagePatch(history, cache, loaded, existing);
+      expect(patch.nextFullMessageCache).toBe(cache);
+      expect(patch.nextLoadedMessageIndices).toBe(loaded);
+      expect(patch.nextHistory[1]).toBe(existing);
     });
   });
 
