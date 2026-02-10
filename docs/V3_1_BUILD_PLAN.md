@@ -209,6 +209,12 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 140: bound `postingSetCache` with LRU-style eviction to prevent unbounded memory growth during long-lived search sessions.
    - Pass 141: expand `searchIndex` tests to cover eight-term and nine-term fast paths.
    - Pass 142: add `searchIndex` coverage for singleton-candidate behavior in the generic ten-term path.
+   - Pass 143: in `SearchService.searchAsync`, apply `SearchIndexService.searchSessions` prefilter before session hydration and worker dispatch for non-regex queries longer than two characters.
+   - Pass 144: in `SearchService.searchAsync`, return early with empty result stats when index prefilter yields zero candidate sessions, skipping session hydration and worker calls.
+   - Pass 145: in `search.worker`, switch to bounded top-K result accumulation (`maxResults * 2` buffer + trim) instead of unbounded result growth.
+   - Pass 146: in `search.worker`, optimize tokenization/keyword extraction loops and add a small bounded query-token cache to reduce repeated split/filter overhead.
+   - Pass 147: add `SearchService.searchAsync` tests validating index-prefilter session reduction and zero-candidate early return behavior.
+   - Pass 148: normalize async stats shape in `SearchService.searchAsync` and consistently report async search timings through `performanceService`.
 
 ## Release Checklist for v3.1.x
 

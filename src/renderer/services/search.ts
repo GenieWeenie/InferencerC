@@ -14,6 +14,7 @@ import { ChatSession } from '../../shared/types';
 import { SearchIndexService } from './searchIndex';
 import { autoTaggingService } from './autoTagging';
 import { workerManager } from './workerManager';
+import { performanceService } from './performance';
 
 export interface SearchResult {
     sessionId: string;
@@ -67,6 +68,21 @@ export class SearchService {
         'she', 'that', 'the', 'this', 'to', 'was', 'were', 'will', 'with',
         'you', 'your', 'i', 'me', 'my', 'we', 'our', 'they', 'their'
     ]);
+
+    private static createEmptyStats(
+        sessionsSearched: number,
+        startTime: number
+    ): SearchStats {
+        const searchTimeMs = Math.max(0, Math.round(performance.now() - startTime));
+        performanceService.reportSearchTime(searchTimeMs);
+        return {
+            totalResults: 0,
+            sessionsSearched,
+            messagesSearched: 0,
+            searchTimeMs,
+            topKeywords: [],
+        };
+    }
 
     /**
      * Search across all conversations
@@ -124,16 +140,10 @@ export class SearchService {
                 const flags = filters.regexFlags || (opts.caseSensitive ? 'g' : 'gi');
                 regex = new RegExp(query, flags);
             } catch {
-                const endTime = performance.now();
+                const stats = this.createEmptyStats(sessions.length, startTime);
                 return {
                     results: [],
-                    stats: {
-                        totalResults: 0,
-                        sessionsSearched: sessions.length,
-                        messagesSearched: 0,
-                        searchTimeMs: Math.round(endTime - startTime),
-                        topKeywords: [],
-                    },
+                    stats,
                 };
             }
         }
@@ -258,6 +268,8 @@ export class SearchService {
         const topKeywords = this.extractTopKeywords(limitedResults);
 
         const endTime = performance.now();
+        const searchTimeMs = Math.round(endTime - startTime);
+        performanceService.reportSearchTime(searchTimeMs);
 
         return {
             results: limitedResults,
@@ -265,7 +277,7 @@ export class SearchService {
                 totalResults: results.length,
                 sessionsSearched: sessions.length,
                 messagesSearched,
-                searchTimeMs: Math.round(endTime - startTime),
+                searchTimeMs,
                 topKeywords,
             },
         };
@@ -283,6 +295,7 @@ export class SearchService {
         if (filters?.useRegex) {
             return this.search(query, filters, options);
         }
+        const startTime = performance.now();
 
         const opts = {
             maxResults: 50,
@@ -317,9 +330,27 @@ export class SearchService {
             });
         }
 
+        if (query.trim().length > 2) {
+            const candidateIds = SearchIndexService.searchSessions(query);
+            sessions = sessions.filter((session) => candidateIds.has(session.id));
+            if (sessions.length === 0) {
+                return {
+                    results: [],
+                    stats: this.createEmptyStats(0, startTime),
+                };
+            }
+        }
+
         const fullSessions: ChatSession[] = sessions
             .map(meta => HistoryService.getSession(meta.id))
             .filter((session): session is ChatSession => Boolean(session && !session.encrypted));
+
+        if (fullSessions.length === 0) {
+            return {
+                results: [],
+                stats: this.createEmptyStats(0, startTime),
+            };
+        }
 
         const workerFilters = {
             dateFrom: filters?.dateFrom?.getTime(),
@@ -329,7 +360,29 @@ export class SearchService {
             sessionId: filters?.sessionId,
         };
 
-        return workerManager.search(fullSessions, query, workerFilters, opts);
+        const workerResult = await workerManager.search(fullSessions, query, workerFilters, opts);
+        const rawStats = workerResult.stats as Partial<SearchStats> | undefined;
+        const fallbackSearchTimeMs = Math.max(0, Math.round(performance.now() - startTime));
+        const normalizedStats: SearchStats = {
+            totalResults: typeof rawStats?.totalResults === 'number'
+                ? rawStats.totalResults
+                : workerResult.results.length,
+            sessionsSearched: typeof rawStats?.sessionsSearched === 'number'
+                ? rawStats.sessionsSearched
+                : fullSessions.length,
+            messagesSearched: typeof rawStats?.messagesSearched === 'number'
+                ? rawStats.messagesSearched
+                : 0,
+            searchTimeMs: typeof rawStats?.searchTimeMs === 'number'
+                ? rawStats.searchTimeMs
+                : fallbackSearchTimeMs,
+            topKeywords: Array.isArray(rawStats?.topKeywords) ? rawStats.topKeywords : [],
+        };
+        performanceService.reportSearchTime(normalizedStats.searchTimeMs);
+        return {
+            results: workerResult.results,
+            stats: normalizedStats,
+        };
     }
 
     /**

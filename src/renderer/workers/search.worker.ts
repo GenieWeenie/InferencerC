@@ -77,15 +77,42 @@ const STOP_WORDS = new Set([
     'she', 'that', 'the', 'this', 'to', 'was', 'were', 'will', 'with',
     'you', 'your', 'i', 'me', 'my', 'we', 'our', 'they', 'their'
 ]);
+const QUERY_TOKEN_CACHE_LIMIT = 128;
+const queryTokenCache = new Map<string, string[]>();
 
 /**
  * Tokenize a query into search terms
  */
 function tokenize(query: string, caseSensitive: boolean): string[] {
+    const cacheKey = `${caseSensitive ? '1' : '0'}|${query}`;
+    const cached = queryTokenCache.get(cacheKey);
+    if (cached) {
+        queryTokenCache.delete(cacheKey);
+        queryTokenCache.set(cacheKey, cached);
+        return cached;
+    }
+
     const text = caseSensitive ? query : query.toLowerCase();
-    return text
-        .split(/\s+/)
-        .filter(term => term.length >= 2 && !STOP_WORDS.has(term));
+    const splitTerms = text.split(/\s+/);
+    const tokens: string[] = [];
+    for (let i = 0; i < splitTerms.length; i++) {
+        const term = splitTerms[i];
+        if (term.length < 2 || STOP_WORDS.has(term)) {
+            continue;
+        }
+        tokens.push(term);
+    }
+
+    queryTokenCache.delete(cacheKey);
+    queryTokenCache.set(cacheKey, tokens);
+    if (queryTokenCache.size > QUERY_TOKEN_CACHE_LIMIT) {
+        const oldestKey = queryTokenCache.keys().next().value;
+        if (oldestKey !== undefined) {
+            queryTokenCache.delete(oldestKey);
+        }
+    }
+
+    return tokens;
 }
 
 /**
@@ -207,20 +234,24 @@ function extractTopKeywords(results: SearchResult[]): string[] {
     const wordCounts = new Map<string, number>();
 
     for (const result of results) {
-        const words = result.content
-            .toLowerCase()
-            .split(/\W+/)
-            .filter(w => w.length > 3 && !STOP_WORDS.has(w));
-
-        for (const word of words) {
-            wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
-        }
+        collectKeywordCounts(result.content, wordCounts);
     }
 
     return Array.from(wordCounts.entries())
         .sort((a, b) => b[1] - a[1])
         .slice(0, 5)
         .map(([word]) => word);
+}
+
+function collectKeywordCounts(content: string, wordCounts: Map<string, number>): void {
+    const words = content.toLowerCase().split(/\W+/);
+    for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        if (word.length <= 3 || STOP_WORDS.has(word)) {
+            continue;
+        }
+        wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
+    }
 }
 
 /**
@@ -263,7 +294,25 @@ function performSearch(
         filteredSessions = filteredSessions.filter(s => s.modelId === filters.model);
     }
 
+    const maxResults = Math.max(1, opts.maxResults || 50);
+    const maxBufferSize = maxResults * 2;
     const results: SearchResult[] = [];
+    let minScoreInBuffer = 0;
+    const pushRankedResult = (result: SearchResult): void => {
+        if (results.length >= maxBufferSize && result.relevanceScore <= minScoreInBuffer) {
+            return;
+        }
+
+        results.push(result);
+        if (results.length > maxBufferSize) {
+            results.sort((a, b) => b.relevanceScore - a.relevanceScore);
+            results.length = maxBufferSize;
+            minScoreInBuffer = results[results.length - 1].relevanceScore;
+        } else if (results.length === maxBufferSize) {
+            results.sort((a, b) => b.relevanceScore - a.relevanceScore);
+            minScoreInBuffer = results[results.length - 1].relevanceScore;
+        }
+    };
     const queryTerms = tokenize(query, opts.caseSensitive || false);
     const queryLower = opts.caseSensitive ? query : query.toLowerCase();
 
@@ -273,7 +322,7 @@ function performSearch(
         // Search in session title
         const titleMatch = matchText(session.title, queryLower, queryTerms, opts);
         if (titleMatch) {
-            results.push({
+            pushRankedResult({
                 sessionId: session.id,
                 sessionTitle: session.title,
                 messageIndex: -1,
@@ -325,7 +374,7 @@ function performSearch(
                     };
                 }
 
-                results.push(result);
+                pushRankedResult(result);
             }
         }
     }
@@ -334,7 +383,7 @@ function performSearch(
     results.sort((a, b) => b.relevanceScore - a.relevanceScore);
 
     // Limit results
-    const limitedResults = results.slice(0, opts.maxResults);
+    const limitedResults = results.slice(0, maxResults);
 
     // Extract top keywords from results
     const topKeywords = extractTopKeywords(limitedResults);
@@ -361,14 +410,7 @@ function extractKeywordsFromMessages(messages: ChatMessage[]): string[] {
 
     for (const msg of messages) {
         const content = typeof msg.content === 'string' ? msg.content : '';
-        const words = content
-            .toLowerCase()
-            .split(/\W+/)
-            .filter(w => w.length > 3 && !STOP_WORDS.has(w));
-
-        for (const word of words) {
-            wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
-        }
+        collectKeywordCounts(content, wordCounts);
     }
 
     return Array.from(wordCounts.entries())
