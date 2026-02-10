@@ -500,8 +500,7 @@ const Chat: React.FC = () => {
         togglePinSession, renameSession,
         connectionStatus,
         loadMessageRange,
-        loadedMessageIndices,
-        getVisibleHistory
+        loadedMessageIndices
     } = useChat(handleApiLog, streamingEnabled);
 
     // Simulate initial session loading for skeleton UI

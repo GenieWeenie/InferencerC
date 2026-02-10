@@ -844,18 +844,6 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         }
     };
 
-    // Get visible history with lazy-loaded content
-    const getVisibleHistory = (): ChatMessage[] => {
-        return history.map((msg, index) => {
-            // If content is loaded in cache, use full message
-            if (loadedMessageIndices.has(index)) {
-                return fullMessageCache.get(index) || msg;
-            }
-            // Otherwise return lightweight version
-            return msg;
-        });
-    };
-
     const executeWebFetch = async () => {
         if (!urlInput) { setShowUrlInput(false); return; }
         const url = urlInput;
@@ -1687,7 +1675,6 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         updateMessageToken,
         // Lazy loading support
         loadMessageRange,
-        loadedMessageIndices,
-        getVisibleHistory
+        loadedMessageIndices
     };
 };

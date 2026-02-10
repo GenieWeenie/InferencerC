@@ -240,6 +240,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 173: add explicit benchmark command `npm run benchmark:search-index` backed by `__tests__/searchIndexBenchmark.bench.ts` for repeatable optimization baselines.
    - Pass 174: add search-index benchmark report helpers (`formatSearchIndexBenchmarkReport`, `saveSearchIndexBenchmarkReport`) to persist JSON snapshots for before/after pass comparisons.
    - Pass 175: fix chat lazy-message hydration to load full message content from authoritative session snapshots/cache (instead of truncated `history` placeholders), ensuring on-demand expansion restores complete messages.
+   - Pass 176: remove dead lazy-history projection (`getVisibleHistory`) and keep range hydration sourced from authoritative full-session message snapshots, trimming unused work and API surface.
 
 ## Release Checklist for v3.1.x
 
