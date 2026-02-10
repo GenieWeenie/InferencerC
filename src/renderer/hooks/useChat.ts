@@ -5,7 +5,9 @@ import { HistoryService } from '../services/history';
 import { simulateLogprobs, detectIntent, findBestModelForIntent } from '../lib/chatUtils';
 import {
     buildContextMessagesPatch,
+    buildDeleteMessagePatch,
     buildInitialLazySessionState,
+    buildMessageReplacePatch,
     buildOutgoingMessagePatch,
     buildSavedSessionsPatch,
     buildChoiceSelectionUpdate,
@@ -907,150 +909,117 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         }
     };
 
+    const applyDeleteMessagePatch = useCallback((patch: NonNullable<ReturnType<typeof buildDeleteMessagePatch>>) => {
+        historyRef.current = patch.nextHistory;
+        fullMessageCacheRef.current = patch.nextFullMessageCache;
+        loadedMessageIndicesRef.current = patch.nextLoadedMessageIndices;
+        setHistory(patch.nextHistory);
+        setFullMessageCache(patch.nextFullMessageCache);
+        setLoadedMessageIndices(patch.nextLoadedMessageIndices);
+    }, []);
+
+    const applyMessageReplacePatch = useCallback((patch: NonNullable<ReturnType<typeof buildMessageReplacePatch>>) => {
+        historyRef.current = patch.nextHistory;
+        fullMessageCacheRef.current = patch.nextFullMessageCache;
+        setHistory(patch.nextHistory);
+        setFullMessageCache(patch.nextFullMessageCache);
+    }, []);
+
     const deleteMessage = useCallback((index: number) => {
-        const currentHistory = historyRef.current;
-        if (index < 0 || index >= currentHistory.length) {
+        const patch = buildDeleteMessagePatch(
+            historyRef.current,
+            fullMessageCacheRef.current,
+            loadedMessageIndicesRef.current,
+            index
+        );
+        if (!patch) {
             return;
         }
 
-        setHistory((prev) => {
-            if (index < 0 || index >= prev.length) return prev;
-            const nextHistory = prev.slice(0, index);
-            historyRef.current = nextHistory;
-            return nextHistory;
-        });
+        applyDeleteMessagePatch(patch);
         selectedTokenRef.current = null;
         setSelectedToken(null);
-
-        // Clean up lazy loading cache - remove entries for deleted messages
-        setFullMessageCache((cache) => {
-            let changed = false;
-            const newCache = new Map(cache);
-            for (let i = index; i < currentHistory.length; i += 1) {
-                if (newCache.delete(i)) {
-                    changed = true;
-                }
-            }
-            if (!changed) return cache;
-            fullMessageCacheRef.current = newCache;
-            return newCache;
-        });
-
-        setLoadedMessageIndices((indices) => {
-            let changed = false;
-            const newIndices = new Set(indices);
-            for (let i = index; i < currentHistory.length; i += 1) {
-                if (newIndices.delete(i)) {
-                    changed = true;
-                }
-            }
-            if (!changed) return indices;
-            loadedMessageIndicesRef.current = newIndices;
-            return newIndices;
-        });
-    }, []);
+    }, [applyDeleteMessagePatch]);
 
     const selectChoice = useCallback((messageIndex: number, choiceIndex: number) => {
-        let updatedMessage: ChatMessage | null = null;
-        setHistory((prev) => {
-            const targetMsg = prev[messageIndex];
-            if (!targetMsg) return prev;
+        const targetMessage = historyRef.current[messageIndex];
+        if (!targetMessage) {
+            return;
+        }
 
-            updatedMessage = buildChoiceSelectionUpdate(targetMsg, choiceIndex);
-            if (!updatedMessage) {
-                return prev;
-            }
-
-            const newHistory = [...prev];
-            newHistory[messageIndex] = updatedMessage;
-            historyRef.current = newHistory;
-            return newHistory;
-        });
-
+        const updatedMessage = buildChoiceSelectionUpdate(targetMessage, choiceIndex);
         if (!updatedMessage) {
             return;
         }
 
-        setFullMessageCache((cache) => {
-            if (cache.get(messageIndex) === updatedMessage) {
-                return cache;
-            }
-            const newCache = new Map(cache);
-            newCache.set(messageIndex, updatedMessage);
-            fullMessageCacheRef.current = newCache;
-            return newCache;
-        });
+        const patch = buildMessageReplacePatch(
+            historyRef.current,
+            fullMessageCacheRef.current,
+            messageIndex,
+            updatedMessage
+        );
+        if (!patch) {
+            return;
+        }
 
+        applyMessageReplacePatch(patch);
         selectedTokenRef.current = null;
         setSelectedToken(null);
-    }, []);
-
-
+    }, [applyMessageReplacePatch]);
 
     const updateMessageContent = useCallback((index: number, content: string, isLoading: boolean, logprobs?: TokenLogprob[], generationTime?: number, toolCalls?: ToolCall[]) => {
-        setHistory(prev => {
-            const newHistory = [...prev];
-            if (!newHistory[index]) return prev;
+        const existing = historyRef.current[index];
+        if (!existing) {
+            return;
+        }
 
-            const existing = newHistory[index];
-            const updatedMessage = buildUpdatedMessageContent({
-                existing,
-                content,
-                isLoading,
-                logprobs,
-                generationTime,
-                toolCalls,
-            });
-            if (!updatedMessage) {
-                return prev;
-            }
-            newHistory[index] = updatedMessage;
-            historyRef.current = newHistory;
-
-            // Update cache for lazy loading
-            setFullMessageCache(cache => {
-                if (cache.get(index) === updatedMessage) {
-                    return cache;
-                }
-                const newCache = new Map(cache);
-                newCache.set(index, updatedMessage);
-                fullMessageCacheRef.current = newCache;
-                return newCache;
-            });
-
-            return newHistory;
+        const updatedMessage = buildUpdatedMessageContent({
+            existing,
+            content,
+            isLoading,
+            logprobs,
+            generationTime,
+            toolCalls,
         });
-    }, []);
+        if (!updatedMessage) {
+            return;
+        }
+
+        const patch = buildMessageReplacePatch(
+            historyRef.current,
+            fullMessageCacheRef.current,
+            index,
+            updatedMessage
+        );
+        if (!patch) {
+            return;
+        }
+
+        applyMessageReplacePatch(patch);
+    }, [applyMessageReplacePatch]);
 
     const updateMessageToken = useCallback((messageIndex: number, tokenIndex: number, newToken: string) => {
-        let tokenUpdate: { updatedMessage: ChatMessage; updatedToken: TokenLogprob } | null = null;
-        setHistory(prev => {
-            const newHistory = [...prev];
-            const msg = newHistory[messageIndex];
-            if (!msg) return prev;
+        const currentMessage = historyRef.current[messageIndex];
+        if (!currentMessage) {
+            return;
+        }
 
-            tokenUpdate = buildTokenEditUpdate(msg, tokenIndex, newToken);
-            if (!tokenUpdate) return prev;
-
-            newHistory[messageIndex] = tokenUpdate.updatedMessage;
-            historyRef.current = newHistory;
-
-            // Update cache for lazy loading
-            setFullMessageCache(cache => {
-                if (cache.get(messageIndex) === tokenUpdate?.updatedMessage) {
-                    return cache;
-                }
-                const newCache = new Map(cache);
-                newCache.set(messageIndex, tokenUpdate!.updatedMessage);
-                fullMessageCacheRef.current = newCache;
-                return newCache;
-            });
-
-            return newHistory;
-        });
+        const tokenUpdate = buildTokenEditUpdate(currentMessage, tokenIndex, newToken);
         if (!tokenUpdate) {
             return;
         }
+
+        const patch = buildMessageReplacePatch(
+            historyRef.current,
+            fullMessageCacheRef.current,
+            messageIndex,
+            tokenUpdate.updatedMessage
+        );
+        if (!patch) {
+            return;
+        }
+
+        applyMessageReplacePatch(patch);
         setSelectedToken((prevSelectedToken) => {
             if (!prevSelectedToken || prevSelectedToken.messageIndex !== messageIndex || prevSelectedToken.tokenIndex !== tokenIndex) {
                 return prevSelectedToken;
@@ -1059,7 +1028,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             selectedTokenRef.current = nextSelectedToken;
             return nextSelectedToken;
         });
-    }, []);
+    }, [applyMessageReplacePatch]);
 
     const deriveSessionTitleFromMessages = (messages: ChatMessage[]): string => {
         const firstUserMessage = messages.find(
@@ -1417,6 +1386,31 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         setImageAttachments(prev => prev.filter(a => a.id !== id));
     };
 
+    const applyOutgoingPatch = useCallback((outgoingPatch: ReturnType<typeof buildOutgoingMessagePatch>) => {
+        historyRef.current = outgoingPatch.nextHistory;
+        fullMessageCacheRef.current = outgoingPatch.nextFullMessageCache;
+        loadedMessageIndicesRef.current = outgoingPatch.nextLoadedMessageIndices;
+        setFullMessageCache(outgoingPatch.nextFullMessageCache);
+        setLoadedMessageIndices(outgoingPatch.nextLoadedMessageIndices);
+        setHistory(outgoingPatch.nextHistory);
+    }, []);
+
+    const buildComposerResetPatch = () => ({
+        nextInput: '',
+        nextAttachments: [] as { id: string; name: string; content: string }[],
+        nextImageAttachments: [] as { id: string; name: string; mimeType: string; base64: string; thumbnailUrl: string }[],
+        nextPrefill: null as string | null,
+    });
+
+    const applyComposerResetPatch = useCallback((activeSessionId: string) => {
+        const resetPatch = buildComposerResetPatch();
+        setInput(resetPatch.nextInput);
+        setAttachments(resetPatch.nextAttachments);
+        setImageAttachments(resetPatch.nextImageAttachments);
+        setPrefill(resetPatch.nextPrefill);
+        crashRecoveryService.saveDraft(activeSessionId, '');
+    }, []);
+
     const sendMessage = async (contextOptions?: {
         excludedMessageIndices?: number[];
         contextSummary?: string;
@@ -1506,9 +1500,12 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             userMessageContent = contentParts;
         }
 
+        const currentHistory = historyRef.current;
+        const currentFullMessageCache = fullMessageCacheRef.current;
+        const currentLoadedMessageIndices = loadedMessageIndicesRef.current;
         const excludedIndices = new Set(contextOptions?.excludedMessageIndices || []);
         const baseMessages: Message[] = buildContextMessagesPatch({
-            history,
+            history: currentHistory,
             excludedIndices,
             finalSystemPrompt,
             contextSummary: contextOptions?.contextSummary,
@@ -1538,29 +1535,17 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const msgA: ChatMessage = { role: 'assistant', content: '', isLoading: true };
             const msgB: ChatMessage = { role: 'assistant', content: '', isLoading: true };
             const outgoingPatch = buildOutgoingMessagePatch({
-                history,
-                fullMessageCache,
-                loadedMessageIndices,
+                history: currentHistory,
+                fullMessageCache: currentFullMessageCache,
+                loadedMessageIndices: currentLoadedMessageIndices,
                 userMessage: userMsg,
                 assistantMessages: [msgA, msgB],
             });
             const indexA = outgoingPatch.assistantStartIndex;
             const indexB = outgoingPatch.assistantStartIndex + 1;
 
-            historyRef.current = outgoingPatch.nextHistory;
-            fullMessageCacheRef.current = outgoingPatch.nextFullMessageCache;
-            loadedMessageIndicesRef.current = outgoingPatch.nextLoadedMessageIndices;
-            setFullMessageCache(outgoingPatch.nextFullMessageCache);
-            setLoadedMessageIndices(outgoingPatch.nextLoadedMessageIndices);
-            setHistory(outgoingPatch.nextHistory);
-
-            setInput('');
-            setAttachments([]);
-            setImageAttachments([]);
-            setPrefill(null);
-
-            // Clear draft after sending message
-            crashRecoveryService.saveDraft(sessionId, '');
+            applyOutgoingPatch(outgoingPatch);
+            applyComposerResetPatch(sessionId);
 
             const ctrlA = new AbortController();
             const ctrlB = new AbortController();
@@ -1578,28 +1563,16 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             // Normal Mode
             const loadingItem: ChatMessage = { role: 'assistant', content: prefill || '', isLoading: true };
             const outgoingPatch = buildOutgoingMessagePatch({
-                history,
-                fullMessageCache,
-                loadedMessageIndices,
+                history: currentHistory,
+                fullMessageCache: currentFullMessageCache,
+                loadedMessageIndices: currentLoadedMessageIndices,
                 userMessage: userMsg,
                 assistantMessages: [loadingItem],
             });
             const targetIndex = outgoingPatch.assistantStartIndex;
 
-            historyRef.current = outgoingPatch.nextHistory;
-            fullMessageCacheRef.current = outgoingPatch.nextFullMessageCache;
-            loadedMessageIndicesRef.current = outgoingPatch.nextLoadedMessageIndices;
-            setFullMessageCache(outgoingPatch.nextFullMessageCache);
-            setLoadedMessageIndices(outgoingPatch.nextLoadedMessageIndices);
-            setHistory(outgoingPatch.nextHistory);
-
-            setInput('');
-            setAttachments([]);
-            setImageAttachments([]);
-            setPrefill(null);
-
-            // Clear draft after sending message
-            crashRecoveryService.saveDraft(sessionId, '');
+            applyOutgoingPatch(outgoingPatch);
+            applyComposerResetPatch(sessionId);
 
             const ctrl = new AbortController();
             setAbortControllers([ctrl]);

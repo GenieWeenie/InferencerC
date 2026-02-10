@@ -57,6 +57,91 @@ export const buildMessageLoadPatch = (
     return { nextLoadedMessageIndices, nextFullMessageCache };
 };
 
+export const buildDeleteMessagePatch = (
+    history: ChatMessage[],
+    fullMessageCache: Map<number, ChatMessage>,
+    loadedMessageIndices: Set<number>,
+    deleteFromIndex: number
+): {
+    nextHistory: ChatMessage[];
+    nextFullMessageCache: Map<number, ChatMessage>;
+    nextLoadedMessageIndices: Set<number>;
+} | null => {
+    if (deleteFromIndex < 0 || deleteFromIndex >= history.length) {
+        return null;
+    }
+
+    const nextHistory = history.slice(0, deleteFromIndex);
+
+    let nextFullMessageCache: Map<number, ChatMessage> = fullMessageCache;
+    let nextLoadedMessageIndices: Set<number> = loadedMessageIndices;
+
+    let cacheChanged = false;
+    const cachePatch = new Map(fullMessageCache);
+    for (let index = deleteFromIndex; index < history.length; index += 1) {
+        if (cachePatch.delete(index)) {
+            cacheChanged = true;
+        }
+    }
+    if (cacheChanged) {
+        nextFullMessageCache = cachePatch;
+    }
+
+    let loadedChanged = false;
+    const loadedPatch = new Set(loadedMessageIndices);
+    for (let index = deleteFromIndex; index < history.length; index += 1) {
+        if (loadedPatch.delete(index)) {
+            loadedChanged = true;
+        }
+    }
+    if (loadedChanged) {
+        nextLoadedMessageIndices = loadedPatch;
+    }
+
+    return {
+        nextHistory,
+        nextFullMessageCache,
+        nextLoadedMessageIndices,
+    };
+};
+
+export const buildMessageReplacePatch = (
+    history: ChatMessage[],
+    fullMessageCache: Map<number, ChatMessage>,
+    messageIndex: number,
+    updatedMessage: ChatMessage
+): { nextHistory: ChatMessage[]; nextFullMessageCache: Map<number, ChatMessage> } | null => {
+    if (messageIndex < 0 || messageIndex >= history.length) {
+        return null;
+    }
+
+    const currentMessage = history[messageIndex];
+    const currentCachedMessage = fullMessageCache.get(messageIndex);
+
+    const historyChanged = currentMessage !== updatedMessage;
+    const cacheChanged = currentCachedMessage !== updatedMessage;
+    if (!historyChanged && !cacheChanged) {
+        return null;
+    }
+
+    let nextHistory = history;
+    if (historyChanged) {
+        nextHistory = [...history];
+        nextHistory[messageIndex] = updatedMessage;
+    }
+
+    let nextFullMessageCache = fullMessageCache;
+    if (cacheChanged) {
+        nextFullMessageCache = new Map(fullMessageCache);
+        nextFullMessageCache.set(messageIndex, updatedMessage);
+    }
+
+    return {
+        nextHistory,
+        nextFullMessageCache,
+    };
+};
+
 const areTopLogprobsEqual = (a?: TokenLogprob['top_logprobs'], b?: TokenLogprob['top_logprobs']): boolean => {
     if (a === b) return true;
     if (!a || !b) return !a && !b;

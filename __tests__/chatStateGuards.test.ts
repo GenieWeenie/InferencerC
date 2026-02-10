@@ -3,8 +3,10 @@ import {
   areToolCallsEquivalent,
   buildChoiceSelectionUpdate,
   buildContextMessagesPatch,
+  buildDeleteMessagePatch,
   buildInitialLazySessionState,
   buildMessageLoadPatch,
+  buildMessageReplacePatch,
   buildOutgoingMessagePatch,
   buildSavedSessionsPatch,
   buildStopGenerationPatch,
@@ -55,6 +57,85 @@ describe('chatStateGuards', () => {
       expect(patch).not.toBeNull();
       expect(Array.from(patch!.nextLoadedMessageIndices).sort((a, b) => a - b)).toEqual([0, 2]);
       expect(patch!.nextFullMessageCache.get(2)).toBe(allMessages[2]);
+    });
+  });
+
+  describe('buildDeleteMessagePatch', () => {
+    it('returns null for out-of-range indices', () => {
+      const history = [createMessage('a'), createMessage('b')];
+      const cache = new Map<number, ChatMessage>([[0, history[0]]]);
+      const loaded = new Set<number>([0]);
+      expect(buildDeleteMessagePatch(history, cache, loaded, -1)).toBeNull();
+      expect(buildDeleteMessagePatch(history, cache, loaded, 2)).toBeNull();
+    });
+
+    it('truncates history and prunes cache/index entries from deletion point', () => {
+      const history = [createMessage('a'), createMessage('b'), createMessage('c')];
+      const cache = new Map<number, ChatMessage>([
+        [0, history[0]],
+        [1, history[1]],
+        [2, history[2]],
+      ]);
+      const loaded = new Set<number>([0, 1, 2]);
+      const patch = buildDeleteMessagePatch(history, cache, loaded, 1);
+
+      expect(patch).not.toBeNull();
+      expect(patch!.nextHistory).toEqual([history[0]]);
+      expect(Array.from(patch!.nextFullMessageCache.keys())).toEqual([0]);
+      expect(Array.from(patch!.nextLoadedMessageIndices.values())).toEqual([0]);
+    });
+
+    it('reuses cache/index references when no entries need pruning', () => {
+      const history = [createMessage('a'), createMessage('b')];
+      const cache = new Map<number, ChatMessage>([[0, history[0]]]);
+      const loaded = new Set<number>([0]);
+      const patch = buildDeleteMessagePatch(history, cache, loaded, 1);
+
+      expect(patch).not.toBeNull();
+      expect(patch!.nextHistory).toEqual([history[0]]);
+      expect(patch!.nextFullMessageCache).toBe(cache);
+      expect(patch!.nextLoadedMessageIndices).toBe(loaded);
+    });
+  });
+
+  describe('buildMessageReplacePatch', () => {
+    it('returns null for out-of-range index', () => {
+      const history = [createMessage('a')];
+      const cache = new Map<number, ChatMessage>([[0, history[0]]]);
+      const updated = createMessage('updated');
+      expect(buildMessageReplacePatch(history, cache, -1, updated)).toBeNull();
+      expect(buildMessageReplacePatch(history, cache, 1, updated)).toBeNull();
+    });
+
+    it('returns null when both history and cache already hold the same message object', () => {
+      const message = createMessage('same');
+      const history = [message];
+      const cache = new Map<number, ChatMessage>([[0, message]]);
+      expect(buildMessageReplacePatch(history, cache, 0, message)).toBeNull();
+    });
+
+    it('updates both history and cache when replacing with a new message', () => {
+      const history = [createMessage('old')];
+      const cache = new Map<number, ChatMessage>([[0, history[0]]]);
+      const updated = createMessage('new');
+      const patch = buildMessageReplacePatch(history, cache, 0, updated);
+
+      expect(patch).not.toBeNull();
+      expect(patch!.nextHistory[0]).toBe(updated);
+      expect(patch!.nextHistory).not.toBe(history);
+      expect(patch!.nextFullMessageCache.get(0)).toBe(updated);
+      expect(patch!.nextFullMessageCache).not.toBe(cache);
+    });
+
+    it('can patch cache only when history already references updated message', () => {
+      const updated = createMessage('shared');
+      const history = [updated];
+      const cache = new Map<number, ChatMessage>();
+      const patch = buildMessageReplacePatch(history, cache, 0, updated);
+
+      expect(patch).not.toBeNull();
+      expect(patch!.nextHistory).toBe(history);
+      expect(patch!.nextFullMessageCache.get(0)).toBe(updated);
     });
   });
 
