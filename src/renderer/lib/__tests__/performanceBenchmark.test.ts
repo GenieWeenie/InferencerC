@@ -5,6 +5,8 @@ import {
     generateBenchmarkSession,
     wait,
     runSearchIndexBaseline,
+    formatSearchIndexBenchmarkReport,
+    saveSearchIndexBenchmarkReport,
 } from '../performanceBenchmark';
 
 // Mock requestAnimationFrame for Node environment
@@ -243,6 +245,58 @@ describe('performanceBenchmark', () => {
             expect(report.iterations).toBe(1);
             expect(report.warmupRuns).toBe(0);
             expect(report.queryLengths).toEqual([1, 1, 4]);
+        });
+
+        it('formats and persists benchmark reports', () => {
+            const originalLocalStorage = globalThis.localStorage;
+            const storageMap = new Map<string, string>();
+            Object.defineProperty(globalThis, 'localStorage', {
+                value: {
+                    getItem: (key: string) => (storageMap.has(key) ? storageMap.get(key)! : null),
+                    setItem: (key: string, value: string) => storageMap.set(key, value),
+                    removeItem: (key: string) => storageMap.delete(key),
+                    clear: () => storageMap.clear(),
+                    key: (index: number) => Array.from(storageMap.keys())[index] ?? null,
+                    get length() {
+                        return storageMap.size;
+                    }
+                },
+                configurable: true,
+                writable: true,
+            });
+            try {
+                const suite = runSearchIndexBaseline({
+                    queryLengths: [2, 4],
+                    iterations: 1,
+                    warmupRuns: 0,
+                    searchFn: () => new Set(['s1']),
+                });
+
+                const formatted = formatSearchIndexBenchmarkReport(suite);
+                expect(() => JSON.parse(formatted)).not.toThrow();
+
+                const saved = saveSearchIndexBenchmarkReport(suite, {
+                    storageKey: 'test-search-index-bench-reports',
+                    maxReports: 2,
+                    label: 'unit-bench',
+                });
+                expect(saved).toHaveLength(1);
+                expect(saved[0].label).toBe('unit-bench');
+
+                const nextSaved = saveSearchIndexBenchmarkReport(suite, {
+                    storageKey: 'test-search-index-bench-reports',
+                    maxReports: 2,
+                    label: 'unit-bench-2',
+                });
+                expect(nextSaved).toHaveLength(2);
+                expect(nextSaved[0].label).toBe('unit-bench-2');
+            } finally {
+                Object.defineProperty(globalThis, 'localStorage', {
+                    value: originalLocalStorage,
+                    configurable: true,
+                    writable: true,
+                });
+            }
         });
     });
 });

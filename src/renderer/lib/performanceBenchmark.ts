@@ -63,7 +63,21 @@ export interface SearchIndexBenchmarkOptions {
     searchFn?: (query: string) => Set<string>;
 }
 
+export interface SearchIndexBenchmarkPersistedReport {
+    id: string;
+    createdAt: number;
+    label: string;
+    suite: SearchIndexBenchmarkSuite;
+}
+
+export interface SaveSearchIndexBenchmarkOptions {
+    storageKey?: string;
+    label?: string;
+    maxReports?: number;
+}
+
 const DEFAULT_SEARCH_INDEX_QUERY_LENGTHS = [1, 2, 3, 5, 8, 12, 20, 33];
+const DEFAULT_SEARCH_INDEX_REPORT_STORAGE_KEY = 'search_index_benchmark_reports';
 
 const buildSyntheticQuery = (queryLength: number): string => {
     const terms = new Array<string>(queryLength);
@@ -133,6 +147,40 @@ export function runSearchIndexBaseline(
         warmupRuns,
         samples,
     };
+}
+
+export function formatSearchIndexBenchmarkReport(suite: SearchIndexBenchmarkSuite): string {
+    return JSON.stringify(suite, null, 2);
+}
+
+export function saveSearchIndexBenchmarkReport(
+    suite: SearchIndexBenchmarkSuite,
+    options: SaveSearchIndexBenchmarkOptions = {}
+): SearchIndexBenchmarkPersistedReport[] {
+    if (typeof localStorage === 'undefined') {
+        return [];
+    }
+
+    const storageKey = options.storageKey || DEFAULT_SEARCH_INDEX_REPORT_STORAGE_KEY;
+    const maxReports = Math.max(1, options.maxReports ?? 20);
+    const label = options.label || 'search-index-baseline';
+    const record: SearchIndexBenchmarkPersistedReport = {
+        id: `${suite.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+        createdAt: Date.now(),
+        label,
+        suite,
+    };
+
+    try {
+        const raw = localStorage.getItem(storageKey);
+        const parsed = raw ? JSON.parse(raw) as SearchIndexBenchmarkPersistedReport[] : [];
+        const next = [record, ...parsed].slice(0, maxReports);
+        localStorage.setItem(storageKey, JSON.stringify(next));
+        return next;
+    } catch (error) {
+        console.error('Failed to persist search-index benchmark report:', error);
+        return [record];
+    }
 }
 
 /**

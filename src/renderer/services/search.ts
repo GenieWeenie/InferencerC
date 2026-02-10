@@ -155,6 +155,32 @@ export class SearchService {
         return autoTaggingService.getTagsLookup();
     }
 
+    private static filterSessionsByCandidates(
+        sessions: ChatSession[],
+        candidateIds: Set<string>
+    ): ChatSession[] {
+        const filtered: ChatSession[] = [];
+        for (let i = 0; i < sessions.length; i++) {
+            const session = sessions[i];
+            if (candidateIds.has(session.id)) {
+                filtered.push(session);
+            }
+        }
+        return filtered;
+    }
+
+    private static hydrateFullSessions(sessions: ChatSession[]): ChatSession[] {
+        const fullSessions: ChatSession[] = [];
+        for (let i = 0; i < sessions.length; i++) {
+            const hydrated = HistoryService.getSession(sessions[i].id);
+            if (!hydrated || hydrated.encrypted) {
+                continue;
+            }
+            fullSessions.push(hydrated);
+        }
+        return fullSessions;
+    }
+
     /**
      * Search across all conversations
      */
@@ -194,7 +220,7 @@ export class SearchService {
 
         if (!regex && query.trim().length > 2) {
             const candidateIds = SearchIndexService.searchSessions(query);
-            sessions = sessions.filter(s => candidateIds.has(s.id));
+            sessions = this.filterSessionsByCandidates(sessions, candidateIds);
         }
 
         // Pre-compute query data once
@@ -356,7 +382,7 @@ export class SearchService {
 
         if (query.trim().length > 2) {
             const candidateIds = SearchIndexService.searchSessions(query);
-            sessions = sessions.filter((session) => candidateIds.has(session.id));
+            sessions = this.filterSessionsByCandidates(sessions, candidateIds);
             if (sessions.length === 0) {
                 return {
                     results: [],
@@ -365,9 +391,7 @@ export class SearchService {
             }
         }
 
-        const fullSessions: ChatSession[] = sessions
-            .map(meta => HistoryService.getSession(meta.id))
-            .filter((session): session is ChatSession => Boolean(session && !session.encrypted));
+        const fullSessions = this.hydrateFullSessions(sessions);
 
         if (fullSessions.length === 0) {
             return {
@@ -644,9 +668,15 @@ export class SearchService {
      */
     private static tokenize(query: string, caseSensitive: boolean): string[] {
         const text = caseSensitive ? query : query.toLowerCase();
-        return text
-            .split(/\s+/)
-            .filter(term => term.length >= 2 && !this.stopWords.has(term));
+        const rawTerms = text.split(/\s+/);
+        const tokens: string[] = [];
+        for (let i = 0; i < rawTerms.length; i++) {
+            const term = rawTerms[i];
+            if (term.length >= 2 && !this.stopWords.has(term)) {
+                tokens.push(term);
+            }
+        }
+        return tokens;
     }
 
     /**
@@ -663,20 +693,44 @@ export class SearchService {
                 ? result.matchedText
                 : result.matchedText.substring(0, 500);
 
-            const words = textToProcess
-                .toLowerCase()
-                .split(/\W+/)
-                .filter(w => w.length > 3 && !this.stopWords.has(w));
-
-            for (const word of words) {
+            const words = textToProcess.toLowerCase().split(/\W+/);
+            for (let wordIndex = 0; wordIndex < words.length; wordIndex++) {
+                const word = words[wordIndex];
+                if (word.length <= 3 || this.stopWords.has(word)) {
+                    continue;
+                }
                 wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
             }
         }
 
-        return Array.from(wordCounts.entries())
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 5)
-            .map(([word]) => word);
+        const topWords: string[] = [];
+        const topCounts: number[] = [];
+        for (const [word, count] of wordCounts) {
+            let insertAt = -1;
+            for (let i = 0; i < topCounts.length; i++) {
+                if (count > topCounts[i]) {
+                    insertAt = i;
+                    break;
+                }
+            }
+
+            if (insertAt === -1) {
+                if (topCounts.length < 5) {
+                    topWords.push(word);
+                    topCounts.push(count);
+                }
+                continue;
+            }
+
+            topWords.splice(insertAt, 0, word);
+            topCounts.splice(insertAt, 0, count);
+            if (topCounts.length > 5) {
+                topWords.pop();
+                topCounts.pop();
+            }
+        }
+
+        return topWords;
     }
 
     /**

@@ -229,6 +229,16 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 162: in `autoTaggingService`, add reverse cache (`tag -> sessionIds`) refreshed with raw/tag caches so `getConversationsByTag` is lookup-based instead of full-array scans.
    - Pass 163: in `SearchService`, centralize tag-lookup resolution for filter paths so sync/async searches consistently consume one cached bulk lookup per request.
    - Pass 164: expand regression coverage for large-query stability and tag-heavy filtering behavior (single bulk tag lookup + limited session hydration).
+   - Pass 165: extract shared posting-list collection + smallest-candidate selection helpers in `searchIndex` so multi-term intersection paths stop duplicating candidate-selection logic.
+   - Pass 166: route former 7-term intersection path through the shared smallest-posting-list helper, preserving singleton fast paths via common helpers.
+   - Pass 167: route former 5/6-term intersection paths through the shared helper, removing duplicated membership-set setup and scan loops.
+   - Pass 168: route former 3/4-term intersection paths through the shared helper, consolidating fixed-arity intersection behavior.
+   - Pass 169: route 2-term intersections through the same shared helper, leaving a single multi-term intersection engine for all 2+ term queries.
+   - Pass 170: in `searchIndex.applyOperations`, replace repeated `includes(sessionId)` duplicate checks with a fast append-if-missing helper (tail check + reverse scan), reducing duplicate-check overhead on hot upsert paths.
+   - Pass 171: in `SearchService`, replace candidate-filter and async hydration `filter/map` chains with single-pass loops (`filterSessionsByCandidates`, `hydrateFullSessions`) on hot search paths.
+   - Pass 172: replace full-map keyword sort pipelines in both sync search and search worker with bounded top-k selection helpers, keeping output identical while reducing allocation/sort overhead.
+   - Pass 173: add explicit benchmark command `npm run benchmark:search-index` backed by `__tests__/searchIndexBenchmark.bench.ts` for repeatable optimization baselines.
+   - Pass 174: add search-index benchmark report helpers (`formatSearchIndexBenchmarkReport`, `saveSearchIndexBenchmarkReport`) to persist JSON snapshots for before/after pass comparisons.
 
 ## Release Checklist for v3.1.x
 

@@ -341,49 +341,64 @@ const createSingletonResult = (sessionId: string): Set<string> => {
     return result;
 };
 
-const singletonMatchesAllTerms = (
+const singletonMatchesPostingLists = (
     sessionId: string,
-    queryTerms: string[],
-    indexTerms: Record<string, string[]>,
+    postingLists: string[][],
     smallestTermIndex: number
 ): boolean => {
-    for (let i = 0; i < queryTerms.length; i++) {
+    for (let i = 0; i < postingLists.length; i++) {
         if (i === smallestTermIndex) {
             continue;
         }
-        const ids = indexTerms[queryTerms[i]];
-        if (!ids || !ids.includes(sessionId)) {
+        if (!postingLists[i].includes(sessionId)) {
             return false;
         }
     }
     return true;
 };
 
+const collectPostingLists = (
+    queryTerms: string[],
+    indexTerms: Record<string, string[]>
+): string[][] | null => {
+    const postingLists = new Array<string[]>(queryTerms.length);
+    for (let i = 0; i < queryTerms.length; i++) {
+        const ids = indexTerms[queryTerms[i]];
+        if (!ids || ids.length === 0) {
+            return null;
+        }
+        postingLists[i] = ids;
+    }
+    return postingLists;
+};
+
+const findSmallestPostingListIndex = (postingLists: string[][]): number => {
+    let smallestIndex = 0;
+    let smallestLength = postingLists[0].length;
+    for (let i = 1; i < postingLists.length; i++) {
+        const currentLength = postingLists[i].length;
+        if (currentLength < smallestLength) {
+            smallestLength = currentLength;
+            smallestIndex = i;
+        }
+    }
+    return smallestIndex;
+};
+
 const intersectBySmallestPostingList = (
     queryTerms: string[],
     indexTerms: Record<string, string[]>
 ): Set<string> => {
-    let smallestTermIndex = -1;
-    let candidateIds: string[] | null = null;
-
-    for (let i = 0; i < queryTerms.length; i++) {
-        const ids = indexTerms[queryTerms[i]];
-        if (!ids || ids.length === 0) {
-            return new Set<string>();
-        }
-        if (!candidateIds || ids.length < candidateIds.length) {
-            smallestTermIndex = i;
-            candidateIds = ids;
-        }
-    }
-
-    if (!candidateIds || smallestTermIndex === -1) {
+    const postingLists = collectPostingLists(queryTerms, indexTerms);
+    if (!postingLists) {
         return new Set<string>();
     }
+    const smallestTermIndex = findSmallestPostingListIndex(postingLists);
+    const candidateIds = postingLists[smallestTermIndex];
 
     if (candidateIds.length === 1) {
         const sessionId = candidateIds[0];
-        return singletonMatchesAllTerms(sessionId, queryTerms, indexTerms, smallestTermIndex)
+        return singletonMatchesPostingLists(sessionId, postingLists, smallestTermIndex)
             ? createSingletonResult(sessionId)
             : new Set<string>();
     }
@@ -398,9 +413,7 @@ const intersectBySmallestPostingList = (
         if (i === smallestTermIndex) {
             continue;
         }
-        const term = queryTerms[i];
-        const ids = indexTerms[term]!;
-        remainingTermSets[remainingTermSetIndex] = getPostingSet(term, ids);
+        remainingTermSets[remainingTermSetIndex] = getPostingSet(queryTerms[i], postingLists[i]);
         remainingTermSetIndex++;
     }
 
@@ -484,6 +497,27 @@ const removeSessionIdFromTerm = (index: InvertedIndex, term: string, sessionId: 
     }
 
     ids.length = writeIndex;
+};
+
+const appendSessionIdIfMissing = (termIds: string[], sessionId: string): boolean => {
+    const termIdsLength = termIds.length;
+    if (termIdsLength === 0) {
+        termIds.push(sessionId);
+        return true;
+    }
+
+    if (termIds[termIdsLength - 1] === sessionId) {
+        return false;
+    }
+
+    for (let i = termIdsLength - 2; i >= 0; i--) {
+        if (termIds[i] === sessionId) {
+            return false;
+        }
+    }
+
+    termIds.push(sessionId);
+    return true;
 };
 
 export const SearchIndexService = {
@@ -623,10 +657,7 @@ export const SearchIndexService = {
                         termIds.push(sessionId);
                         continue;
                     }
-                    if (termIds.includes(sessionId)) {
-                        continue;
-                    }
-                    termIds.push(sessionId);
+                    appendSessionIdIfMissing(termIds, sessionId);
                 }
             } else {
                 for (let termIndex = 0; termIndex < termList.length; termIndex++) {
@@ -636,10 +667,7 @@ export const SearchIndexService = {
                         indexTerms[term] = [sessionId];
                         continue;
                     }
-                    if (termIds.includes(sessionId)) {
-                        continue;
-                    }
-                    termIds.push(sessionId);
+                    appendSessionIdIfMissing(termIds, sessionId);
                 }
             }
             index.sessionTerms[sessionId] = termList;
@@ -711,597 +739,6 @@ export const SearchIndexService = {
             return new Set(ids);
         }
 
-        if (queryTermCount === 2) {
-            const firstTerm = queryTerms[0];
-            const secondTerm = queryTerms[1];
-            const firstIds = index.terms[firstTerm];
-            const secondIds = index.terms[secondTerm];
-
-            if (!firstIds || firstIds.length === 0 || !secondIds || secondIds.length === 0) {
-                return new Set<string>();
-            }
-
-            let resultIds: Set<string> | null = null;
-            const scanFirstTerm = firstIds.length <= secondIds.length;
-            const candidateTermIndex = scanFirstTerm ? 0 : 1;
-            const candidateIds = scanFirstTerm ? firstIds : secondIds;
-            const membershipTerm = scanFirstTerm ? secondTerm : firstTerm;
-            const membershipIds = scanFirstTerm ? secondIds : firstIds;
-            if (candidateIds.length === 1) {
-                const sessionId = candidateIds[0];
-                return singletonMatchesAllTerms(sessionId, queryTerms, index.terms, candidateTermIndex)
-                    ? createSingletonResult(sessionId)
-                    : new Set<string>();
-            }
-            const membershipSet = getPostingSet(membershipTerm, membershipIds);
-
-            for (let i = 0; i < candidateIds.length; i++) {
-                const sessionId = candidateIds[i];
-                if (membershipSet.has(sessionId)) {
-                    if (!resultIds) {
-                        resultIds = new Set<string>();
-                    }
-                    resultIds.add(sessionId);
-                }
-            }
-            return resultIds ?? new Set<string>();
-        }
-        if (queryTermCount === 3) {
-            const firstTerm = queryTerms[0];
-            const secondTerm = queryTerms[1];
-            const thirdTerm = queryTerms[2];
-            const firstIds = index.terms[firstTerm];
-            const secondIds = index.terms[secondTerm];
-            const thirdIds = index.terms[thirdTerm];
-
-            if (!firstIds || firstIds.length === 0 || !secondIds || secondIds.length === 0 || !thirdIds || thirdIds.length === 0) {
-                return new Set<string>();
-            }
-
-            let resultIds: Set<string> | null = null;
-            let candidateIds = firstIds;
-            let candidateTermIndex = 0;
-            let membershipTermA = secondTerm;
-            let membershipIdsA = secondIds;
-            let membershipTermB = thirdTerm;
-            let membershipIdsB = thirdIds;
-
-            if (secondIds.length < candidateIds.length) {
-                candidateIds = secondIds;
-                candidateTermIndex = 1;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = thirdTerm;
-                membershipIdsB = thirdIds;
-            }
-            if (thirdIds.length < candidateIds.length) {
-                candidateIds = thirdIds;
-                candidateTermIndex = 2;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-            }
-
-            if (candidateIds.length === 1) {
-                const sessionId = candidateIds[0];
-                return singletonMatchesAllTerms(sessionId, queryTerms, index.terms, candidateTermIndex)
-                    ? createSingletonResult(sessionId)
-                    : new Set<string>();
-            }
-            const membershipSetA = getPostingSet(membershipTermA, membershipIdsA);
-            const membershipSetB = getPostingSet(membershipTermB, membershipIdsB);
-            for (let i = 0; i < candidateIds.length; i++) {
-                const sessionId = candidateIds[i];
-                if (membershipSetA.has(sessionId) && membershipSetB.has(sessionId)) {
-                    if (!resultIds) {
-                        resultIds = new Set<string>();
-                    }
-                    resultIds.add(sessionId);
-                }
-            }
-            return resultIds ?? new Set<string>();
-        }
-        if (queryTermCount === 4) {
-            const firstTerm = queryTerms[0];
-            const secondTerm = queryTerms[1];
-            const thirdTerm = queryTerms[2];
-            const fourthTerm = queryTerms[3];
-            const firstIds = index.terms[firstTerm];
-            const secondIds = index.terms[secondTerm];
-            const thirdIds = index.terms[thirdTerm];
-            const fourthIds = index.terms[fourthTerm];
-
-            if (
-                !firstIds || firstIds.length === 0 ||
-                !secondIds || secondIds.length === 0 ||
-                !thirdIds || thirdIds.length === 0 ||
-                !fourthIds || fourthIds.length === 0
-            ) {
-                return new Set<string>();
-            }
-
-            let resultIds: Set<string> | null = null;
-            let candidateIds = firstIds;
-            let candidateTermIndex = 0;
-            let membershipTermA = secondTerm;
-            let membershipIdsA = secondIds;
-            let membershipTermB = thirdTerm;
-            let membershipIdsB = thirdIds;
-            let membershipTermC = fourthTerm;
-            let membershipIdsC = fourthIds;
-
-            if (secondIds.length < candidateIds.length) {
-                candidateIds = secondIds;
-                candidateTermIndex = 1;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = thirdTerm;
-                membershipIdsB = thirdIds;
-                membershipTermC = fourthTerm;
-                membershipIdsC = fourthIds;
-            }
-            if (thirdIds.length < candidateIds.length) {
-                candidateIds = thirdIds;
-                candidateTermIndex = 2;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-                membershipTermC = fourthTerm;
-                membershipIdsC = fourthIds;
-            }
-            if (fourthIds.length < candidateIds.length) {
-                candidateIds = fourthIds;
-                candidateTermIndex = 3;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-                membershipTermC = thirdTerm;
-                membershipIdsC = thirdIds;
-            }
-
-            if (candidateIds.length === 1) {
-                const sessionId = candidateIds[0];
-                return singletonMatchesAllTerms(sessionId, queryTerms, index.terms, candidateTermIndex)
-                    ? createSingletonResult(sessionId)
-                    : new Set<string>();
-            }
-            const membershipSetA = getPostingSet(membershipTermA, membershipIdsA);
-            const membershipSetB = getPostingSet(membershipTermB, membershipIdsB);
-            const membershipSetC = getPostingSet(membershipTermC, membershipIdsC);
-            for (let i = 0; i < candidateIds.length; i++) {
-                const sessionId = candidateIds[i];
-                if (membershipSetA.has(sessionId) && membershipSetB.has(sessionId) && membershipSetC.has(sessionId)) {
-                    if (!resultIds) {
-                        resultIds = new Set<string>();
-                    }
-                    resultIds.add(sessionId);
-                }
-            }
-            return resultIds ?? new Set<string>();
-        }
-        if (queryTermCount === 5) {
-            const firstTerm = queryTerms[0];
-            const secondTerm = queryTerms[1];
-            const thirdTerm = queryTerms[2];
-            const fourthTerm = queryTerms[3];
-            const fifthTerm = queryTerms[4];
-            const firstIds = index.terms[firstTerm];
-            const secondIds = index.terms[secondTerm];
-            const thirdIds = index.terms[thirdTerm];
-            const fourthIds = index.terms[fourthTerm];
-            const fifthIds = index.terms[fifthTerm];
-
-            if (
-                !firstIds || firstIds.length === 0 ||
-                !secondIds || secondIds.length === 0 ||
-                !thirdIds || thirdIds.length === 0 ||
-                !fourthIds || fourthIds.length === 0 ||
-                !fifthIds || fifthIds.length === 0
-            ) {
-                return new Set<string>();
-            }
-
-            let resultIds: Set<string> | null = null;
-            let candidateIds = firstIds;
-            let candidateTermIndex = 0;
-            let membershipTermA = secondTerm;
-            let membershipIdsA = secondIds;
-            let membershipTermB = thirdTerm;
-            let membershipIdsB = thirdIds;
-            let membershipTermC = fourthTerm;
-            let membershipIdsC = fourthIds;
-            let membershipTermD = fifthTerm;
-            let membershipIdsD = fifthIds;
-
-            if (secondIds.length < candidateIds.length) {
-                candidateIds = secondIds;
-                candidateTermIndex = 1;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = thirdTerm;
-                membershipIdsB = thirdIds;
-                membershipTermC = fourthTerm;
-                membershipIdsC = fourthIds;
-                membershipTermD = fifthTerm;
-                membershipIdsD = fifthIds;
-            }
-            if (thirdIds.length < candidateIds.length) {
-                candidateIds = thirdIds;
-                candidateTermIndex = 2;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-                membershipTermC = fourthTerm;
-                membershipIdsC = fourthIds;
-                membershipTermD = fifthTerm;
-                membershipIdsD = fifthIds;
-            }
-            if (fourthIds.length < candidateIds.length) {
-                candidateIds = fourthIds;
-                candidateTermIndex = 3;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-                membershipTermC = thirdTerm;
-                membershipIdsC = thirdIds;
-                membershipTermD = fifthTerm;
-                membershipIdsD = fifthIds;
-            }
-            if (fifthIds.length < candidateIds.length) {
-                candidateIds = fifthIds;
-                candidateTermIndex = 4;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-                membershipTermC = thirdTerm;
-                membershipIdsC = thirdIds;
-                membershipTermD = fourthTerm;
-                membershipIdsD = fourthIds;
-            }
-
-            if (candidateIds.length === 1) {
-                const sessionId = candidateIds[0];
-                return singletonMatchesAllTerms(sessionId, queryTerms, index.terms, candidateTermIndex)
-                    ? createSingletonResult(sessionId)
-                    : new Set<string>();
-            }
-            const membershipSetA = getPostingSet(membershipTermA, membershipIdsA);
-            const membershipSetB = getPostingSet(membershipTermB, membershipIdsB);
-            const membershipSetC = getPostingSet(membershipTermC, membershipIdsC);
-            const membershipSetD = getPostingSet(membershipTermD, membershipIdsD);
-            for (let i = 0; i < candidateIds.length; i++) {
-                const sessionId = candidateIds[i];
-                if (
-                    membershipSetA.has(sessionId) &&
-                    membershipSetB.has(sessionId) &&
-                    membershipSetC.has(sessionId) &&
-                    membershipSetD.has(sessionId)
-                ) {
-                    if (!resultIds) {
-                        resultIds = new Set<string>();
-                    }
-                    resultIds.add(sessionId);
-                }
-            }
-            return resultIds ?? new Set<string>();
-        }
-        if (queryTermCount === 6) {
-            const firstTerm = queryTerms[0];
-            const secondTerm = queryTerms[1];
-            const thirdTerm = queryTerms[2];
-            const fourthTerm = queryTerms[3];
-            const fifthTerm = queryTerms[4];
-            const sixthTerm = queryTerms[5];
-            const firstIds = index.terms[firstTerm];
-            const secondIds = index.terms[secondTerm];
-            const thirdIds = index.terms[thirdTerm];
-            const fourthIds = index.terms[fourthTerm];
-            const fifthIds = index.terms[fifthTerm];
-            const sixthIds = index.terms[sixthTerm];
-
-            if (
-                !firstIds || firstIds.length === 0 ||
-                !secondIds || secondIds.length === 0 ||
-                !thirdIds || thirdIds.length === 0 ||
-                !fourthIds || fourthIds.length === 0 ||
-                !fifthIds || fifthIds.length === 0 ||
-                !sixthIds || sixthIds.length === 0
-            ) {
-                return new Set<string>();
-            }
-
-            let resultIds: Set<string> | null = null;
-            let candidateIds = firstIds;
-            let candidateTermIndex = 0;
-            let membershipTermA = secondTerm;
-            let membershipIdsA = secondIds;
-            let membershipTermB = thirdTerm;
-            let membershipIdsB = thirdIds;
-            let membershipTermC = fourthTerm;
-            let membershipIdsC = fourthIds;
-            let membershipTermD = fifthTerm;
-            let membershipIdsD = fifthIds;
-            let membershipTermE = sixthTerm;
-            let membershipIdsE = sixthIds;
-
-            if (secondIds.length < candidateIds.length) {
-                candidateIds = secondIds;
-                candidateTermIndex = 1;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = thirdTerm;
-                membershipIdsB = thirdIds;
-                membershipTermC = fourthTerm;
-                membershipIdsC = fourthIds;
-                membershipTermD = fifthTerm;
-                membershipIdsD = fifthIds;
-                membershipTermE = sixthTerm;
-                membershipIdsE = sixthIds;
-            }
-            if (thirdIds.length < candidateIds.length) {
-                candidateIds = thirdIds;
-                candidateTermIndex = 2;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-                membershipTermC = fourthTerm;
-                membershipIdsC = fourthIds;
-                membershipTermD = fifthTerm;
-                membershipIdsD = fifthIds;
-                membershipTermE = sixthTerm;
-                membershipIdsE = sixthIds;
-            }
-            if (fourthIds.length < candidateIds.length) {
-                candidateIds = fourthIds;
-                candidateTermIndex = 3;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-                membershipTermC = thirdTerm;
-                membershipIdsC = thirdIds;
-                membershipTermD = fifthTerm;
-                membershipIdsD = fifthIds;
-                membershipTermE = sixthTerm;
-                membershipIdsE = sixthIds;
-            }
-            if (fifthIds.length < candidateIds.length) {
-                candidateIds = fifthIds;
-                candidateTermIndex = 4;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-                membershipTermC = thirdTerm;
-                membershipIdsC = thirdIds;
-                membershipTermD = fourthTerm;
-                membershipIdsD = fourthIds;
-                membershipTermE = sixthTerm;
-                membershipIdsE = sixthIds;
-            }
-            if (sixthIds.length < candidateIds.length) {
-                candidateIds = sixthIds;
-                candidateTermIndex = 5;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-                membershipTermC = thirdTerm;
-                membershipIdsC = thirdIds;
-                membershipTermD = fourthTerm;
-                membershipIdsD = fourthIds;
-                membershipTermE = fifthTerm;
-                membershipIdsE = fifthIds;
-            }
-
-            if (candidateIds.length === 1) {
-                const sessionId = candidateIds[0];
-                return singletonMatchesAllTerms(sessionId, queryTerms, index.terms, candidateTermIndex)
-                    ? createSingletonResult(sessionId)
-                    : new Set<string>();
-            }
-
-            const membershipSetA = getPostingSet(membershipTermA, membershipIdsA);
-            const membershipSetB = getPostingSet(membershipTermB, membershipIdsB);
-            const membershipSetC = getPostingSet(membershipTermC, membershipIdsC);
-            const membershipSetD = getPostingSet(membershipTermD, membershipIdsD);
-            const membershipSetE = getPostingSet(membershipTermE, membershipIdsE);
-            for (let i = 0; i < candidateIds.length; i++) {
-                const sessionId = candidateIds[i];
-                if (
-                    membershipSetA.has(sessionId) &&
-                    membershipSetB.has(sessionId) &&
-                    membershipSetC.has(sessionId) &&
-                    membershipSetD.has(sessionId) &&
-                    membershipSetE.has(sessionId)
-                ) {
-                    if (!resultIds) {
-                        resultIds = new Set<string>();
-                    }
-                    resultIds.add(sessionId);
-                }
-            }
-            return resultIds ?? new Set<string>();
-        }
-        if (queryTermCount === 7) {
-            const firstTerm = queryTerms[0];
-            const secondTerm = queryTerms[1];
-            const thirdTerm = queryTerms[2];
-            const fourthTerm = queryTerms[3];
-            const fifthTerm = queryTerms[4];
-            const sixthTerm = queryTerms[5];
-            const seventhTerm = queryTerms[6];
-            const firstIds = index.terms[firstTerm];
-            const secondIds = index.terms[secondTerm];
-            const thirdIds = index.terms[thirdTerm];
-            const fourthIds = index.terms[fourthTerm];
-            const fifthIds = index.terms[fifthTerm];
-            const sixthIds = index.terms[sixthTerm];
-            const seventhIds = index.terms[seventhTerm];
-
-            if (
-                !firstIds || firstIds.length === 0 ||
-                !secondIds || secondIds.length === 0 ||
-                !thirdIds || thirdIds.length === 0 ||
-                !fourthIds || fourthIds.length === 0 ||
-                !fifthIds || fifthIds.length === 0 ||
-                !sixthIds || sixthIds.length === 0 ||
-                !seventhIds || seventhIds.length === 0
-            ) {
-                return new Set<string>();
-            }
-
-            let resultIds: Set<string> | null = null;
-            let candidateIds = firstIds;
-            let candidateTermIndex = 0;
-            let membershipTermA = secondTerm;
-            let membershipIdsA = secondIds;
-            let membershipTermB = thirdTerm;
-            let membershipIdsB = thirdIds;
-            let membershipTermC = fourthTerm;
-            let membershipIdsC = fourthIds;
-            let membershipTermD = fifthTerm;
-            let membershipIdsD = fifthIds;
-            let membershipTermE = sixthTerm;
-            let membershipIdsE = sixthIds;
-            let membershipTermF = seventhTerm;
-            let membershipIdsF = seventhIds;
-
-            if (secondIds.length < candidateIds.length) {
-                candidateIds = secondIds;
-                candidateTermIndex = 1;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = thirdTerm;
-                membershipIdsB = thirdIds;
-                membershipTermC = fourthTerm;
-                membershipIdsC = fourthIds;
-                membershipTermD = fifthTerm;
-                membershipIdsD = fifthIds;
-                membershipTermE = sixthTerm;
-                membershipIdsE = sixthIds;
-                membershipTermF = seventhTerm;
-                membershipIdsF = seventhIds;
-            }
-            if (thirdIds.length < candidateIds.length) {
-                candidateIds = thirdIds;
-                candidateTermIndex = 2;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-                membershipTermC = fourthTerm;
-                membershipIdsC = fourthIds;
-                membershipTermD = fifthTerm;
-                membershipIdsD = fifthIds;
-                membershipTermE = sixthTerm;
-                membershipIdsE = sixthIds;
-                membershipTermF = seventhTerm;
-                membershipIdsF = seventhIds;
-            }
-            if (fourthIds.length < candidateIds.length) {
-                candidateIds = fourthIds;
-                candidateTermIndex = 3;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-                membershipTermC = thirdTerm;
-                membershipIdsC = thirdIds;
-                membershipTermD = fifthTerm;
-                membershipIdsD = fifthIds;
-                membershipTermE = sixthTerm;
-                membershipIdsE = sixthIds;
-                membershipTermF = seventhTerm;
-                membershipIdsF = seventhIds;
-            }
-            if (fifthIds.length < candidateIds.length) {
-                candidateIds = fifthIds;
-                candidateTermIndex = 4;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-                membershipTermC = thirdTerm;
-                membershipIdsC = thirdIds;
-                membershipTermD = fourthTerm;
-                membershipIdsD = fourthIds;
-                membershipTermE = sixthTerm;
-                membershipIdsE = sixthIds;
-                membershipTermF = seventhTerm;
-                membershipIdsF = seventhIds;
-            }
-            if (sixthIds.length < candidateIds.length) {
-                candidateIds = sixthIds;
-                candidateTermIndex = 5;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-                membershipTermC = thirdTerm;
-                membershipIdsC = thirdIds;
-                membershipTermD = fourthTerm;
-                membershipIdsD = fourthIds;
-                membershipTermE = fifthTerm;
-                membershipIdsE = fifthIds;
-                membershipTermF = seventhTerm;
-                membershipIdsF = seventhIds;
-            }
-            if (seventhIds.length < candidateIds.length) {
-                candidateIds = seventhIds;
-                candidateTermIndex = 6;
-                membershipTermA = firstTerm;
-                membershipIdsA = firstIds;
-                membershipTermB = secondTerm;
-                membershipIdsB = secondIds;
-                membershipTermC = thirdTerm;
-                membershipIdsC = thirdIds;
-                membershipTermD = fourthTerm;
-                membershipIdsD = fourthIds;
-                membershipTermE = fifthTerm;
-                membershipIdsE = fifthIds;
-                membershipTermF = sixthTerm;
-                membershipIdsF = sixthIds;
-            }
-
-            if (candidateIds.length === 1) {
-                const sessionId = candidateIds[0];
-                return singletonMatchesAllTerms(sessionId, queryTerms, index.terms, candidateTermIndex)
-                    ? createSingletonResult(sessionId)
-                    : new Set<string>();
-            }
-
-            const membershipSetA = getPostingSet(membershipTermA, membershipIdsA);
-            const membershipSetB = getPostingSet(membershipTermB, membershipIdsB);
-            const membershipSetC = getPostingSet(membershipTermC, membershipIdsC);
-            const membershipSetD = getPostingSet(membershipTermD, membershipIdsD);
-            const membershipSetE = getPostingSet(membershipTermE, membershipIdsE);
-            const membershipSetF = getPostingSet(membershipTermF, membershipIdsF);
-            for (let i = 0; i < candidateIds.length; i++) {
-                const sessionId = candidateIds[i];
-                if (
-                    membershipSetA.has(sessionId) &&
-                    membershipSetB.has(sessionId) &&
-                    membershipSetC.has(sessionId) &&
-                    membershipSetD.has(sessionId) &&
-                    membershipSetE.has(sessionId) &&
-                    membershipSetF.has(sessionId)
-                ) {
-                    if (!resultIds) {
-                        resultIds = new Set<string>();
-                    }
-                    resultIds.add(sessionId);
-                }
-            }
-            return resultIds ?? new Set<string>();
-        }
         return intersectBySmallestPostingList(queryTerms, index.terms);
     },
 

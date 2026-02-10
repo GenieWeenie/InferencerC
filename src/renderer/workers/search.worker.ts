@@ -242,10 +242,7 @@ function extractTopKeywords(results: SearchResult[]): string[] {
         collectKeywordCounts(result.content, wordCounts);
     }
 
-    return Array.from(wordCounts.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([word]) => word);
+    return takeTopKeywords(wordCounts, 5);
 }
 
 function collectKeywordCounts(content: string, wordCounts: Map<string, number>): void {
@@ -257,6 +254,37 @@ function collectKeywordCounts(content: string, wordCounts: Map<string, number>):
         }
         wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
     }
+}
+
+function takeTopKeywords(wordCounts: Map<string, number>, limit: number): string[] {
+    const topWords: string[] = [];
+    const topCounts: number[] = [];
+    for (const [word, count] of wordCounts) {
+        let insertAt = -1;
+        for (let i = 0; i < topCounts.length; i++) {
+            if (count > topCounts[i]) {
+                insertAt = i;
+                break;
+            }
+        }
+
+        if (insertAt === -1) {
+            if (topCounts.length < limit) {
+                topWords.push(word);
+                topCounts.push(count);
+            }
+            continue;
+        }
+
+        topWords.splice(insertAt, 0, word);
+        topCounts.splice(insertAt, 0, count);
+        if (topCounts.length > limit) {
+            topWords.pop();
+            topCounts.pop();
+        }
+    }
+
+    return topWords;
 }
 
 /**
@@ -419,10 +447,7 @@ function extractKeywordsFromMessages(messages: ChatMessage[]): string[] {
         collectKeywordCounts(content, wordCounts);
     }
 
-    return Array.from(wordCounts.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 20)
-        .map(([word]) => word);
+    return takeTopKeywords(wordCounts, 20);
 }
 
 // Message handler

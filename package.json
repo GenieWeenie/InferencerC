@@ -20,6 +20,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "benchmark:search-index": "jest --runInBand --testMatch \"**/__tests__/**/*.bench.ts\"",
     "qa:smoke:ui": "bash ./scripts/qa/ui_smoke_qa.sh",
     "qa:release:gate": "bash ./scripts/qa/release_gate.sh"
   },
