@@ -4,8 +4,10 @@ import { ChatResponse, Message, TokenLogprob, Model, ChatMessage, ChatSession, T
 import { HistoryService } from '../services/history';
 import { simulateLogprobs, detectIntent, findBestModelForIntent } from '../lib/chatUtils';
 import {
+    buildOutgoingMessagePatch,
     buildChoiceSelectionUpdate,
     buildMessageLoadPatch,
+    buildStopGenerationPatch,
     buildTokenEditUpdate,
     buildUpdatedMessageContent,
     collectMessageIndicesToLoad,
@@ -183,6 +185,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     const didApplyInitialModelSelectionRef = useRef(false);
     const loadedSessionIdRef = useRef<string | null>(null);
     const loadedSessionMessagesRef = useRef<ChatMessage[]>([]);
+    const lastSidebarMetadataSignatureRef = useRef<string>('');
 
     // Logic State
     const [input, setInput] = useState('');
@@ -597,6 +600,24 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             loadedSessionIdRef.current = sessionId;
             loadedSessionMessagesRef.current = messagesToSave;
 
+            const sidebarMetadataSignature = JSON.stringify({
+                sessionId,
+                persistedTitle,
+                currentModel,
+                expertMode: expertMode ?? null,
+                thinkingEnabled: Boolean(thinkingEnabled),
+                systemPrompt,
+                temperature,
+                topP,
+                maxTokens,
+                batchSize,
+                messageCount: messagesToSave.length,
+            });
+            if (lastSidebarMetadataSignatureRef.current === sidebarMetadataSignature) {
+                return;
+            }
+            lastSidebarMetadataSignatureRef.current = sidebarMetadataSignature;
+
             // Keep sidebar history in sync without reparsing full storage every autosave tick.
             setSavedSessions((prev) => {
                 const metadata: ChatSession = {
@@ -685,6 +706,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
     const createNewSession = () => {
         const newSession = HistoryService.createNewSession(currentModel || 'local-lmstudio');
+        lastSidebarMetadataSignatureRef.current = '';
         setSessionId(newSession.id);
         loadedSessionIdRef.current = newSession.id;
         loadedSessionMessagesRef.current = [];
@@ -727,6 +749,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     const loadSession = (id: string) => {
         const session = HistoryService.getSession(id);
         if (session) {
+            lastSidebarMetadataSignatureRef.current = '';
             setSessionId(session.id);
 
             // Lazy loading: Only load recent messages initially
@@ -815,6 +838,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     };
 
     const deleteSession = (id: string) => {
+        lastSidebarMetadataSignatureRef.current = '';
         HistoryService.deleteSession(id);
         setSavedSessions((prev) => prev.filter((session) => session.id !== id));
         if (id === sessionId) createNewSession();
@@ -1389,22 +1413,13 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     const stopGeneration = () => {
         abortControllers.forEach(c => c.abort());
         setAbortControllers([]);
-        setHistory(prev => {
-            const newHistory = prev.map((msg, index) => {
-                if (msg.isLoading) {
-                    const stoppedMsg = { ...msg, isLoading: false, content: msg.content + " [Stopped]" };
-                    // Update cache
-                    setFullMessageCache(cache => {
-                        const newCache = new Map(cache);
-                        newCache.set(index, stoppedMsg);
-                        return newCache;
-                    });
-                    return stoppedMsg;
-                }
-                return msg;
-            });
-            return newHistory;
-        });
+        const stopPatch = buildStopGenerationPatch(historyRef.current, fullMessageCacheRef.current);
+        if (stopPatch) {
+            historyRef.current = stopPatch.nextHistory;
+            fullMessageCacheRef.current = stopPatch.nextFullMessageCache;
+            setHistory(stopPatch.nextHistory);
+            setFullMessageCache(stopPatch.nextFullMessageCache);
+        }
         toast.info("Generation stopped.");
         logComplianceEvent({
             category: 'chat.message',
@@ -1556,35 +1571,26 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             }))
         };
 
-        let newHistory = [...history, userMsg];
-        let controllers: AbortController[] = [];
-
-        // Track new messages as loaded in lazy loading cache
-        const userMsgIndex = newHistory.length - 1;
-        const newCache = new Map(fullMessageCache);
-        const newLoadedIndices = new Set(loadedMessageIndices);
-        newCache.set(userMsgIndex, userMsg);
-        newLoadedIndices.add(userMsgIndex);
-
         if (battleMode && secondaryModel) {
             // Battle Mode: 2 Assistant Messages
-            const indexA = newHistory.length;
-            const indexB = newHistory.length + 1;
-
             const msgA: ChatMessage = { role: 'assistant', content: '', isLoading: true };
             const msgB: ChatMessage = { role: 'assistant', content: '', isLoading: true };
+            const outgoingPatch = buildOutgoingMessagePatch({
+                history,
+                fullMessageCache,
+                loadedMessageIndices,
+                userMessage: userMsg,
+                assistantMessages: [msgA, msgB],
+            });
+            const indexA = outgoingPatch.assistantStartIndex;
+            const indexB = outgoingPatch.assistantStartIndex + 1;
 
-            newHistory.push(msgA, msgB);
-
-            // Track battle mode messages as loaded
-            newCache.set(indexA, msgA);
-            newCache.set(indexB, msgB);
-            newLoadedIndices.add(indexA);
-            newLoadedIndices.add(indexB);
-
-            setFullMessageCache(newCache);
-            setLoadedMessageIndices(newLoadedIndices);
-            setHistory(newHistory);
+            historyRef.current = outgoingPatch.nextHistory;
+            fullMessageCacheRef.current = outgoingPatch.nextFullMessageCache;
+            loadedMessageIndicesRef.current = outgoingPatch.nextLoadedMessageIndices;
+            setFullMessageCache(outgoingPatch.nextFullMessageCache);
+            setLoadedMessageIndices(outgoingPatch.nextLoadedMessageIndices);
+            setHistory(outgoingPatch.nextHistory);
 
             setInput('');
             setAttachments([]);
@@ -1596,7 +1602,6 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
             const ctrlA = new AbortController();
             const ctrlB = new AbortController();
-            controllers = [ctrlA, ctrlB];
             setAbortControllers([ctrlA, ctrlB]);
 
             // Model Name Lookup
@@ -1604,22 +1609,27 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const nameB = availableModels.find(m => m.id === secondaryModel)?.name || secondaryModel;
 
             // Trigger Parallel Streams
-            streamResponse(modelToUse, baseMessages, indexA, ctrlA.signal, `Model A: ${nameA}`, newHistory);
-            streamResponse(secondaryModel, baseMessages, indexB, ctrlB.signal, `Model B: ${nameB}`, newHistory);
+            streamResponse(modelToUse, baseMessages, indexA, ctrlA.signal, `Model A: ${nameA}`, outgoingPatch.nextHistory);
+            streamResponse(secondaryModel, baseMessages, indexB, ctrlB.signal, `Model B: ${nameB}`, outgoingPatch.nextHistory);
 
         } else {
             // Normal Mode
-            const targetIndex = newHistory.length;
             const loadingItem: ChatMessage = { role: 'assistant', content: prefill || '', isLoading: true };
-            newHistory.push(loadingItem);
+            const outgoingPatch = buildOutgoingMessagePatch({
+                history,
+                fullMessageCache,
+                loadedMessageIndices,
+                userMessage: userMsg,
+                assistantMessages: [loadingItem],
+            });
+            const targetIndex = outgoingPatch.assistantStartIndex;
 
-            // Track assistant message as loaded
-            newCache.set(targetIndex, loadingItem);
-            newLoadedIndices.add(targetIndex);
-
-            setFullMessageCache(newCache);
-            setLoadedMessageIndices(newLoadedIndices);
-            setHistory(newHistory);
+            historyRef.current = outgoingPatch.nextHistory;
+            fullMessageCacheRef.current = outgoingPatch.nextFullMessageCache;
+            loadedMessageIndicesRef.current = outgoingPatch.nextLoadedMessageIndices;
+            setFullMessageCache(outgoingPatch.nextFullMessageCache);
+            setLoadedMessageIndices(outgoingPatch.nextLoadedMessageIndices);
+            setHistory(outgoingPatch.nextHistory);
 
             setInput('');
             setAttachments([]);
@@ -1630,13 +1640,12 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             crashRecoveryService.saveDraft(sessionId, '');
 
             const ctrl = new AbortController();
-            controllers = [ctrl];
             setAbortControllers([ctrl]);
 
             let messagesToSend = [...baseMessages];
             if (prefill) messagesToSend.push({ role: 'assistant', content: prefill });
 
-            streamResponse(modelToUse, messagesToSend, targetIndex, ctrl.signal, "", newHistory);
+            streamResponse(modelToUse, messagesToSend, targetIndex, ctrl.signal, "", outgoingPatch.nextHistory);
         }
     };
 

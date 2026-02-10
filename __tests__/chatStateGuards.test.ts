@@ -3,6 +3,8 @@ import {
   areToolCallsEquivalent,
   buildChoiceSelectionUpdate,
   buildMessageLoadPatch,
+  buildOutgoingMessagePatch,
+  buildStopGenerationPatch,
   buildTokenEditUpdate,
   buildUpdatedMessageContent,
   collectMessageIndicesToLoad,
@@ -184,6 +186,75 @@ describe('chatStateGuards', () => {
       expect(next!.updatedToken.token).toBe('LA');
       expect(next!.updatedMessage.content).toBe('HelLA');
       expect(next!.updatedMessage.choices?.[0].message.content).toBe('HelLA');
+    });
+  });
+
+  describe('buildStopGenerationPatch', () => {
+    it('returns null when no messages are loading', () => {
+      const history: ChatMessage[] = [
+        { role: 'user', content: 'hello' },
+        { role: 'assistant', content: 'done', isLoading: false },
+      ];
+      const cache = new Map<number, ChatMessage>([
+        [0, history[0]],
+        [1, history[1]],
+      ]);
+
+      expect(buildStopGenerationPatch(history, cache)).toBeNull();
+    });
+
+    it('stops loading messages and updates cache in one patch', () => {
+      const history: ChatMessage[] = [
+        { role: 'user', content: 'q' },
+        { role: 'assistant', content: 'stream-a', isLoading: true },
+        { role: 'assistant', content: 'stream-b [Stopped]', isLoading: true },
+      ];
+      const cache = new Map<number, ChatMessage>([
+        [1, history[1]],
+      ]);
+
+      const patch = buildStopGenerationPatch(history, cache);
+      expect(patch).not.toBeNull();
+      expect(patch!.nextHistory[0]).toBe(history[0]);
+      expect(patch!.nextHistory[1].isLoading).toBe(false);
+      expect(patch!.nextHistory[1].content).toBe('stream-a [Stopped]');
+      expect(patch!.nextHistory[2].isLoading).toBe(false);
+      expect(patch!.nextHistory[2].content).toBe('stream-b [Stopped]');
+      expect(patch!.nextFullMessageCache.get(1)?.content).toBe('stream-a [Stopped]');
+      expect(patch!.nextFullMessageCache.get(2)?.content).toBe('stream-b [Stopped]');
+    });
+  });
+
+  describe('buildOutgoingMessagePatch', () => {
+    it('appends user+assistant messages and updates cache/index sets', () => {
+      const history: ChatMessage[] = [
+        { role: 'system', content: 'sys' },
+      ];
+      const userMessage: ChatMessage = { role: 'user', content: 'hello' };
+      const assistants: ChatMessage[] = [
+        { role: 'assistant', content: '', isLoading: true },
+        { role: 'assistant', content: '', isLoading: true },
+      ];
+      const cache = new Map<number, ChatMessage>([[0, history[0]]]);
+      const loaded = new Set<number>([0]);
+
+      const patch = buildOutgoingMessagePatch({
+        history,
+        fullMessageCache: cache,
+        loadedMessageIndices: loaded,
+        userMessage,
+        assistantMessages: assistants,
+      });
+
+      expect(patch.userMessageIndex).toBe(1);
+      expect(patch.assistantStartIndex).toBe(2);
+      expect(patch.nextHistory).toHaveLength(4);
+      expect(patch.nextHistory[1]).toEqual(userMessage);
+      expect(patch.nextHistory[2]).toEqual(assistants[0]);
+      expect(patch.nextHistory[3]).toEqual(assistants[1]);
+      expect(Array.from(patch.nextLoadedMessageIndices).sort((a, b) => a - b)).toEqual([0, 1, 2, 3]);
+      expect(patch.nextFullMessageCache.get(1)).toEqual(userMessage);
+      expect(patch.nextFullMessageCache.get(3)).toEqual(assistants[1]);
     });
   });
 });

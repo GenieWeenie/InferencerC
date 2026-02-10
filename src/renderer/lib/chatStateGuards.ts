@@ -236,3 +236,88 @@ export const buildTokenEditUpdate = (
         updatedToken: nextLogprobs[tokenIndex],
     };
 };
+
+const STOPPED_SUFFIX = ' [Stopped]';
+
+export const buildStopGenerationPatch = (
+    history: ChatMessage[],
+    fullMessageCache: Map<number, ChatMessage>
+): { nextHistory: ChatMessage[]; nextFullMessageCache: Map<number, ChatMessage> } | null => {
+    let nextHistory: ChatMessage[] | null = null;
+    let nextFullMessageCache: Map<number, ChatMessage> | null = null;
+
+    for (let index = 0; index < history.length; index += 1) {
+        const message = history[index];
+        if (!message?.isLoading) {
+            continue;
+        }
+
+        if (!nextHistory) {
+            nextHistory = [...history];
+            nextFullMessageCache = new Map(fullMessageCache);
+        }
+
+        const nextContent = message.content.endsWith(STOPPED_SUFFIX)
+            ? message.content
+            : `${message.content}${STOPPED_SUFFIX}`;
+        const stoppedMessage: ChatMessage = {
+            ...message,
+            isLoading: false,
+            content: nextContent,
+        };
+
+        nextHistory[index] = stoppedMessage;
+        nextFullMessageCache!.set(index, stoppedMessage);
+    }
+
+    if (!nextHistory || !nextFullMessageCache) {
+        return null;
+    }
+
+    return {
+        nextHistory,
+        nextFullMessageCache,
+    };
+};
+
+interface BuildOutgoingMessagePatchInput {
+    history: ChatMessage[];
+    fullMessageCache: Map<number, ChatMessage>;
+    loadedMessageIndices: Set<number>;
+    userMessage: ChatMessage;
+    assistantMessages: ChatMessage[];
+}
+
+export const buildOutgoingMessagePatch = ({
+    history,
+    fullMessageCache,
+    loadedMessageIndices,
+    userMessage,
+    assistantMessages,
+}: BuildOutgoingMessagePatchInput): {
+    nextHistory: ChatMessage[];
+    nextFullMessageCache: Map<number, ChatMessage>;
+    nextLoadedMessageIndices: Set<number>;
+    userMessageIndex: number;
+    assistantStartIndex: number;
+} => {
+    const nextHistory = [...history, userMessage, ...assistantMessages];
+    const nextFullMessageCache = new Map(fullMessageCache);
+    const nextLoadedMessageIndices = new Set(loadedMessageIndices);
+
+    const userMessageIndex = history.length;
+    const assistantStartIndex = userMessageIndex + 1;
+
+    for (let index = userMessageIndex; index < nextHistory.length; index += 1) {
+        nextFullMessageCache.set(index, nextHistory[index]);
+        nextLoadedMessageIndices.add(index);
+    }
+
+    return {
+        nextHistory,
+        nextFullMessageCache,
+        nextLoadedMessageIndices,
+        userMessageIndex,
+        assistantStartIndex,
+    };
+};

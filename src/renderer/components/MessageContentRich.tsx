@@ -109,6 +109,251 @@ interface SyntaxHighlighterBundle {
     style: any;
 }
 
+type CodeExecutionResult = {
+    output: string;
+    success: boolean;
+};
+
+interface MarkdownCodeRendererProps {
+    inline?: boolean;
+    className?: string;
+    children?: React.ReactNode;
+    codeProps: Record<string, any>;
+    syntaxHighlighterBundle: SyntaxHighlighterBundle | null;
+    loadedSyntaxLanguages: Set<string>;
+    codeBlockLanguages: Record<string, string>;
+    onLanguageChange: (codeHash: string, language: string) => void;
+    onPreviewCode: (code: string, language: string) => void;
+    mcpAvailable?: boolean;
+    isUser: boolean;
+    onShowFilePathInput: (code: string) => void;
+    executingCode: string | null;
+    onExecuteCode: (code: string, language: string, codeHash: string) => void;
+    executionResult?: CodeExecutionResult;
+    onDismissExecutionResult: (codeHash: string) => void;
+    githubConfigured: boolean;
+    onCreateGist: (code: string, language: string) => void;
+    onSaveFile: (code: string, language: string) => void;
+    copiedCode: string | null;
+    onCopyCode: (code: string) => void;
+    showFilePathInput: string | null;
+    filePath: string;
+    onFilePathChange: (value: string) => void;
+    onInsertToFile: (code: string, language: string) => void;
+    onCancelInsertToFile: () => void;
+}
+
+const MarkdownCodeRenderer: React.FC<MarkdownCodeRendererProps> = React.memo(({
+    inline,
+    className,
+    children,
+    codeProps,
+    syntaxHighlighterBundle,
+    loadedSyntaxLanguages,
+    codeBlockLanguages,
+    onLanguageChange,
+    onPreviewCode,
+    mcpAvailable,
+    isUser,
+    onShowFilePathInput,
+    executingCode,
+    onExecuteCode,
+    executionResult,
+    onDismissExecutionResult,
+    githubConfigured,
+    onCreateGist,
+    onSaveFile,
+    copiedCode,
+    onCopyCode,
+    showFilePathInput,
+    filePath,
+    onFilePathChange,
+    onInsertToFile,
+    onCancelInsertToFile,
+}) => {
+    const match = /language-([\w-]+)/.exec(className || '');
+    const codeString = String(children).replace(/\n$/, '');
+    const isBlock = !inline && (Boolean(match) || codeString.includes('\n'));
+    if (!isBlock) {
+        return (
+            <code className={`${className} bg-slate-800/80 px-1.5 py-0.5 rounded text-amber-200 font-mono text-[0.85em] border border-slate-700/50 box-decoration-clone break-all`} {...codeProps}>
+                {children}
+            </code>
+        );
+    }
+
+    const codeHash = codeString.substring(0, 50);
+    const detectedLanguage = match ? match[1] : 'text';
+    const selectedLanguage = codeBlockLanguages[codeHash] || detectedLanguage;
+    const normalizedSyntaxLanguage = normalizeSyntaxLanguage(selectedLanguage);
+    const SyntaxHighlighterComponent = syntaxHighlighterBundle?.component;
+    const canSyntaxHighlight = Boolean(
+        SyntaxHighlighterComponent &&
+        normalizedSyntaxLanguage &&
+        loadedSyntaxLanguages.has(normalizedSyntaxLanguage)
+    );
+    const isPreviewable = PREVIEWABLE_LANGUAGES.includes(selectedLanguage.toLowerCase());
+
+    return (
+        <div className="rounded-lg overflow-hidden my-4 border border-slate-700 bg-[#1e1e1e] shadow-lg group/code">
+            <div className="flex justify-between items-center px-4 py-2 bg-[#2d2d2d] border-b border-slate-700 select-none">
+                <div className="flex items-center gap-2">
+                    <div className="flex gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-full bg-red-500/50"></div>
+                        <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/50"></div>
+                        <div className="w-2.5 h-2.5 rounded-full bg-green-500/50"></div>
+                    </div>
+                    <select
+                        value={selectedLanguage}
+                        onChange={(event) => onLanguageChange(codeHash, event.target.value)}
+                        className="text-xs font-mono text-slate-300 font-bold ml-2 uppercase tracking-wider bg-slate-800/50 border border-slate-600/50 rounded px-2 py-0.5 hover:bg-slate-700/50 focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer appearance-none"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        {COMMON_LANGUAGES.map((languageOption) => (
+                            <option key={languageOption} value={languageOption} className="bg-slate-800">
+                                {languageOption.toUpperCase()}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                <div className="flex items-center gap-1">
+                    {isPreviewable && (
+                        <button
+                            onClick={() => onPreviewCode(codeString, selectedLanguage)}
+                            className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-emerald-500/30 hover:border-emerald-500/50"
+                        >
+                            <Play size={12} fill="currentColor" />
+                            PREVIEW
+                        </button>
+                    )}
+                    {mcpAvailable && !isUser && (
+                        <button
+                            onClick={() => onShowFilePathInput(codeString)}
+                            className="flex items-center gap-1.5 text-[10px] font-bold text-blue-400 hover:text-blue-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-blue-500/30 hover:border-blue-500/50"
+                            title="Insert to file (requires MCP)"
+                        >
+                            <FileText size={12} />
+                            INSERT
+                        </button>
+                    )}
+                    {(selectedLanguage === 'python' || selectedLanguage === 'javascript' || selectedLanguage === 'js') && !isUser && (
+                        <button
+                            onClick={() => onExecuteCode(codeString, selectedLanguage, codeHash)}
+                            disabled={executingCode === codeHash}
+                            className="flex items-center gap-1.5 text-[10px] font-bold text-orange-400 hover:text-orange-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-orange-500/30 hover:border-orange-500/50 disabled:opacity-50"
+                            title="Execute code (sandboxed)"
+                        >
+                            {executingCode === codeHash ? (
+                                <span className="animate-spin">⏳</span>
+                            ) : (
+                                <PlayCircle size={12} />
+                            )}
+                            RUN
+                        </button>
+                    )}
+                    {githubConfigured && !isUser && (
+                        <button
+                            onClick={() => onCreateGist(codeString, selectedLanguage)}
+                            className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-emerald-500/30 hover:border-emerald-500/50"
+                            title="Create GitHub Gist"
+                        >
+                            <Github size={12} />
+                            GIST
+                        </button>
+                    )}
+                    <button
+                        onClick={() => onSaveFile(codeString, selectedLanguage)}
+                        className="flex items-center gap-1.5 text-[10px] font-bold text-purple-400 hover:text-purple-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-purple-500/30 hover:border-purple-500/50"
+                        title="Save as file"
+                    >
+                        <Save size={12} />
+                        SAVE
+                    </button>
+                    <button
+                        onClick={() => onCopyCode(codeString)}
+                        className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 hover:text-white transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-transparent hover:border-slate-600"
+                    >
+                        {copiedCode === codeString ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                        {copiedCode === codeString ? 'COPIED' : 'COPY'}
+                    </button>
+                </div>
+            </div>
+            <div className="relative">
+                {canSyntaxHighlight ? (
+                    <SyntaxHighlighterComponent
+                        {...codeProps}
+                        style={syntaxHighlighterBundle!.style}
+                        language={normalizedSyntaxLanguage || undefined}
+                        PreTag="div"
+                        customStyle={{ margin: 0, borderRadius: 0, padding: '1.25rem', overflowX: 'auto', background: 'transparent', fontSize: '13px', lineHeight: '1.5' }}
+                        wrapLines={true}
+                        wrapLongLines={true}
+                        showLineNumbers={true}
+                        lineNumberStyle={{ minWidth: '2em', paddingRight: '1em', color: '#525252', textAlign: 'right' }}
+                    >
+                        {codeString}
+                    </SyntaxHighlighterComponent>
+                ) : (
+                    <pre className="m-0 p-5 overflow-x-auto bg-transparent text-slate-100 text-[13px] leading-relaxed whitespace-pre-wrap break-words custom-scrollbar">
+                        <code className="font-mono">{codeString}</code>
+                    </pre>
+                )}
+            </div>
+            {executionResult && (
+                <div className={`px-4 py-3 border-t ${executionResult.success ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className={`text-xs font-bold ${executionResult.success ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {executionResult.success ? '✓ Execution Successful' : '✗ Execution Failed'}
+                        </span>
+                        <button
+                            onClick={() => onDismissExecutionResult(codeHash)}
+                            className="ml-auto p-1 hover:bg-slate-700 rounded transition-colors"
+                        >
+                            <X size={12} className="text-slate-500" />
+                        </button>
+                    </div>
+                    <pre className="text-xs font-mono text-slate-300 whitespace-pre-wrap bg-slate-900/50 p-2 rounded border border-slate-700/50 max-h-48 overflow-y-auto custom-scrollbar">
+                        {executionResult.output}
+                    </pre>
+                </div>
+            )}
+            {showFilePathInput === codeString && (
+                <div className="px-4 py-3 bg-[#2d2d2d] border-t border-slate-700">
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="text"
+                            value={filePath}
+                            onChange={(event) => onFilePathChange(event.target.value)}
+                            placeholder="Enter file path (e.g., ./src/utils/helper.js)"
+                            className="flex-1 bg-slate-800 border border-slate-600 text-white text-sm rounded px-3 py-1.5 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
+                            autoFocus
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                    onInsertToFile(codeString, selectedLanguage);
+                                } else if (event.key === 'Escape') {
+                                    onCancelInsertToFile();
+                                }
+                            }}
+                        />
+                        <button
+                            onClick={() => onInsertToFile(codeString, selectedLanguage)}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded font-medium transition-colors"
+                        >
+                            Insert
+                        </button>
+                        <button
+                            onClick={onCancelInsertToFile}
+                            className="p-1.5 hover:bg-slate-700 rounded transition-colors"
+                        >
+                            <X size={16} className="text-slate-400" />
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+});
+
 const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser, mcpAvailable, onInsertToFile }) => {
     const [copiedCode, setCopiedCode] = React.useState<string | null>(null);
     const [previewCode, setPreviewCode] = React.useState<{ code: string; language: string } | null>(null);
@@ -116,7 +361,7 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
     const [filePath, setFilePath] = React.useState('');
     const [codeBlockLanguages, setCodeBlockLanguages] = React.useState<Record<string, string>>({});
     const [executingCode, setExecutingCode] = React.useState<string | null>(null);
-    const [executionResults, setExecutionResults] = React.useState<Record<string, { output: string; success: boolean }>>({});
+    const [executionResults, setExecutionResults] = React.useState<Record<string, CodeExecutionResult>>({});
     const [mathPlugins, setMathPlugins] = React.useState<MathPluginBundle | null>(null);
     const [syntaxHighlighterBundle, setSyntaxHighlighterBundle] = React.useState<SyntaxHighlighterBundle | null>(null);
     const [loadedSyntaxLanguages, setLoadedSyntaxLanguages] = React.useState<Set<string>>(new Set());
@@ -250,13 +495,13 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
         return mathPlugins ? [mathPlugins.rehypeKatex] : [];
     }, [mathPlugins]);
 
-    const handleCopy = (code: string) => {
-        navigator.clipboard.writeText(code);
+    const handleCopy = React.useCallback((code: string) => {
+        void navigator.clipboard.writeText(code);
         setCopiedCode(code);
         setTimeout(() => setCopiedCode(null), 2000);
-    };
+    }, []);
 
-    const handleSaveFile = (code: string, language: string) => {
+    const handleSaveFile = React.useCallback((code: string, language: string) => {
         const extensionMap: Record<string, string> = {
             javascript: 'js',
             typescript: 'ts',
@@ -315,9 +560,9 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
         URL.revokeObjectURL(url);
 
         toast.success(`Saved as ${filename}`);
-    };
+    }, []);
 
-    const handleExecuteCode = async (code: string, language: string, codeHash: string) => {
+    const handleExecuteCode = React.useCallback(async (code: string, language: string, codeHash: string) => {
         if (!window.electronAPI?.executeCode) {
             toast.error('Code execution not available');
             return;
@@ -350,9 +595,41 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
         } finally {
             setExecutingCode(null);
         }
-    };
+    }, []);
 
-    const handleInsertToFile = (codeString: string, language: string) => {
+    const handleDismissExecutionResult = React.useCallback((codeHash: string) => {
+        setExecutionResults((prev) => {
+            if (!prev[codeHash]) return prev;
+            const next = { ...prev };
+            delete next[codeHash];
+            return next;
+        });
+    }, []);
+
+    const handleCreateGist = React.useCallback(async (codeString: string, language: string) => {
+        const filename = `code.${language === 'javascript' ? 'js' : language === 'typescript' ? 'ts' : language === 'python' ? 'py' : 'txt'}`;
+        const description = 'Code snippet from InferencerC';
+
+        const result = await githubService.createGist(
+            description,
+            filename,
+            codeString,
+            false
+        );
+
+        if (result.success && result.gist) {
+            toast.success('Gist created!', {
+                action: {
+                    label: 'Open',
+                    onClick: () => window.open(result.gist!.html_url, '_blank'),
+                },
+            });
+        } else {
+            toast.error(result.error || 'Failed to create gist');
+        }
+    }, []);
+
+    const handleInsertToFile = React.useCallback((codeString: string, language: string) => {
         if (!filePath.trim()) {
             toast.error('Please enter a file path');
             return;
@@ -364,256 +641,114 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
             setShowFilePathInput(null);
             setFilePath('');
         }
-    };
+    }, [filePath, onInsertToFile]);
+
+    const handleLanguageChange = React.useCallback((codeHash: string, newLanguage: string) => {
+        setCodeBlockLanguages((prev) => {
+            if (prev[codeHash] === newLanguage) {
+                return prev;
+            }
+            return { ...prev, [codeHash]: newLanguage };
+        });
+        void ensureSyntaxLanguageLoaded(newLanguage);
+    }, [ensureSyntaxLanguageLoaded]);
+
+    const markdownStaticComponents = React.useMemo(() => ({
+        p: ({ children }: { children?: React.ReactNode }) => <p className="mb-4 last:mb-0 leading-7 text-slate-300 font-sens">{children}</p>,
+        ul: ({ children }: { children?: React.ReactNode }) => <ul className="list-disc ml-4 mb-4 space-y-2 text-slate-300 marker:text-primary/70">{children}</ul>,
+        ol: ({ children }: { children?: React.ReactNode }) => <ol className="list-decimal ml-4 mb-4 space-y-2 text-slate-300 marker:text-primary/70">{children}</ol>,
+        h1: ({ children }: { children?: React.ReactNode }) => <h1 className="text-2xl font-bold text-white mb-4 mt-8 pb-2 border-b border-slate-800">{children}</h1>,
+        h2: ({ children }: { children?: React.ReactNode }) => <h2 className="text-xl font-bold text-white mb-3 mt-6 flex items-center gap-2"><span className="w-1 h-6 bg-primary rounded-full inline-block"></span>{children}</h2>,
+        h3: ({ children }: { children?: React.ReactNode }) => <h3 className="text-lg font-bold text-slate-100 mb-2 mt-5">{children}</h3>,
+        a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
+            <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary-300 hover:underline font-medium transition-colors decoration-primary/30 underline-offset-4">
+                {children}
+            </a>
+        ),
+        table: ({ children }: { children?: React.ReactNode }) => (
+            <div className="overflow-x-auto my-6 border border-slate-700 rounded-lg shadow-sm bg-slate-900/30 custom-scrollbar max-w-full">
+                <table className="min-w-full divide-y divide-slate-700 text-left border-collapse">
+                    {children}
+                </table>
+            </div>
+        ),
+        thead: ({ children }: { children?: React.ReactNode }) => <thead className="bg-slate-800/80 text-slate-200">{children}</thead>,
+        th: ({ children }: { children?: React.ReactNode }) => <th className="px-4 py-3 text-xs font-bold uppercase tracking-wider border-b border-slate-700 whitespace-nowrap">{children}</th>,
+        td: ({ children }: { children?: React.ReactNode }) => <td className="px-4 py-3 text-sm text-slate-300 border-b border-slate-800 last:border-0 hover:bg-slate-800/30 transition-colors">{children}</td>,
+        blockquote: ({ children }: { children?: React.ReactNode }) => (
+            <div className="flex gap-3 my-4 pl-4 border-l-4 border-primary/40 bg-slate-800/20 py-3 pr-4 rounded-r-lg italic text-slate-400">
+                <div className="opacity-30 text-4xl leading-none font-serif">"</div>
+                <div className="flex-1">{children}</div>
+            </div>
+        ),
+        hr: () => <hr className="my-8 border-slate-800" />,
+    }), []);
+
+    const renderMarkdownCode = React.useCallback(({ inline, className, children, ...codeProps }: any) => (
+        <MarkdownCodeRenderer
+            inline={inline}
+            className={className}
+            children={children}
+            codeProps={codeProps}
+            syntaxHighlighterBundle={syntaxHighlighterBundle}
+            loadedSyntaxLanguages={loadedSyntaxLanguages}
+            codeBlockLanguages={codeBlockLanguages}
+            onLanguageChange={handleLanguageChange}
+            onPreviewCode={(code, language) => setPreviewCode({ code, language })}
+            mcpAvailable={mcpAvailable}
+            isUser={isUser}
+            onShowFilePathInput={setShowFilePathInput}
+            executingCode={executingCode}
+            onExecuteCode={handleExecuteCode}
+            executionResult={executionResults[String(children).replace(/\n$/, '').substring(0, 50)]}
+            onDismissExecutionResult={handleDismissExecutionResult}
+            githubConfigured={githubService.isConfigured()}
+            onCreateGist={(code, language) => {
+                void handleCreateGist(code, language);
+            }}
+            onSaveFile={handleSaveFile}
+            copiedCode={copiedCode}
+            onCopyCode={handleCopy}
+            showFilePathInput={showFilePathInput}
+            filePath={filePath}
+            onFilePathChange={setFilePath}
+            onInsertToFile={handleInsertToFile}
+            onCancelInsertToFile={() => {
+                setShowFilePathInput(null);
+                setFilePath('');
+            }}
+        />
+    ), [
+        codeBlockLanguages,
+        copiedCode,
+        executingCode,
+        executionResults,
+        filePath,
+        handleCopy,
+        handleCreateGist,
+        handleDismissExecutionResult,
+        handleExecuteCode,
+        handleInsertToFile,
+        handleLanguageChange,
+        handleSaveFile,
+        isUser,
+        loadedSyntaxLanguages,
+        mcpAvailable,
+        showFilePathInput,
+        syntaxHighlighterBundle,
+    ]);
+
+    const markdownComponents = React.useMemo(() => ({
+        ...markdownStaticComponents,
+        code: renderMarkdownCode,
+    }), [markdownStaticComponents, renderMarkdownCode]);
 
     return (
         <>
             <ReactMarkdown
                 remarkPlugins={remarkPlugins}
                 rehypePlugins={rehypePlugins}
-                components={{
-                    code({ inline, className, children, ...props }: any) {
-                        const match = /language-([\w-]+)/.exec(className || '');
-                        const codeString = String(children).replace(/\n$/, '');
-                        const isBlock = !inline && (match || codeString.includes('\n'));
-                        const codeHash = codeString.substring(0, 50);
-                        const detectedLanguage = match ? match[1] : 'text';
-                        const SyntaxHighlighterComponent = syntaxHighlighterBundle?.component;
-                        const language = codeBlockLanguages[codeHash] || detectedLanguage;
-                        const normalizedSyntaxLanguage = normalizeSyntaxLanguage(language);
-                        const canSyntaxHighlight = Boolean(
-                            SyntaxHighlighterComponent &&
-                            normalizedSyntaxLanguage &&
-                            loadedSyntaxLanguages.has(normalizedSyntaxLanguage)
-                        );
-                        const isPreviewable = PREVIEWABLE_LANGUAGES.includes(language.toLowerCase());
-
-                        const handleLanguageChange = (newLang: string) => {
-                            setCodeBlockLanguages((prev) => ({ ...prev, [codeHash]: newLang }));
-                            void ensureSyntaxLanguageLoaded(newLang);
-                        };
-
-                        return isBlock ? (
-                            <div className="rounded-lg overflow-hidden my-4 border border-slate-700 bg-[#1e1e1e] shadow-lg group/code">
-                                <div className="flex justify-between items-center px-4 py-2 bg-[#2d2d2d] border-b border-slate-700 select-none">
-                                    <div className="flex items-center gap-2">
-                                        <div className="flex gap-1.5">
-                                            <div className="w-2.5 h-2.5 rounded-full bg-red-500/50"></div>
-                                            <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/50"></div>
-                                            <div className="w-2.5 h-2.5 rounded-full bg-green-500/50"></div>
-                                        </div>
-                                        <select
-                                            value={language}
-                                            onChange={(e) => handleLanguageChange(e.target.value)}
-                                            className="text-xs font-mono text-slate-300 font-bold ml-2 uppercase tracking-wider bg-slate-800/50 border border-slate-600/50 rounded px-2 py-0.5 hover:bg-slate-700/50 focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer appearance-none"
-                                            onClick={(e) => e.stopPropagation()}
-                                        >
-                                            {COMMON_LANGUAGES.map((lang) => (
-                                                <option key={lang} value={lang} className="bg-slate-800">
-                                                    {lang.toUpperCase()}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <div className="flex items-center gap-1">
-                                        {isPreviewable && (
-                                            <button
-                                                onClick={() => setPreviewCode({ code: codeString, language })}
-                                                className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-emerald-500/30 hover:border-emerald-500/50"
-                                            >
-                                                <Play size={12} fill="currentColor" />
-                                                PREVIEW
-                                            </button>
-                                        )}
-                                        {mcpAvailable && !isUser && (
-                                            <button
-                                                onClick={() => setShowFilePathInput(codeString)}
-                                                className="flex items-center gap-1.5 text-[10px] font-bold text-blue-400 hover:text-blue-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-blue-500/30 hover:border-blue-500/50"
-                                                title="Insert to file (requires MCP)"
-                                            >
-                                                <FileText size={12} />
-                                                INSERT
-                                            </button>
-                                        )}
-                                        {(language === 'python' || language === 'javascript' || language === 'js') && !isUser && (
-                                            <button
-                                                onClick={() => handleExecuteCode(codeString, language, codeHash)}
-                                                disabled={executingCode === codeHash}
-                                                className="flex items-center gap-1.5 text-[10px] font-bold text-orange-400 hover:text-orange-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-orange-500/30 hover:border-orange-500/50 disabled:opacity-50"
-                                                title="Execute code (sandboxed)"
-                                            >
-                                                {executingCode === codeHash ? (
-                                                    <span className="animate-spin">⏳</span>
-                                                ) : (
-                                                    <PlayCircle size={12} />
-                                                )}
-                                                RUN
-                                            </button>
-                                        )}
-                                        {githubService.isConfigured() && !isUser && (
-                                            <button
-                                                onClick={async () => {
-                                                    const filename = `code.${language === 'javascript' ? 'js' : language === 'typescript' ? 'ts' : language === 'python' ? 'py' : 'txt'}`;
-                                                    const description = 'Code snippet from InferencerC';
-
-                                                    const result = await githubService.createGist(
-                                                        description,
-                                                        filename,
-                                                        codeString,
-                                                        false
-                                                    );
-
-                                                    if (result.success && result.gist) {
-                                                        toast.success('Gist created!', {
-                                                            action: {
-                                                                label: 'Open',
-                                                                onClick: () => window.open(result.gist!.html_url, '_blank'),
-                                                            },
-                                                        });
-                                                    } else {
-                                                        toast.error(result.error || 'Failed to create gist');
-                                                    }
-                                                }}
-                                                className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-emerald-500/30 hover:border-emerald-500/50"
-                                                title="Create GitHub Gist"
-                                            >
-                                                <Github size={12} />
-                                                GIST
-                                            </button>
-                                        )}
-                                        <button
-                                            onClick={() => handleSaveFile(codeString, language)}
-                                            className="flex items-center gap-1.5 text-[10px] font-bold text-purple-400 hover:text-purple-300 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-purple-500/30 hover:border-purple-500/50"
-                                            title="Save as file"
-                                        >
-                                            <Save size={12} />
-                                            SAVE
-                                        </button>
-                                        <button
-                                            onClick={() => handleCopy(codeString)}
-                                            className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 hover:text-white transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-transparent hover:border-slate-600"
-                                        >
-                                            {copiedCode === codeString ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                                            {copiedCode === codeString ? 'COPIED' : 'COPY'}
-                                        </button>
-                                    </div>
-                                </div>
-                                <div className="relative">
-                                    {canSyntaxHighlight ? (
-                                        <SyntaxHighlighterComponent
-                                            {...props}
-                                            style={syntaxHighlighterBundle.style}
-                                            language={normalizedSyntaxLanguage || undefined}
-                                            PreTag="div"
-                                            customStyle={{ margin: 0, borderRadius: 0, padding: '1.25rem', overflowX: 'auto', background: 'transparent', fontSize: '13px', lineHeight: '1.5' }}
-                                            wrapLines={true}
-                                            wrapLongLines={true}
-                                            showLineNumbers={true}
-                                            lineNumberStyle={{ minWidth: '2em', paddingRight: '1em', color: '#525252', textAlign: 'right' }}
-                                        >
-                                            {codeString}
-                                        </SyntaxHighlighterComponent>
-                                    ) : (
-                                        <pre className="m-0 p-5 overflow-x-auto bg-transparent text-slate-100 text-[13px] leading-relaxed whitespace-pre-wrap break-words custom-scrollbar">
-                                            <code className="font-mono">{codeString}</code>
-                                        </pre>
-                                    )}
-                                </div>
-                                {executionResults[codeHash] && (
-                                    <div className={`px-4 py-3 border-t ${executionResults[codeHash].success ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <span className={`text-xs font-bold ${executionResults[codeHash].success ? 'text-emerald-400' : 'text-red-400'}`}>
-                                                {executionResults[codeHash].success ? '✓ Execution Successful' : '✗ Execution Failed'}
-                                            </span>
-                                            <button
-                                                onClick={() => {
-                                                    const newResults = { ...executionResults };
-                                                    delete newResults[codeHash];
-                                                    setExecutionResults(newResults);
-                                                }}
-                                                className="ml-auto p-1 hover:bg-slate-700 rounded transition-colors"
-                                            >
-                                                <X size={12} className="text-slate-500" />
-                                            </button>
-                                        </div>
-                                        <pre className="text-xs font-mono text-slate-300 whitespace-pre-wrap bg-slate-900/50 p-2 rounded border border-slate-700/50 max-h-48 overflow-y-auto custom-scrollbar">
-                                            {executionResults[codeHash].output}
-                                        </pre>
-                                    </div>
-                                )}
-                                {showFilePathInput === codeString && (
-                                    <div className="px-4 py-3 bg-[#2d2d2d] border-t border-slate-700">
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                type="text"
-                                                value={filePath}
-                                                onChange={(e) => setFilePath(e.target.value)}
-                                                placeholder="Enter file path (e.g., ./src/utils/helper.js)"
-                                                className="flex-1 bg-slate-800 border border-slate-600 text-white text-sm rounded px-3 py-1.5 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none"
-                                                autoFocus
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') {
-                                                        handleInsertToFile(codeString, language);
-                                                    } else if (e.key === 'Escape') {
-                                                        setShowFilePathInput(null);
-                                                        setFilePath('');
-                                                    }
-                                                }}
-                                            />
-                                            <button
-                                                onClick={() => handleInsertToFile(codeString, language)}
-                                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded font-medium transition-colors"
-                                            >
-                                                Insert
-                                            </button>
-                                            <button
-                                                onClick={() => {
-                                                    setShowFilePathInput(null);
-                                                    setFilePath('');
-                                                }}
-                                                className="p-1.5 hover:bg-slate-700 rounded transition-colors"
-                                            >
-                                                <X size={16} className="text-slate-400" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <code className={`${className} bg-slate-800/80 px-1.5 py-0.5 rounded text-amber-200 font-mono text-[0.85em] border border-slate-700/50 box-decoration-clone break-all`} {...props}>
-                                {children}
-                            </code>
-                        );
-                    },
-                    p: ({ children }) => <p className="mb-4 last:mb-0 leading-7 text-slate-300 font-sens">{children}</p>,
-                    ul: ({ children }) => <ul className="list-disc ml-4 mb-4 space-y-2 text-slate-300 marker:text-primary/70">{children}</ul>,
-                    ol: ({ children }) => <ol className="list-decimal ml-4 mb-4 space-y-2 text-slate-300 marker:text-primary/70">{children}</ol>,
-                    h1: ({ children }) => <h1 className="text-2xl font-bold text-white mb-4 mt-8 pb-2 border-b border-slate-800">{children}</h1>,
-                    h2: ({ children }) => <h2 className="text-xl font-bold text-white mb-3 mt-6 flex items-center gap-2"><span className="w-1 h-6 bg-primary rounded-full inline-block"></span>{children}</h2>,
-                    h3: ({ children }) => <h3 className="text-lg font-bold text-slate-100 mb-2 mt-5">{children}</h3>,
-                    a: ({ href, children }) => (
-                        <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:text-primary-300 hover:underline font-medium transition-colors decoration-primary/30 underline-offset-4">
-                            {children}
-                        </a>
-                    ),
-                    table: ({ children }) => (
-                        <div className="overflow-x-auto my-6 border border-slate-700 rounded-lg shadow-sm bg-slate-900/30 custom-scrollbar max-w-full">
-                            <table className="min-w-full divide-y divide-slate-700 text-left border-collapse">
-                                {children}
-                            </table>
-                        </div>
-                    ),
-                    thead: ({ children }) => <thead className="bg-slate-800/80 text-slate-200">{children}</thead>,
-                    th: ({ children }) => <th className="px-4 py-3 text-xs font-bold uppercase tracking-wider border-b border-slate-700 whitespace-nowrap">{children}</th>,
-                    td: ({ children }) => <td className="px-4 py-3 text-sm text-slate-300 border-b border-slate-800 last:border-0 hover:bg-slate-800/30 transition-colors">{children}</td>,
-                    blockquote: ({ children }) => (
-                        <div className="flex gap-3 my-4 pl-4 border-l-4 border-primary/40 bg-slate-800/20 py-3 pr-4 rounded-r-lg italic text-slate-400">
-                            <div className="opacity-30 text-4xl leading-none font-serif">"</div>
-                            <div className="flex-1">{children}</div>
-                        </div>
-                    ),
-                    hr: () => <hr className="my-8 border-slate-800" />,
-                }}
+                components={markdownComponents}
             >
                 {content}
             </ReactMarkdown>

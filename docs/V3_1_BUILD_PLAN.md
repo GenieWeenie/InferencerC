@@ -273,6 +273,12 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 206: split the top-header primary action cluster into a memoized child component driven by stable callback/config props to lower header rerender churn.
    - Pass 207: extract SSE chunk parsing + tool-call delta merge into a dedicated stream parser helper (`chatStreamParser`) and reuse it in `useChat.streamResponse`.
    - Pass 208: add deterministic unit tests for the chat shortcut resolver/dispatcher and the stream parser’s content/tool-call merge behavior.
+   - Pass 209: add `buildStopGenerationPatch` in `chatStateGuards` to batch-stop loading assistant messages and cache updates with a no-op return when nothing is loading.
+   - Pass 210: refactor `useChat.stopGeneration` to apply one computed stop patch (`history` + message cache) instead of nested per-message cache setters.
+   - Pass 211: add shared outgoing message/cache/index patch helper (`buildOutgoingMessagePatch`) so normal and battle send paths use one append/update flow.
+   - Pass 212: apply outgoing patch helper in `useChat.sendMessage` and add autosave sidebar metadata signature guard to skip unchanged `setSavedSessions` writes.
+   - Pass 213: extract memoized markdown code-block renderer in `MessageContentRich` and memoize the markdown components map to reduce heavy inline renderer recreation.
+   - Pass 214: expand `chatStateGuards` tests for stop-generation and outgoing-message patch helpers, including deterministic no-op/update coverage.
 
 ## Release Checklist for v3.1.x
 
