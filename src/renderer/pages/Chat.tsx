@@ -27,10 +27,18 @@ import {
     type SearchResultPreviewCacheEntry,
 } from '../lib/chatRenderModels';
 import {
+    type ChatMessageActionCapabilities,
     getMessageActionCapabilities,
     isLongPressActionAllowed,
     type ChatMessageAction,
 } from '../lib/chatMessageActions';
+import {
+    buildComposerControlPillDescriptors,
+    buildLongPressMenuActionItems,
+    type ComposerControlPillDescriptor,
+    type ComposerControlPillKey,
+    getWrappedSearchResultIndex,
+} from '../lib/chatUiModels';
 import {
     dispatchChatShortcutAction,
     isTypingShortcutTarget,
@@ -1600,6 +1608,430 @@ const SearchToolbarControls: React.FC<SearchToolbarControlsProps> = React.memo((
     prev.onCloseSearch === next.onCloseSearch
 ));
 
+interface ChatSearchPanelProps {
+    showSearch: boolean;
+    searchQuery: string;
+    onSearchQueryChange: (value: string) => void;
+    hasResults: boolean;
+    currentSearchIndex: number;
+    searchResultsCount: number;
+    showSearchResultsList: boolean;
+    onToggleSearchResultsList: () => void;
+    onPreviousSearchResult: () => void;
+    onNextSearchResult: () => void;
+    onCloseSearch: () => void;
+    virtuosoComponent: React.ComponentType<any> | null;
+    renderSearchResultItem: (resultIndex: number) => React.ReactNode;
+}
+
+const ChatSearchPanel: React.FC<ChatSearchPanelProps> = React.memo(({
+    showSearch,
+    searchQuery,
+    onSearchQueryChange,
+    hasResults,
+    currentSearchIndex,
+    searchResultsCount,
+    showSearchResultsList,
+    onToggleSearchResultsList,
+    onPreviousSearchResult,
+    onNextSearchResult,
+    onCloseSearch,
+    virtuosoComponent: VirtuosoComponent,
+    renderSearchResultItem,
+}) => {
+    const handleSearchInputChange = React.useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        onSearchQueryChange(event.target.value);
+    }, [onSearchQueryChange]);
+
+    return (
+        <AnimatePresence>
+            {showSearch && (
+                <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="border-b border-slate-800 bg-slate-900/50 overflow-hidden min-w-0"
+                >
+                    <div className="relative">
+                        <div className="px-6 py-3 flex items-center gap-3 min-w-0 overflow-hidden">
+                            <div className="flex-1 relative">
+                                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={handleSearchInputChange}
+                                    placeholder="Search in this conversation..."
+                                    className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-lg pl-10 pr-4 py-2 focus:ring-2 focus:ring-primary/50 focus:border-primary/50 outline-none"
+                                    autoFocus
+                                />
+                            </div>
+                            <SearchToolbarControls
+                                hasResults={hasResults}
+                                currentSearchIndex={currentSearchIndex}
+                                searchResultsCount={searchResultsCount}
+                                showSearchResultsList={showSearchResultsList}
+                                onToggleSearchResultsList={onToggleSearchResultsList}
+                                onPreviousSearchResult={onPreviousSearchResult}
+                                onNextSearchResult={onNextSearchResult}
+                                onCloseSearch={onCloseSearch}
+                            />
+                        </div>
+
+                        <AnimatePresence>
+                            {showSearchResultsList && searchResultsCount > 0 && (
+                                <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    transition={{ duration: 0.2 }}
+                                    className="border-t border-slate-800 bg-slate-900 overflow-hidden"
+                                >
+                                    <div className="max-h-80 overflow-y-auto">
+                                        {VirtuosoComponent ? (
+                                            <VirtuosoComponent
+                                                style={{ height: Math.min(searchResultsCount * 60, 320) }}
+                                                totalCount={searchResultsCount}
+                                                itemContent={renderSearchResultItem}
+                                            />
+                                        ) : (
+                                            <div className="h-24 flex items-center justify-center text-xs text-slate-500">
+                                                Loading search results...
+                                            </div>
+                                        )}
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>
+    );
+}, (prev, next) => (
+    prev.showSearch === next.showSearch &&
+    prev.searchQuery === next.searchQuery &&
+    prev.onSearchQueryChange === next.onSearchQueryChange &&
+    prev.hasResults === next.hasResults &&
+    prev.currentSearchIndex === next.currentSearchIndex &&
+    prev.searchResultsCount === next.searchResultsCount &&
+    prev.showSearchResultsList === next.showSearchResultsList &&
+    prev.onToggleSearchResultsList === next.onToggleSearchResultsList &&
+    prev.onPreviousSearchResult === next.onPreviousSearchResult &&
+    prev.onNextSearchResult === next.onNextSearchResult &&
+    prev.onCloseSearch === next.onCloseSearch &&
+    prev.virtuosoComponent === next.virtuosoComponent &&
+    prev.renderSearchResultItem === next.renderSearchResultItem
+));
+
+interface LongPressActionMenuProps {
+    menuRef: React.RefObject<HTMLDivElement | null>;
+    menuPosition: { x: number; y: number } | null;
+    messageIndex: number;
+    isBookmarked: boolean;
+    capabilities: ChatMessageActionCapabilities;
+    onAction: (action: ChatMessageAction) => void;
+}
+
+const LONG_PRESS_ACTION_ICON_MAP: Record<ChatMessageAction, React.ComponentType<{ size?: number; className?: string }>> = {
+    copy: Copy,
+    bookmark: Star,
+    edit: Edit2,
+    regenerate: RefreshCw,
+    branch: GitBranch,
+    delete: Trash2,
+};
+
+const LONG_PRESS_ACTION_ICON_CLASS_MAP: Record<ChatMessageAction, string> = {
+    copy: 'text-blue-400',
+    bookmark: 'text-yellow-400',
+    edit: 'text-green-400',
+    regenerate: 'text-purple-400',
+    branch: 'text-yellow-400',
+    delete: '',
+};
+
+const LongPressActionMenu: React.FC<LongPressActionMenuProps> = React.memo(({
+    menuRef,
+    menuPosition,
+    messageIndex,
+    isBookmarked,
+    capabilities,
+    onAction,
+}) => {
+    const visibleItems = React.useMemo(
+        () => buildLongPressMenuActionItems(capabilities, isBookmarked).filter((item) => item.visible),
+        [capabilities, isBookmarked]
+    );
+    const regularItems = React.useMemo(
+        () => visibleItems.filter((item) => !item.destructive),
+        [visibleItems]
+    );
+    const destructiveItems = React.useMemo(
+        () => visibleItems.filter((item) => item.destructive),
+        [visibleItems]
+    );
+
+    if (!menuPosition) {
+        return null;
+    }
+
+    return (
+        <motion.div
+            ref={menuRef}
+            initial={{ opacity: 0, scale: 0.95, y: 4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 4 }}
+            transition={{ duration: 0.15 }}
+            className="fixed z-40 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl min-w-[220px] overflow-hidden"
+            style={{ left: menuPosition.x, top: menuPosition.y }}
+            data-long-press-message-index={messageIndex}
+        >
+            {regularItems.map((item) => {
+                const Icon = LONG_PRESS_ACTION_ICON_MAP[item.action];
+                return (
+                    <button
+                        key={item.action}
+                        onClick={() => onAction(item.action)}
+                        className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 text-slate-200 text-sm transition-colors"
+                    >
+                        <Icon size={14} className={LONG_PRESS_ACTION_ICON_CLASS_MAP[item.action]} />
+                        <span>{item.label}</span>
+                    </button>
+                );
+            })}
+            {destructiveItems.length > 0 && regularItems.length > 0 && (
+                <div className="border-t border-slate-700/50" />
+            )}
+            {destructiveItems.map((item) => {
+                const Icon = LONG_PRESS_ACTION_ICON_MAP[item.action];
+                return (
+                    <button
+                        key={item.action}
+                        onClick={() => onAction(item.action)}
+                        className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-red-500/20 text-red-400 text-sm transition-colors"
+                    >
+                        <Icon size={14} />
+                        <span>{item.label}</span>
+                    </button>
+                );
+            })}
+        </motion.div>
+    );
+}, (prev, next) => (
+    prev.menuRef === next.menuRef &&
+    prev.menuPosition === next.menuPosition &&
+    prev.messageIndex === next.messageIndex &&
+    prev.isBookmarked === next.isBookmarked &&
+    prev.capabilities.canCopy === next.capabilities.canCopy &&
+    prev.capabilities.canBookmark === next.capabilities.canBookmark &&
+    prev.capabilities.canEdit === next.capabilities.canEdit &&
+    prev.capabilities.canRegenerate === next.capabilities.canRegenerate &&
+    prev.capabilities.canBranch === next.capabilities.canBranch &&
+    prev.capabilities.canDelete === next.capabilities.canDelete &&
+    prev.onAction === next.onAction
+));
+
+interface ComposerActionButtonsProps {
+    showBottomControls: boolean;
+    showSuggestions: boolean;
+    canToggleSuggestions: boolean;
+    canSend: boolean;
+    onToggleBottomControls: () => void;
+    onToggleSuggestions: () => void;
+    onSend: () => void;
+}
+
+const ComposerActionButtons: React.FC<ComposerActionButtonsProps> = React.memo(({
+    showBottomControls,
+    showSuggestions,
+    canToggleSuggestions,
+    canSend,
+    onToggleBottomControls,
+    onToggleSuggestions,
+    onSend,
+}) => (
+    <div className="flex flex-col gap-2">
+        <button
+            onClick={onToggleBottomControls}
+            title={showBottomControls ? 'Hide bottom controls' : 'Show bottom controls'}
+            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-all border border-slate-700"
+        >
+            {showBottomControls ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+        </button>
+        <button
+            onClick={onToggleSuggestions}
+            disabled={!canToggleSuggestions}
+            title={showSuggestions ? 'Hide smart suggestions' : 'Smart Suggestions'}
+            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed border border-slate-700"
+        >
+            <Sparkles size={16} />
+        </button>
+        <button
+            onClick={onSend}
+            disabled={!canSend}
+            className="p-2 bg-primary text-white rounded-lg hover:brightness-110 transition-all disabled:opacity-50 disabled:grayscale shadow-lg shadow-primary/20"
+        >
+            <Send size={18} fill="currentColor" />
+        </button>
+    </div>
+), (prev, next) => (
+    prev.showBottomControls === next.showBottomControls &&
+    prev.showSuggestions === next.showSuggestions &&
+    prev.canToggleSuggestions === next.canToggleSuggestions &&
+    prev.canSend === next.canSend &&
+    prev.onToggleBottomControls === next.onToggleBottomControls &&
+    prev.onToggleSuggestions === next.onToggleSuggestions &&
+    prev.onSend === next.onSend
+));
+
+type SidebarTab = 'inspector' | 'controls' | 'prompts' | 'documents';
+
+interface ComposerControlPillActionConfig {
+    key: ComposerControlPillKey;
+    label: string;
+    icon: React.ReactNode;
+    className: string;
+    title?: string;
+    onClick: () => void;
+}
+
+interface ComposerVariableContext {
+    modelId: string;
+    modelName: string;
+    sessionId: string;
+    sessionTitle: string;
+    messageCount: number;
+}
+
+interface ComposerControlPillsProps {
+    actions: ComposerControlPillActionConfig[];
+    mcpAvailable: boolean;
+    mcpConnectedCount: number;
+    mcpToolCount: number;
+    showExpertMenu: boolean;
+    onSelectExpert: (mode: string | null) => void;
+    showVariableMenu: boolean;
+    onCloseVariableMenu: () => void;
+    onInsertVariable: (variable: string) => void;
+    variableContext: ComposerVariableContext;
+}
+
+const ComposerControlPills: React.FC<ComposerControlPillsProps> = React.memo(({
+    actions,
+    mcpAvailable,
+    mcpConnectedCount,
+    mcpToolCount,
+    showExpertMenu,
+    onSelectExpert,
+    showVariableMenu,
+    onCloseVariableMenu,
+    onInsertVariable,
+    variableContext,
+}) => (
+    <div className="px-4 py-3 bg-slate-950/50 border-t border-slate-800/50 flex flex-wrap gap-2 items-center relative rounded-b-2xl">
+        {actions.map((action) => (
+            <button
+                key={action.key}
+                onClick={action.onClick}
+                className={action.className}
+                title={action.title}
+            >
+                {action.icon} {action.label}
+            </button>
+        ))}
+        <div
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${mcpAvailable
+                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                : 'bg-slate-800/50 text-slate-500 border-slate-700/50'
+                }`}
+            title={mcpAvailable ? `${mcpConnectedCount} server(s), ${mcpToolCount} tools` : 'No MCP servers connected'}
+        >
+            <Plug size={12} strokeWidth={2.5} />
+            {mcpAvailable ? (
+                <span className="flex items-center gap-1">
+                    MCP
+                    <span className="bg-emerald-500/30 text-emerald-300 text-[10px] px-1 rounded">{mcpToolCount}</span>
+                </span>
+            ) : (
+                <span className="opacity-50">MCP</span>
+            )}
+        </div>
+
+        {showExpertMenu && (
+            <div className="absolute bottom-12 right-4 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 z-50">
+                <div className="p-2 border-b border-slate-800 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Select Expert Persona</div>
+                <button onClick={() => onSelectExpert(null)} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">None (Default)</button>
+                <button onClick={() => onSelectExpert('coding')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">👨‍💻 Coding Expert</button>
+                <button onClick={() => onSelectExpert('reasoning')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">🧠 Logic & Reasoning</button>
+                <button onClick={() => onSelectExpert('creative')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">🎨 Creative Writer</button>
+                <button onClick={() => onSelectExpert('math')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">📐 Mathematician</button>
+            </div>
+        )}
+
+        {showVariableMenu && (
+            <React.Suspense fallback={null}>
+                <VariableInsertMenu
+                    isOpen={showVariableMenu}
+                    onClose={onCloseVariableMenu}
+                    onInsert={onInsertVariable}
+                    context={variableContext}
+                />
+            </React.Suspense>
+        )}
+    </div>
+), (prev, next) => (
+    prev.actions === next.actions &&
+    prev.mcpAvailable === next.mcpAvailable &&
+    prev.mcpConnectedCount === next.mcpConnectedCount &&
+    prev.mcpToolCount === next.mcpToolCount &&
+    prev.showExpertMenu === next.showExpertMenu &&
+    prev.onSelectExpert === next.onSelectExpert &&
+    prev.showVariableMenu === next.showVariableMenu &&
+    prev.onCloseVariableMenu === next.onCloseVariableMenu &&
+    prev.onInsertVariable === next.onInsertVariable &&
+    prev.variableContext === next.variableContext
+));
+
+interface SidebarTabsHeaderProps {
+    activeTab: SidebarTab;
+    onSelectInspectorTab: () => void;
+    onSelectControlsTab: () => void;
+    onSelectPromptsTab: () => void;
+    onSelectDocumentsTab: () => void;
+    onCloseSidebar: () => void;
+}
+
+const SidebarTabsHeader: React.FC<SidebarTabsHeaderProps> = React.memo(({
+    activeTab,
+    onSelectInspectorTab,
+    onSelectControlsTab,
+    onSelectPromptsTab,
+    onSelectDocumentsTab,
+    onCloseSidebar,
+}) => (
+    <div className="flex border-b border-slate-800 relative">
+        <button onClick={onSelectInspectorTab} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'inspector' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Inspector</button>
+        <button onClick={onSelectControlsTab} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'controls' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Controls</button>
+        <button onClick={onSelectPromptsTab} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'prompts' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Prompts</button>
+        <button onClick={onSelectDocumentsTab} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'documents' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Docs</button>
+        <button
+            onClick={onCloseSidebar}
+            className="absolute top-2 right-2 p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition-colors"
+            title="Close Sidebar"
+        >
+            <X size={14} />
+        </button>
+    </div>
+), (prev, next) => (
+    prev.activeTab === next.activeTab &&
+    prev.onSelectInspectorTab === next.onSelectInspectorTab &&
+    prev.onSelectControlsTab === next.onSelectControlsTab &&
+    prev.onSelectPromptsTab === next.onSelectPromptsTab &&
+    prev.onSelectDocumentsTab === next.onSelectDocumentsTab &&
+    prev.onCloseSidebar === next.onCloseSidebar
+));
+
 const readPersistedApiLogCount = (): number => {
     try {
         const rawCount = localStorage.getItem(ACTIVITY_LOG_COUNT_KEY);
@@ -1739,7 +2171,7 @@ const Chat: React.FC = () => {
     } = useMCP({ enabled: hasConfiguredMcpServers, deferUntilIdle: true });
     const [isDragging, setIsDragging] = React.useState(false);
     const [showInspector, setShowInspector] = React.useState(false);
-    const [activeTab, setActiveTab] = React.useState<'inspector' | 'controls' | 'prompts' | 'documents'>('controls');
+    const [activeTab, setActiveTab] = React.useState<SidebarTab>('controls');
     const [isEditingSystemPrompt, setIsEditingSystemPrompt] = React.useState(false);
     const [editingMessageIndex, setEditingMessageIndex] = React.useState<number | null>(null);
     const [editedMessageContent, setEditedMessageContent] = React.useState<string>('');
@@ -4221,11 +4653,14 @@ const Chat: React.FC = () => {
     const handleToggleSearchResultsList = React.useCallback(() => {
         setShowSearchResultsList((prev) => !prev);
     }, []);
+    const handleSearchQueryChange = React.useCallback((value: string) => {
+        setSearchQuery(value);
+    }, []);
     const handlePreviousSearchResult = React.useCallback(() => {
-        setCurrentSearchIndex((prev) => (prev > 0 ? prev - 1 : searchResults.length - 1));
+        setCurrentSearchIndex((prev) => getWrappedSearchResultIndex(prev, searchResults.length, 'previous'));
     }, [searchResults.length]);
     const handleNextSearchResult = React.useCallback(() => {
-        setCurrentSearchIndex((prev) => (prev < searchResults.length - 1 ? prev + 1 : 0));
+        setCurrentSearchIndex((prev) => getWrappedSearchResultIndex(prev, searchResults.length, 'next'));
     }, [searchResults.length]);
     const handleCloseSearchPanel = React.useCallback(() => {
         setShowSearch(false);
@@ -4359,6 +4794,301 @@ const Chat: React.FC = () => {
         () => getMessageActionCapabilities(longPressMessage),
         [longPressMessage?.role, longPressMessage?.isLoading]
     );
+    const isLongPressMessageBookmarked = React.useMemo(
+        () => Boolean(longPressMenu && bookmarkedMessages.has(longPressMenu.messageIndex)),
+        [bookmarkedMessages, longPressMenu]
+    );
+    const handleToggleBottomControls = React.useCallback(() => {
+        setShowBottomControls((prev) => !prev);
+    }, []);
+    const handleToggleSuggestions = React.useCallback(() => {
+        setShowSuggestions((prev) => !prev);
+    }, []);
+    const handleSendComposerMessage = React.useCallback(() => {
+        sendMessageWithContext();
+    }, [sendMessageWithContext]);
+    const handleTogglePrefill = React.useCallback(() => {
+        setPrefill((prev) => (prev === null ? '' : null));
+    }, []);
+    const handleToggleUrlInput = React.useCallback(() => {
+        setShowUrlInput((prev) => !prev);
+    }, []);
+    const handleToggleGithubInput = React.useCallback(() => {
+        setShowGithubInput((prev) => !prev);
+    }, []);
+    const handleProjectContextControlClick = React.useCallback(async () => {
+        enableProjectContextFeature();
+        const projectContextService = await loadProjectContextService();
+        if (projectContext) {
+            projectContextService.clearContext();
+            toast.success('Project context cleared');
+            return;
+        }
+
+        const success = await projectContextService.selectFolder();
+        if (success) {
+            toast.success('Project folder loaded');
+            setTimeout(async () => {
+                await projectContextService.startWatching();
+            }, 500);
+        } else {
+            toast.error('Failed to select folder');
+        }
+    }, [projectContext]);
+    const handleToggleThinking = React.useCallback(() => {
+        setThinkingEnabled((prev) => !prev);
+    }, [setThinkingEnabled]);
+    const handleToggleBattleMode = React.useCallback(() => {
+        setBattleMode((prev) => !prev);
+    }, [setBattleMode]);
+    const handleToggleInspector = React.useCallback(() => {
+        setShowInspector((prev) => !prev);
+    }, []);
+    const handleToggleExpertMenu = React.useCallback(() => {
+        setShowExpertMenu((prev) => !prev);
+    }, [setShowExpertMenu]);
+    const handleToggleVariableMenu = React.useCallback(() => {
+        setShowVariableMenu((prev) => !prev);
+    }, []);
+    const handleToggleJsonMode = React.useCallback(() => {
+        setJsonMode((prev) => {
+            const next = !prev;
+            toast.success(next ? 'JSON mode enabled' : 'JSON mode disabled');
+            return next;
+        });
+    }, []);
+    const handleToggleStreamingMode = React.useCallback(() => {
+        setStreamingEnabled((prev) => {
+            const next = !prev;
+            toast.success(next ? 'Streaming enabled' : 'Streaming disabled');
+            return next;
+        });
+    }, []);
+    const handleOpenAnalyticsPanel = React.useCallback(() => {
+        setShowAnalytics(true);
+    }, []);
+    const handleOpenRecommendationsPanel = React.useCallback(() => {
+        setShowRecommendations(true);
+    }, []);
+    const handleToggleSidebar = React.useCallback(() => {
+        setSidebarOpen((prev) => !prev);
+    }, []);
+    const handleCloseVariableMenu = React.useCallback(() => {
+        setShowVariableMenu(false);
+    }, []);
+    const handleInsertVariable = React.useCallback((variable: string) => {
+        setInput((prev) => prev + variable);
+        setShowVariableMenu(false);
+    }, [setInput]);
+    const handleCloseSidebar = React.useCallback(() => {
+        setSidebarOpen(false);
+    }, []);
+    const handleSelectInspectorTab = React.useCallback(() => {
+        setActiveTab('inspector');
+    }, []);
+    const handleSelectControlsTab = React.useCallback(() => {
+        setActiveTab('controls');
+    }, []);
+    const handleSelectPromptsTab = React.useCallback(() => {
+        setActiveTab('prompts');
+    }, []);
+    const handleSelectDocumentsTab = React.useCallback(() => {
+        setActiveTab('documents');
+    }, []);
+    const composerControlDescriptors = React.useMemo<ComposerControlPillDescriptor[]>(() => buildComposerControlPillDescriptors({
+        prefillEnabled: prefill !== null,
+        showUrlInput,
+        githubConfigured,
+        showGithubInput,
+        hasProjectContext: Boolean(projectContext),
+        thinkingEnabled,
+        battleMode,
+        showInspector,
+        expertMode,
+        showVariableMenu,
+        jsonMode,
+        streamingEnabled,
+        hasHistory: history.length > 0,
+        sidebarOpen,
+    }), [
+        prefill,
+        showUrlInput,
+        githubConfigured,
+        showGithubInput,
+        projectContext,
+        thinkingEnabled,
+        battleMode,
+        showInspector,
+        expertMode,
+        showVariableMenu,
+        jsonMode,
+        streamingEnabled,
+        history.length,
+        sidebarOpen,
+    ]);
+    const controlPillActionHandlers = React.useMemo<Record<ComposerControlPillKey, () => void>>(() => ({
+        'control-response': handleTogglePrefill,
+        tools: handleToggleUrlInput,
+        github: handleToggleGithubInput,
+        project: handleProjectContextControlClick,
+        thinking: handleToggleThinking,
+        battle: handleToggleBattleMode,
+        inspector: handleToggleInspector,
+        'expert-config': handleToggleExpertMenu,
+        variables: handleToggleVariableMenu,
+        json: handleToggleJsonMode,
+        stream: handleToggleStreamingMode,
+        analytics: handleOpenAnalyticsPanel,
+        recommendations: handleOpenRecommendationsPanel,
+        controls: handleToggleSidebar,
+    }), [
+        handleTogglePrefill,
+        handleToggleUrlInput,
+        handleToggleGithubInput,
+        handleProjectContextControlClick,
+        handleToggleThinking,
+        handleToggleBattleMode,
+        handleToggleInspector,
+        handleToggleExpertMenu,
+        handleToggleVariableMenu,
+        handleToggleJsonMode,
+        handleToggleStreamingMode,
+        handleOpenAnalyticsPanel,
+        handleOpenRecommendationsPanel,
+        handleToggleSidebar,
+    ]);
+    const composerControlPillActions = React.useMemo<ComposerControlPillActionConfig[]>(() => {
+        const inactiveClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200';
+        const activePrimaryClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-primary text-white border-primary shadow-[0_0_10px_rgba(59,130,246,0.4)]';
+        const activeBlueClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-blue-500 text-white border-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.4)]';
+        const activeBattleClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-gradient-to-r from-orange-500 to-red-600 text-white border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]';
+        const activeToolsClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-primary text-white border-primary animate-pulse';
+
+        return composerControlDescriptors
+            .filter((descriptor) => descriptor.visible)
+            .map((descriptor) => {
+                const baseAction = {
+                    key: descriptor.key,
+                    label: descriptor.label,
+                    onClick: controlPillActionHandlers[descriptor.key],
+                    title: undefined as string | undefined,
+                };
+
+                switch (descriptor.key) {
+                    case 'control-response':
+                        return {
+                            ...baseAction,
+                            icon: descriptor.active
+                                ? <Check size={12} strokeWidth={3} />
+                                : <Settings size={12} strokeWidth={2.5} />,
+                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
+                        };
+                    case 'tools':
+                        return {
+                            ...baseAction,
+                            icon: <Globe size={12} strokeWidth={2.5} />,
+                            className: descriptor.active ? activeToolsClassName : inactiveClassName,
+                        };
+                    case 'github':
+                        return {
+                            ...baseAction,
+                            icon: <Github size={12} strokeWidth={2.5} />,
+                            className: descriptor.active ? activeBlueClassName : inactiveClassName,
+                        };
+                    case 'project':
+                        return {
+                            ...baseAction,
+                            icon: <FolderOpen size={12} strokeWidth={2.5} />,
+                            className: descriptor.active ? activeBlueClassName : inactiveClassName,
+                        };
+                    case 'thinking':
+                        return {
+                            ...baseAction,
+                            icon: <Brain size={12} strokeWidth={2.5} />,
+                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
+                        };
+                    case 'battle':
+                        return {
+                            ...baseAction,
+                            icon: <Users size={12} strokeWidth={2.5} />,
+                            className: descriptor.active ? activeBattleClassName : inactiveClassName,
+                        };
+                    case 'inspector':
+                        return {
+                            ...baseAction,
+                            icon: <Activity size={12} strokeWidth={2.5} />,
+                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
+                        };
+                    case 'expert-config':
+                        return {
+                            ...baseAction,
+                            icon: <Users size={12} strokeWidth={2.5} />,
+                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
+                        };
+                    case 'variables':
+                        return {
+                            ...baseAction,
+                            icon: <Code2 size={12} strokeWidth={2.5} />,
+                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
+                            title: 'Insert variables like {{date}}, {{time}}, {{user_name}}',
+                        };
+                    case 'json':
+                        return {
+                            ...baseAction,
+                            icon: <Code2 size={12} strokeWidth={2.5} />,
+                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
+                            title: 'Enable JSON output format',
+                        };
+                    case 'stream':
+                        return {
+                            ...baseAction,
+                            icon: <Activity size={12} strokeWidth={2.5} />,
+                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
+                            title: descriptor.active ? 'Disable streaming (get full response at once)' : 'Enable streaming (real-time token display)',
+                        };
+                    case 'analytics':
+                        return {
+                            ...baseAction,
+                            icon: <BarChart3 size={12} strokeWidth={2.5} />,
+                            className: 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white',
+                            title: 'View usage analytics and statistics',
+                        };
+                    case 'recommendations':
+                        return {
+                            ...baseAction,
+                            icon: <Sparkles size={12} strokeWidth={2.5} />,
+                            className: 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white',
+                            title: 'Find relevant conversations (Ctrl+Shift+R)',
+                        };
+                    case 'controls':
+                        return {
+                            ...baseAction,
+                            icon: <Settings size={12} strokeWidth={2.5} />,
+                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
+                            title: 'Toggle Controls Panel',
+                        };
+                    default:
+                        return {
+                            ...baseAction,
+                            icon: null,
+                            className: inactiveClassName,
+                        };
+                }
+            });
+    }, [composerControlDescriptors, controlPillActionHandlers]);
+    const composerVariableContext = React.useMemo<ComposerVariableContext>(() => ({
+        modelId: currentModel,
+        modelName: availableModels.find((model) => model.id === currentModel)?.name || currentModel,
+        sessionId,
+        sessionTitle: savedSessions.find((session) => session.id === sessionId)?.title || 'New Chat',
+        messageCount: history.length,
+    }), [
+        currentModel,
+        availableModels,
+        sessionId,
+        savedSessions,
+        history.length,
+    ]);
     const composerBottomInset = isCompactViewport ? 16 : 24;
     const messageListFooterHeight = Math.max(132, composerOverlayHeight + composerBottomInset + 16);
 
@@ -4447,71 +5177,21 @@ const Chat: React.FC = () => {
                     />
                 </div>
 
-                {/* Search Bar */}
-                <AnimatePresence>
-                    {showSearch && (
-                        <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            transition={{ duration: 0.2 }}
-                            className="border-b border-slate-800 bg-slate-900/50 overflow-hidden min-w-0"
-                        >
-                            <div className="relative">
-                                <div className="px-6 py-3 flex items-center gap-3 min-w-0 overflow-hidden">
-                                    <div className="flex-1 relative">
-                                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                                        <input
-                                            type="text"
-                                            value={searchQuery}
-                                            onChange={(e) => setSearchQuery(e.target.value)}
-                                            placeholder="Search in this conversation..."
-                                            className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-lg pl-10 pr-4 py-2 focus:ring-2 focus:ring-primary/50 focus:border-primary/50 outline-none"
-                                            autoFocus
-                                        />
-                                    </div>
-                                    <SearchToolbarControls
-                                        hasResults={searchResults.length > 0}
-                                        currentSearchIndex={currentSearchIndex}
-                                        searchResultsCount={searchResults.length}
-                                        showSearchResultsList={showSearchResultsList}
-                                        onToggleSearchResultsList={handleToggleSearchResultsList}
-                                        onPreviousSearchResult={handlePreviousSearchResult}
-                                        onNextSearchResult={handleNextSearchResult}
-                                        onCloseSearch={handleCloseSearchPanel}
-                                    />
-                                </div>
-
-                                {/* Virtualized search results list */}
-                                <AnimatePresence>
-                                    {showSearchResultsList && searchResults.length > 0 && (
-                                        <motion.div
-                                            initial={{ height: 0, opacity: 0 }}
-                                            animate={{ height: 'auto', opacity: 1 }}
-                                            exit={{ height: 0, opacity: 0 }}
-                                            transition={{ duration: 0.2 }}
-                                            className="border-t border-slate-800 bg-slate-900 overflow-hidden"
-                                        >
-                                            <div className="max-h-80 overflow-y-auto">
-                                                {VirtuosoComponent ? (
-                                                    <VirtuosoComponent
-                                                        style={{ height: Math.min(searchResults.length * 60, 320) }}
-                                                        totalCount={searchResults.length}
-                                                        itemContent={renderSearchResultItem}
-                                                    />
-                                                ) : (
-                                                    <div className="h-24 flex items-center justify-center text-xs text-slate-500">
-                                                        Loading search results...
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </motion.div>
-                                    )}
-                                </AnimatePresence>
-                            </div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                <ChatSearchPanel
+                    showSearch={showSearch}
+                    searchQuery={searchQuery}
+                    onSearchQueryChange={handleSearchQueryChange}
+                    hasResults={searchResults.length > 0}
+                    currentSearchIndex={currentSearchIndex}
+                    searchResultsCount={searchResults.length}
+                    showSearchResultsList={showSearchResultsList}
+                    onToggleSearchResultsList={handleToggleSearchResultsList}
+                    onPreviousSearchResult={handlePreviousSearchResult}
+                    onNextSearchResult={handleNextSearchResult}
+                    onCloseSearch={handleCloseSearchPanel}
+                    virtuosoComponent={VirtuosoComponent}
+                    renderSearchResultItem={renderSearchResultItem}
+                />
 
                 {/* AI Summary Panel */}
                 {history.length >= 5 && (
@@ -4610,63 +5290,14 @@ const Chat: React.FC = () => {
 
                 <AnimatePresence>
                     {longPressMenu && longPressMessage && (
-                        <motion.div
-                            ref={longPressMenuRef}
-                            initial={{ opacity: 0, scale: 0.95, y: 4 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.95, y: 4 }}
-                            transition={{ duration: 0.15 }}
-                            className="fixed z-40 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl min-w-[220px] overflow-hidden"
-                            style={{ left: longPressMenu.x, top: longPressMenu.y }}
-                        >
-                            <button
-                                onClick={() => handleLongPressAction('copy')}
-                                className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 text-slate-200 text-sm transition-colors"
-                            >
-                                <Copy size={14} className="text-blue-400" />
-                                <span>Copy message</span>
-                            </button>
-                            <button
-                                onClick={() => handleLongPressAction('bookmark')}
-                                className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 text-slate-200 text-sm transition-colors"
-                            >
-                                <Star size={14} className="text-yellow-400" />
-                                <span>{bookmarkedMessages.has(longPressMenu.messageIndex) ? 'Remove bookmark' : 'Bookmark message'}</span>
-                            </button>
-                            {longPressMessageCapabilities.canEdit && (
-                                <button
-                                    onClick={() => handleLongPressAction('edit')}
-                                    className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 text-slate-200 text-sm transition-colors"
-                                >
-                                    <Edit2 size={14} className="text-green-400" />
-                                    <span>Edit message</span>
-                                </button>
-                            )}
-                            {longPressMessageCapabilities.canRegenerate && (
-                                <button
-                                    onClick={() => handleLongPressAction('regenerate')}
-                                    className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 text-slate-200 text-sm transition-colors"
-                                >
-                                    <RefreshCw size={14} className="text-purple-400" />
-                                    <span>Regenerate</span>
-                                </button>
-                            )}
-                            <button
-                                onClick={() => handleLongPressAction('branch')}
-                                className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 text-slate-200 text-sm transition-colors"
-                            >
-                                <GitBranch size={14} className="text-yellow-400" />
-                                <span>Branch from here</span>
-                            </button>
-                            <div className="border-t border-slate-700/50" />
-                            <button
-                                onClick={() => handleLongPressAction('delete')}
-                                className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-red-500/20 text-red-400 text-sm transition-colors"
-                            >
-                                <Trash2 size={14} />
-                                <span>Delete from here</span>
-                            </button>
-                        </motion.div>
+                        <LongPressActionMenu
+                            menuRef={longPressMenuRef}
+                            menuPosition={longPressMenu}
+                            messageIndex={longPressMenu.messageIndex}
+                            isBookmarked={isLongPressMessageBookmarked}
+                            capabilities={longPressMessageCapabilities}
+                            onAction={handleLongPressAction}
+                        />
                     )}
                 </AnimatePresence>
 
@@ -4863,30 +5494,15 @@ const Chat: React.FC = () => {
                                 placeholder="Type your prompt here... (Try '/')"
                                 rows={1}
                             />
-                            <div className="flex flex-col gap-2">
-                                <button
-                                    onClick={() => setShowBottomControls(prev => !prev)}
-                                    title={showBottomControls ? 'Hide bottom controls' : 'Show bottom controls'}
-                                    className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-all border border-slate-700"
-                                >
-                                    {showBottomControls ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-                                </button>
-                                <button
-                                    onClick={() => setShowSuggestions(!showSuggestions)}
-                                    disabled={history.length === 0}
-                                    title="Smart Suggestions"
-                                    className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed border border-slate-700"
-                                >
-                                    <Sparkles size={16} />
-                                </button>
-                                <button
-                                    onClick={sendMessageWithContext}
-                                    disabled={!input.trim()}
-                                    className="p-2 bg-primary text-white rounded-lg hover:brightness-110 transition-all disabled:opacity-50 disabled:grayscale shadow-lg shadow-primary/20"
-                                >
-                                    <Send size={18} fill="currentColor" />
-                                </button>
-                            </div>
+                            <ComposerActionButtons
+                                showBottomControls={showBottomControls}
+                                showSuggestions={showSuggestions}
+                                canToggleSuggestions={history.length > 0}
+                                canSend={Boolean(input.trim())}
+                                onToggleBottomControls={handleToggleBottomControls}
+                                onToggleSuggestions={handleToggleSuggestions}
+                                onSend={handleSendComposerMessage}
+                            />
                         </div>
 
                         {/* 2. Prefill / Steering Input (Controlled by Toggle) */}
@@ -5073,244 +5689,18 @@ const Chat: React.FC = () => {
 
                         {/* 3. Control Pills Bar */}
                         {showBottomControls && (
-                        <div className="px-4 py-3 bg-slate-950/50 border-t border-slate-800/50 flex flex-wrap gap-2 items-center relative rounded-b-2xl">
-                            {/* Toggle 1: Control Response */}
-                            <button
-                                onClick={() => setPrefill(prefill === null ? '' : null)}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${prefill !== null
-                                    ? 'bg-primary text-white border-primary shadow-[0_0_10px_rgba(59,130,246,0.4)]'
-                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                                    }`}
-                            >
-                                {prefill !== null ? <Check size={12} strokeWidth={3} /> : <Settings size={12} strokeWidth={2.5} />} Control Response
-                            </button>
-
-                            {/* Toggle 2: Tools */}
-                            <button
-                                onClick={() => setShowUrlInput(!showUrlInput)}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${showUrlInput
-                                    ? 'bg-primary text-white border-primary animate-pulse'
-                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                                    }`}
-                            >
-                                <Globe size={12} strokeWidth={2.5} /> Tools
-                            </button>
-
-                            {/* Toggle 2c: GitHub */}
-                            {githubConfigured && (
-                                <button
-                                    onClick={() => setShowGithubInput(!showGithubInput)}
-                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${showGithubInput
-                                        ? 'bg-blue-500 text-white border-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.4)]'
-                                        : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                                        }`}
-                                >
-                                    <Github size={12} strokeWidth={2.5} /> GitHub
-                                </button>
-                            )}
-
-                            {/* Toggle 2b: Project Context */}
-                            <button
-                                onClick={async () => {
-                                    enableProjectContextFeature();
-                                    const projectContextService = await loadProjectContextService();
-                                    if (projectContext) {
-                                        projectContextService.clearContext();
-                                        toast.success('Project context cleared');
-                                    } else {
-                                        const success = await projectContextService.selectFolder();
-                                        if (success) {
-                                            toast.success('Project folder loaded');
-                                            // Auto-start watching
-                                            setTimeout(async () => {
-                                                await projectContextService.startWatching();
-                                            }, 500);
-                                        } else {
-                                            toast.error('Failed to select folder');
-                                        }
-                                    }
-                                }}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${projectContext
-                                    ? 'bg-blue-500 text-white border-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.4)]'
-                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                                    }`}
-                            >
-                                <FolderOpen size={12} strokeWidth={2.5} /> {projectContext ? 'Context' : 'Project'}
-                            </button>
-
-                            {/* Toggle 3: Thinking */}
-                            <button
-                                onClick={() => setThinkingEnabled(!thinkingEnabled)}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${thinkingEnabled
-                                    ? 'bg-primary text-white border-primary shadow-[0_0_10px_rgba(59,130,246,0.4)]'
-                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                                    }`}
-                            >
-                                <Brain size={12} strokeWidth={2.5} /> Thinking
-                            </button>
-
-                            {/* Toggle 3b: Battle Mode */}
-                            <button
-                                onClick={() => setBattleMode(!battleMode)}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${battleMode
-                                    ? 'bg-gradient-to-r from-orange-500 to-red-600 text-white border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]'
-                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                                    }`}
-                            >
-                                <Users size={12} strokeWidth={2.5} /> Battle
-                            </button>
-
-                            {/* Toggle 5: Token Inspector */}
-                            <button
-                                onClick={() => setShowInspector(!showInspector)}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${showInspector
-                                    ? 'bg-primary text-white border-primary shadow-[0_0_10px_rgba(59,130,246,0.4)]'
-                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                                    }`}
-                            >
-                                <Activity size={12} strokeWidth={2.5} /> Inspector
-                            </button>
-
-                            {/* Toggle 4: Mixture of Experts / Config */}
-                            <button
-                                onClick={() => setShowExpertMenu(!showExpertMenu)}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${expertMode
-                                    ? 'bg-primary text-white border-primary shadow-[0_0_10px_rgba(59,130,246,0.4)]'
-                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                                    }`}
-                            >
-                                <Users size={12} strokeWidth={2.5} /> {expertMode ? `Expert: ${expertMode}` : "Expert Config"}
-                            </button>
-
-                            {/* Toggle 4b: Variables */}
-                            <button
-                                onClick={() => setShowVariableMenu(!showVariableMenu)}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${showVariableMenu
-                                    ? 'bg-primary text-white border-primary shadow-[0_0_10px_rgba(59,130,246,0.4)]'
-                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                                    }`}
-                                title="Insert variables like {{date}}, {{time}}, {{user_name}}"
-                            >
-                                <Code2 size={12} strokeWidth={2.5} /> Variables
-                            </button>
-
-
-
-                            {/* JSON Mode Toggle */}
-                            <button
-                                onClick={() => {
-                                    setJsonMode(!jsonMode);
-                                    toast.success(jsonMode ? 'JSON mode disabled' : 'JSON mode enabled');
-                                }}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${jsonMode
-                                    ? 'bg-primary text-white border-primary shadow-[0_0_10px_rgba(59,130,246,0.4)]'
-                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                                    }`}
-                                title="Enable JSON output format"
-                            >
-                                <Code2 size={12} strokeWidth={2.5} /> JSON
-                            </button>
-
-                            {/* Streaming Toggle */}
-                            <button
-                                onClick={() => {
-                                    setStreamingEnabled(!streamingEnabled);
-                                    toast.success(streamingEnabled ? 'Streaming disabled' : 'Streaming enabled');
-                                }}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${streamingEnabled
-                                    ? 'bg-primary text-white border-primary shadow-[0_0_10px_rgba(59,130,246,0.4)]'
-                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                                    }`}
-                                title={streamingEnabled ? "Disable streaming (get full response at once)" : "Enable streaming (real-time token display)"}
-                            >
-                                <Activity size={12} strokeWidth={2.5} /> Stream
-                            </button>
-
-                            {/* Analytics Dashboard */}
-                            <button
-                                onClick={() => {
-                                    setShowAnalytics(true);
-                                }}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white"
-                                title="View usage analytics and statistics"
-                            >
-                                <BarChart3 size={12} strokeWidth={2.5} /> Analytics
-                            </button>
-
-                            {/* Conversation Recommendations */}
-                            {history.length > 0 && (
-                                <button
-                                    onClick={() => setShowRecommendations(true)}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white"
-                                    title="Find relevant conversations (Ctrl+Shift+R)"
-                                >
-                                    <Sparkles size={12} strokeWidth={2.5} /> Recommendations
-                                </button>
-                            )}
-
-                            {/* Controls Toggle */}
-                            <button
-                                onClick={() => setSidebarOpen(!sidebarOpen)}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${sidebarOpen
-                                    ? 'bg-primary text-white border-primary shadow-[0_0_10px_rgba(59,130,246,0.4)]'
-                                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                                    }`}
-                                title="Toggle Controls Panel"
-                            >
-                                <Settings size={12} strokeWidth={2.5} /> Controls
-                            </button>
-
-                            {/* MCP Status Indicator */}
-                            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${mcpAvailable
-                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                                : 'bg-slate-800/50 text-slate-500 border-slate-700/50'
-                                }`}
-                                title={mcpAvailable ? `${mcpConnectedCount} server(s), ${mcpTools.length} tools` : 'No MCP servers connected'}
-                            >
-                                <Plug size={12} strokeWidth={2.5} />
-                                {mcpAvailable ? (
-                                    <span className="flex items-center gap-1">
-                                        MCP
-                                        <span className="bg-emerald-500/30 text-emerald-300 text-[10px] px-1 rounded">{mcpTools.length}</span>
-                                    </span>
-                                ) : (
-                                    <span className="opacity-50">MCP</span>
-                                )}
-                            </div>
-
-                            {/* Expert Dropdown Menu */}
-                            {showExpertMenu && (
-                                <div className="absolute bottom-12 right-4 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 z-50">
-                                    <div className="p-2 border-b border-slate-800 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Select Expert Persona</div>
-                                    <button onClick={() => handleExpertSelect(null)} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">None (Default)</button>
-                                    <button onClick={() => handleExpertSelect('coding')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">👨‍💻 Coding Expert</button>
-                                    <button onClick={() => handleExpertSelect('reasoning')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">🧠 Logic & Reasoning</button>
-                                    <button onClick={() => handleExpertSelect('creative')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">🎨 Creative Writer</button>
-                                    <button onClick={() => handleExpertSelect('math')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">📐 Mathematician</button>
-                                </div>
-                            )}
-
-                            {/* Variable Insert Menu */}
-                            {showVariableMenu && (
-                                <React.Suspense fallback={null}>
-                                    <VariableInsertMenu
-                                        isOpen={showVariableMenu}
-                                        onClose={() => setShowVariableMenu(false)}
-                                        onInsert={(variable) => {
-                                            setInput(prev => prev + variable);
-                                            setShowVariableMenu(false);
-                                        }}
-                                        context={{
-                                            modelId: currentModel,
-                                            modelName: availableModels.find(m => m.id === currentModel)?.name || currentModel,
-                                            sessionId: sessionId,
-                                            sessionTitle: savedSessions.find(s => s.id === sessionId)?.title || 'New Chat',
-                                            messageCount: history.length
-                                        }}
-                                    />
-                                </React.Suspense>
-                            )}
-                        </div>
+                            <ComposerControlPills
+                                actions={composerControlPillActions}
+                                mcpAvailable={mcpAvailable}
+                                mcpConnectedCount={mcpConnectedCount}
+                                mcpToolCount={mcpTools.length}
+                                showExpertMenu={showExpertMenu}
+                                onSelectExpert={handleExpertSelect}
+                                showVariableMenu={showVariableMenu}
+                                onCloseVariableMenu={handleCloseVariableMenu}
+                                onInsertVariable={handleInsertVariable}
+                                variableContext={composerVariableContext}
+                            />
                         )}
                     </div>
                 </div>
@@ -5322,23 +5712,18 @@ const Chat: React.FC = () => {
                 {isCompactViewport && (
                     <div
                         className="absolute inset-0 bg-black/40 z-20"
-                        onClick={() => setSidebarOpen(false)}
+                        onClick={handleCloseSidebar}
                     />
                 )}
                 <div className={`${isCompactViewport ? 'absolute inset-y-0 right-0 z-30 w-[92vw] max-w-[420px]' : 'w-[420px] min-w-[420px]'} bg-slate-950/50 border-1 border-slate-800 flex flex-col h-full border-l backdrop-blur-xl relative`}>
-                <div className="flex border-b border-slate-800 relative">
-                    <button onClick={() => setActiveTab('inspector')} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'inspector' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Inspector</button>
-                    <button onClick={() => setActiveTab('controls')} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'controls' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Controls</button>
-                    <button onClick={() => setActiveTab('prompts')} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'prompts' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Prompts</button>
-                    <button onClick={() => setActiveTab('documents')} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'documents' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Docs</button>
-                    <button
-                        onClick={() => setSidebarOpen(false)}
-                        className="absolute top-2 right-2 p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition-colors"
-                        title="Close Sidebar"
-                    >
-                        <X size={14} />
-                    </button>
-                </div>
+                <SidebarTabsHeader
+                    activeTab={activeTab}
+                    onSelectInspectorTab={handleSelectInspectorTab}
+                    onSelectControlsTab={handleSelectControlsTab}
+                    onSelectPromptsTab={handleSelectPromptsTab}
+                    onSelectDocumentsTab={handleSelectDocumentsTab}
+                    onCloseSidebar={handleCloseSidebar}
+                />
 
                 {activeTab === 'controls' && (
                     <div className="p-6 flex-1 overflow-y-auto custom-scrollbar space-y-6 pr-4">
