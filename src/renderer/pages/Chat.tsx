@@ -412,6 +412,54 @@ const MessageSkeleton: React.FC<{ isUser?: boolean }> = ({ isUser = false }) => 
     );
 };
 
+interface ToolCallEntry {
+    id?: string;
+    function: {
+        name?: string;
+        arguments?: string;
+    };
+}
+
+const EMPTY_TOOL_CALLS: ToolCallEntry[] = [];
+
+interface ToolCallsListProps {
+    toolCalls: ToolCallEntry[];
+    animated?: boolean;
+}
+
+const ToolCallsList: React.FC<ToolCallsListProps> = React.memo(({
+    toolCalls,
+    animated = false,
+}) => (
+    <div className={`mb-2 space-y-2 ${animated ? 'animate-in slide-in-from-top-1 fade-in duration-300' : ''}`}>
+        {toolCalls.map((tc, idx) => (
+            <div key={tc.id || idx} className="p-2 bg-slate-900/80 border border-slate-700/50 rounded-lg text-xs font-mono shadow-sm">
+                <div className="flex items-center gap-2 mb-1 text-primary">
+                    <Wrench size={12} />
+                    <span className="font-bold">{tc.function.name}</span>
+                </div>
+                <div className="bg-slate-950 p-2 rounded text-slate-400 overflow-x-auto whitespace-pre-wrap break-all">
+                    {tc.function.arguments}
+                </div>
+            </div>
+        ))}
+    </div>
+), (prev, next) => prev.toolCalls === next.toolCalls && prev.animated === next.animated);
+
+const resolveBattleModelName = (
+    content: string | undefined,
+    pattern: RegExp,
+    fallbackModelId: string,
+    availableModels: any[],
+    fallbackLabel: string
+): string => {
+    const match = content?.match(pattern);
+    if (match?.[1]) {
+        return match[1];
+    }
+    return availableModels.find((m: any) => m.id === fallbackModelId)?.name || fallbackLabel;
+};
+
 interface ChatMessageRowProps {
     index: number;
     msg: any;
@@ -497,10 +545,6 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
     isLazyLoaded,
     loadMessageAtIndex,
 }) => {
-    if (isLoadingMessages) {
-        return <MessageSkeleton isUser={index % 2 === 0} />;
-    }
-
     const activeChoice = msg.choices?.[msg.selectedChoiceIndex || 0];
     const currentLogprobs = activeChoice?.logprobs?.content || [];
     const hasLogprobs = Array.isArray(currentLogprobs) && currentLogprobs.length > 0;
@@ -518,6 +562,72 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
         previousMessage?.content?.includes('Model A:') &&
         msg.content?.includes('Model B:') &&
         isComparisonPartnerHidden;
+
+    const toolCalls = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0
+        ? msg.tool_calls as ToolCallEntry[]
+        : EMPTY_TOOL_CALLS;
+    const hasToolCalls = toolCalls.length > 0;
+
+    const comparisonDetails = React.useMemo(() => {
+        if (!nextMessage) {
+            return null;
+        }
+
+        return {
+            messageB: nextMessage,
+            modelAName: resolveBattleModelName(
+                msg.content,
+                /\*\*Model A:\s*(.+?)\*\*/,
+                currentModel,
+                availableModels,
+                'Model A'
+            ),
+            modelBName: resolveBattleModelName(
+                nextMessage.content,
+                /\*\*Model B:\s*(.+?)\*\*/,
+                secondaryModel,
+                availableModels,
+                'Model B'
+            ),
+        };
+    }, [nextMessage, msg.content, currentModel, secondaryModel, availableModels]);
+
+    const handleToggleBookmark = React.useCallback(() => {
+        toggleBookmark(index);
+    }, [toggleBookmark, index]);
+
+    const handleCopyMessage = React.useCallback(() => {
+        navigator.clipboard.writeText(msg.content || '');
+        toast.success('Copied to clipboard');
+    }, [msg.content]);
+
+    const handleDeleteMessage = React.useCallback(() => {
+        deleteMessage(index);
+    }, [deleteMessage, index]);
+
+    const handleEditMessageAction = React.useCallback(() => {
+        handleEditMessage(index);
+    }, [handleEditMessage, index]);
+
+    const handleRegenerateMessageAction = React.useCallback(() => {
+        handleRegenerateResponse(index);
+    }, [handleRegenerateResponse, index]);
+
+    const handleBranchConversationAction = React.useCallback(() => {
+        handleBranchConversation(index);
+    }, [handleBranchConversation, index]);
+
+    const handleRateUp = React.useCallback(() => {
+        handleRateMessage(index, 'up');
+    }, [handleRateMessage, index]);
+
+    const handleRateDown = React.useCallback(() => {
+        handleRateMessage(index, 'down');
+    }, [handleRateMessage, index]);
+
+    if (isLoadingMessages) {
+        return <MessageSkeleton isUser={index % 2 === 0} />;
+    }
 
     if (isSecondInBattlePair) {
         return null;
@@ -540,7 +650,7 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
             style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', fontSize: `${conversationFontSize}px`, maxWidth: isCompactViewport ? '95%' : '85%' }}>
                 <div className="absolute top-2 right-2 flex items-center gap-1.5 rounded-xl border border-slate-700/70 bg-slate-900/85 px-1 py-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto transition-opacity z-20 backdrop-blur-sm">
                     <button
-                        onClick={() => toggleBookmark(index)}
+                        onClick={handleToggleBookmark}
                         className={`h-8 w-8 rounded-lg text-white flex items-center justify-center shadow-sm cursor-pointer transition-colors ${isBookmarked
                             ? 'bg-yellow-500 hover:bg-yellow-600'
                             : 'bg-slate-700/90 hover:bg-slate-600'
@@ -554,14 +664,11 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                             messageContent={msg.content || ''}
                             messageIndex={index}
                             messageRole={msg.role}
-                            onCopy={() => {
-                                navigator.clipboard.writeText(msg.content || '');
-                                toast.success('Copied to clipboard');
-                            }}
-                            onDelete={() => deleteMessage(index)}
-                            onEdit={msg.role === 'user' ? () => handleEditMessage(index) : undefined}
-                            onRegenerate={msg.role === 'assistant' && !msg.isLoading ? () => handleRegenerateResponse(index) : undefined}
-                            onBranch={() => handleBranchConversation(index)}
+                            onCopy={handleCopyMessage}
+                            onDelete={handleDeleteMessage}
+                            onEdit={msg.role === 'user' ? handleEditMessageAction : undefined}
+                            onRegenerate={msg.role === 'assistant' && !msg.isLoading ? handleRegenerateMessageAction : undefined}
+                            onBranch={handleBranchConversationAction}
                         />
                     </React.Suspense>
                 </div>
@@ -569,20 +676,8 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                     <div>
                         {msg.isLoading ? (
                             <div className="flex flex-col gap-2">
-                                {msg.tool_calls && msg.tool_calls.length > 0 && (
-                                    <div className="mb-2 space-y-2 animate-in slide-in-from-top-1 fade-in duration-300">
-                                        {msg.tool_calls.map((tc: any, idx: number) => (
-                                            <div key={tc.id || idx} className="p-2 bg-slate-900/80 border border-slate-700/50 rounded-lg text-xs font-mono shadow-sm">
-                                                <div className="flex items-center gap-2 mb-1 text-primary">
-                                                    <Wrench size={12} />
-                                                    <span className="font-bold">{tc.function.name}</span>
-                                                </div>
-                                                <div className="bg-slate-950 p-2 rounded text-slate-400 overflow-x-auto whitespace-pre-wrap break-all">
-                                                    {tc.function.arguments}
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
+                                {hasToolCalls && (
+                                    <ToolCallsList toolCalls={toolCalls} animated={true} />
                                 )}
                                 {msg.content && (
                                     <React.Suspense fallback={<div className="text-xs text-slate-500">Rendering response...</div>}>
@@ -606,20 +701,8 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                             <>
                                 {(!showInspector || !hasLogprobs) && (
                                     <>
-                                        {msg.tool_calls && msg.tool_calls.length > 0 && (
-                                            <div className="mb-2 space-y-2">
-                                                {msg.tool_calls.map((tc: any, idx: number) => (
-                                                    <div key={tc.id || idx} className="p-2 bg-slate-900/80 border border-slate-700/50 rounded-lg text-xs font-mono shadow-sm">
-                                                        <div className="flex items-center gap-2 mb-1 text-primary">
-                                                            <Wrench size={12} />
-                                                            <span className="font-bold">{tc.function.name}</span>
-                                                        </div>
-                                                        <div className="bg-slate-950 p-2 rounded text-slate-400 overflow-x-auto whitespace-pre-wrap break-all">
-                                                            {tc.function.arguments}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
+                                        {hasToolCalls && (
+                                            <ToolCallsList toolCalls={toolCalls} />
                                         )}
                                         <React.Suspense fallback={<div className="text-xs text-slate-500">Rendering response...</div>}>
                                         <MessageContent
@@ -674,31 +757,19 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
 
                         {isShowingComparison && isBattleModePair && !msg.isLoading && !nextMessage?.isLoading && (
                             <div className="mt-4 mb-4">
-                                {(() => {
-                                    const msgB = nextMessage;
-                                    const modelAMatch = msg.content?.match(/\*\*Model A:\s*(.+?)\*\*/);
-                                    const modelBMatch = msgB?.content?.match(/\*\*Model B:\s*(.+?)\*\*/);
-                                    const modelAName = modelAMatch?.[1] || availableModels.find((m: any) => m.id === currentModel)?.name || 'Model A';
-                                    const modelBName = modelBMatch?.[1] || availableModels.find((m: any) => m.id === secondaryModel)?.name || 'Model B';
-
-                                    if (!msgB) {
-                                        return null;
-                                    }
-
-                                    return (
-                                        <React.Suspense fallback={<div className="text-xs text-slate-500">Loading comparison...</div>}>
-                                            <ComparisonGrid
-                                                messageA={msg}
-                                                messageB={msgB}
-                                                modelAName={modelAName}
-                                                modelBName={modelBName}
-                                                onClose={() => setComparisonIndex(null)}
-                                                mcpAvailable={mcpAvailable}
-                                                onInsertToFile={handleInsertToFile}
-                                            />
-                                        </React.Suspense>
-                                    );
-                                })()}
+                                {comparisonDetails && (
+                                    <React.Suspense fallback={<div className="text-xs text-slate-500">Loading comparison...</div>}>
+                                        <ComparisonGrid
+                                            messageA={msg}
+                                            messageB={comparisonDetails.messageB}
+                                            modelAName={comparisonDetails.modelAName}
+                                            modelBName={comparisonDetails.modelBName}
+                                            onClose={() => setComparisonIndex(null)}
+                                            mcpAvailable={mcpAvailable}
+                                            onInsertToFile={handleInsertToFile}
+                                        />
+                                    </React.Suspense>
+                                )}
                             </div>
                         )}
 
@@ -706,7 +777,7 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                             {!msg.isLoading && (
                                 <div className="flex items-center gap-1">
                                     <button
-                                        onClick={() => handleRateMessage(index, 'up')}
+                                        onClick={handleRateUp}
                                         className={`p-1 rounded transition-colors ${messageRating === 'up'
                                             ? 'text-green-500 bg-green-500/20'
                                             : 'text-slate-500 hover:text-green-400 hover:bg-slate-800'
@@ -716,7 +787,7 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                         <ThumbsUp size={12} fill={messageRating === 'up' ? 'currentColor' : 'none'} />
                                     </button>
                                     <button
-                                        onClick={() => handleRateMessage(index, 'down')}
+                                        onClick={handleRateDown}
                                         className={`p-1 rounded transition-colors ${messageRating === 'down'
                                             ? 'text-red-500 bg-red-500/20'
                                             : 'text-slate-500 hover:text-red-400 hover:bg-slate-800'

@@ -249,6 +249,12 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 182: introduce a stable `loadMessageAtIndex` callback in `Chat` and thread it through `ChatMessageRow` so message-content lazy loads no longer create per-render inline range-loader closures.
    - Pass 183: update `MessageContent` lazy-load triggering to keyed, deduped request dispatch (with stable callback signature), preventing repeated load requests for the same message/lazy state transition.
    - Pass 184: pass primitive preview/role props into memoized `SearchResultRow` (instead of full message objects) and add explicit row comparator checks to reduce avoidable rerenders in the search results panel.
+   - Pass 185: extract duplicated assistant `tool_calls` rendering into a memoized `ToolCallsList` component used for both streaming and settled assistant message states.
+   - Pass 186: replace inline comparison-grid setup IIFE with memoized battle-model metadata resolution (`resolveBattleModelName` + row-level `comparisonDetails`) to reduce repeated parse/lookups.
+   - Pass 187: move message syntax classification into lightweight helper logic with a sentinel precheck before heavy regex matching, reducing avoidable regex work for plain text.
+   - Pass 188: force streaming assistant messages down the plain-text rendering path and defer rich-markdown classification until streaming settles.
+   - Pass 189: stabilize chat row hover-action handlers (`copy/delete/edit/regenerate/branch/bookmark/rate`) with memoized callbacks to reduce callback churn inside hot message rows.
+   - Pass 190: add deterministic unit coverage for message render-mode classification and lazy-load request dedupe decision logic via `messageContentSyntax` helper tests.
 
 ## Release Checklist for v3.1.x
 

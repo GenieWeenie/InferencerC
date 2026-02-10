@@ -1,5 +1,10 @@
 import React from 'react';
 import StreamingIndicator from './StreamingIndicator';
+import {
+    getLazyLoadDecision,
+    getMessageRenderMode,
+    isLikelyTruncatedContent,
+} from '../lib/messageContentSyntax';
 
 interface MessageContentProps {
     content: string;
@@ -83,24 +88,18 @@ const MessageContent: React.FC<MessageContentProps> = ({
     }, [content, isStreaming, displayContent.length]);
 
     React.useEffect(() => {
-        const isContentTruncated = content.length > 0 && content.endsWith('...') && content.length <= 103;
-        const shouldAttemptLoad = (isLazyLoaded || isContentTruncated) && typeof messageIndex === 'number';
-
-        if (!shouldAttemptLoad) {
-            lastLoadRequestKeyRef.current = null;
+        const decision = getLazyLoadDecision({
+            content,
+            isLazyLoaded,
+            messageIndex,
+            hasOnLoadContent: Boolean(onLoadContent),
+            isLoadingContent,
+            lastRequestKey: lastLoadRequestKeyRef.current,
+        });
+        lastLoadRequestKeyRef.current = decision.nextRequestKey;
+        if (!decision.shouldDispatch || !onLoadContent || typeof messageIndex !== 'number') {
             return;
         }
-
-        if (!onLoadContent || isLoadingContent) {
-            return;
-        }
-
-        const requestKey = `${messageIndex}:${isLazyLoaded ? 'lazy' : 'normal'}:${isContentTruncated ? 'truncated' : 'full'}`;
-        if (lastLoadRequestKeyRef.current === requestKey) {
-            return;
-        }
-
-        lastLoadRequestKeyRef.current = requestKey;
         setIsLoadingContent(true);
         onLoadContent(messageIndex);
     }, [content, isLazyLoaded, onLoadContent, messageIndex, isLoadingContent]);
@@ -111,7 +110,7 @@ const MessageContent: React.FC<MessageContentProps> = ({
         }
     }, [content, isLoadingContent]);
 
-    const isContentTruncated = content.length > 0 && content.endsWith('...') && content.length <= 103;
+    const isContentTruncated = isLikelyTruncatedContent(content);
     const shouldShowSkeleton = (isLazyLoaded || isContentTruncated) && isLoadingContent;
 
     if (shouldShowSkeleton) {
@@ -144,8 +143,7 @@ const MessageContent: React.FC<MessageContentProps> = ({
         }
     }
 
-    const hasRichSyntax = /(```[\s\S]*?```|~~~[\s\S]*?~~~|\$\$[\s\S]*?\$\$|\\\(|\\\[|\$[^$\n]+\$)/.test(cleanContent);
-    const hasMarkdownSyntax = /(^|\n)\s*(#{1,6}\s|[-*+]\s|\d+\.\s|>\s)|\[.+?\]\(.+?\)|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|(^|\n)\|.+\|/.test(cleanContent);
+    const renderMode = getMessageRenderMode(cleanContent, Boolean(isStreaming));
 
     return (
         <div className={`prose ${isUser ? 'prose-invert' : 'prose-invert'} max-w-none text-sm break-words overflow-wrap-anywhere word-break-break-word`}>
@@ -161,7 +159,7 @@ const MessageContent: React.FC<MessageContentProps> = ({
                 </details>
             )}
 
-            {hasRichSyntax ? (
+            {renderMode === 'rich' ? (
                 <React.Suspense fallback={<PlainTextContent content={cleanContent} />}>
                     <RichMessageContent
                         content={cleanContent}
@@ -170,7 +168,7 @@ const MessageContent: React.FC<MessageContentProps> = ({
                         onInsertToFile={onInsertToFile}
                     />
                 </React.Suspense>
-            ) : hasMarkdownSyntax ? (
+            ) : renderMode === 'markdown' ? (
                 <React.Suspense fallback={<PlainTextContent content={cleanContent} />}>
                     <MarkdownMessageContent content={cleanContent} />
                 </React.Suspense>
