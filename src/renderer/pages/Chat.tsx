@@ -2596,7 +2596,7 @@ const Chat: React.FC = () => {
                                                 onInsertToFile={handleInsertToFile}
                                                 isStreaming={true}
                                                 isLazyLoaded={!loadedMessageIndices.has(index)}
-                                                onLoadContent={() => loadMessageRange(index, index, history)}
+                                                onLoadContent={() => loadMessageRange(index, index)}
                                                 messageIndex={index}
                                             />
                                         </React.Suspense>
@@ -2632,7 +2632,7 @@ const Chat: React.FC = () => {
                                                     mcpAvailable={mcpAvailable}
                                                     onInsertToFile={handleInsertToFile}
                                                     isLazyLoaded={!loadedMessageIndices.has(index)}
-                                                    onLoadContent={() => loadMessageRange(index, index, history)}
+                                                    onLoadContent={() => loadMessageRange(index, index)}
                                                     messageIndex={index}
                                                 />
                                             </React.Suspense>
@@ -2790,7 +2790,7 @@ const Chat: React.FC = () => {
                                             mcpAvailable={mcpAvailable}
                                             onInsertToFile={handleInsertToFile}
                                             isLazyLoaded={!loadedMessageIndices.has(index)}
-                                            onLoadContent={() => loadMessageRange(index, index, history)}
+                                            onLoadContent={() => loadMessageRange(index, index)}
                                             messageIndex={index}
                                         />
                                     </React.Suspense>

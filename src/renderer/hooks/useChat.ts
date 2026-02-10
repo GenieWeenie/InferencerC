@@ -795,8 +795,26 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         });
     };
 
+    const resolveLazyLoadSourceMessages = (): ChatMessage[] => {
+        if (sessionId && loadedSessionIdRef.current === sessionId && loadedSessionMessagesRef.current.length > 0) {
+            return loadedSessionMessagesRef.current;
+        }
+
+        if (sessionId) {
+            const session = HistoryService.getSession(sessionId);
+            if (session && session.messages.length > 0) {
+                loadedSessionIdRef.current = sessionId;
+                loadedSessionMessagesRef.current = session.messages;
+                return session.messages;
+            }
+        }
+
+        return history;
+    };
+
     // Lazy loading: Load message content on demand
-    const loadMessageContent = (indices: number[], allMessages: ChatMessage[]) => {
+    const loadMessageContent = (indices: number[]) => {
+        const allMessages = resolveLazyLoadSourceMessages();
         const newCache = new Map(fullMessageCache);
         const newLoadedIndices = new Set(loadedMessageIndices);
 
@@ -813,7 +831,8 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     };
 
     // Load a range of messages (for scrolling/pagination)
-    const loadMessageRange = (startIndex: number, endIndex: number, allMessages: ChatMessage[]) => {
+    const loadMessageRange = (startIndex: number, endIndex: number) => {
+        const allMessages = resolveLazyLoadSourceMessages();
         const indicesToLoad: number[] = [];
         for (let i = startIndex; i <= Math.min(endIndex, allMessages.length - 1); i++) {
             if (!loadedMessageIndices.has(i)) {
@@ -821,7 +840,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             }
         }
         if (indicesToLoad.length > 0) {
-            loadMessageContent(indicesToLoad, allMessages);
+            loadMessageContent(indicesToLoad);
         }
     };
 

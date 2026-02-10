@@ -239,6 +239,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 172: replace full-map keyword sort pipelines in both sync search and search worker with bounded top-k selection helpers, keeping output identical while reducing allocation/sort overhead.
    - Pass 173: add explicit benchmark command `npm run benchmark:search-index` backed by `__tests__/searchIndexBenchmark.bench.ts` for repeatable optimization baselines.
    - Pass 174: add search-index benchmark report helpers (`formatSearchIndexBenchmarkReport`, `saveSearchIndexBenchmarkReport`) to persist JSON snapshots for before/after pass comparisons.
+   - Pass 175: fix chat lazy-message hydration to load full message content from authoritative session snapshots/cache (instead of truncated `history` placeholders), ensuring on-demand expansion restores complete messages.
 
 ## Release Checklist for v3.1.x
 
