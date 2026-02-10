@@ -173,3 +173,66 @@ export const buildUpdatedMessageContent = ({
         choices: nextChoices,
     };
 };
+
+export const buildChoiceSelectionUpdate = (
+    existing: ChatMessage,
+    choiceIndex: number
+): ChatMessage | null => {
+    if (!existing.choices || !existing.choices[choiceIndex]) {
+        return null;
+    }
+
+    const selectedChoice = existing.choices[choiceIndex];
+    const nextContent = selectedChoice.message.content;
+    const currentSelectedIndex = existing.selectedChoiceIndex || 0;
+
+    const hasChanges = !(
+        currentSelectedIndex === choiceIndex &&
+        existing.content === nextContent
+    );
+
+    if (!hasChanges) {
+        return null;
+    }
+
+    return {
+        ...existing,
+        selectedChoiceIndex: choiceIndex,
+        content: nextContent,
+    };
+};
+
+export const buildTokenEditUpdate = (
+    existing: ChatMessage,
+    tokenIndex: number,
+    newToken: string
+): { updatedMessage: ChatMessage; updatedToken: TokenLogprob } | null => {
+    const currentChoice = existing.choices?.[0];
+    const currentLogprobs = currentChoice?.logprobs?.content;
+    if (!currentChoice || !currentLogprobs || !currentLogprobs[tokenIndex]) {
+        return null;
+    }
+
+    if (currentLogprobs[tokenIndex].token === newToken) {
+        return null;
+    }
+
+    const nextLogprobs = [...currentLogprobs];
+    nextLogprobs[tokenIndex] = { ...nextLogprobs[tokenIndex], token: newToken };
+    const nextContent = nextLogprobs.map((lp) => lp.token).join('');
+
+    const updatedMessage: ChatMessage = {
+        ...existing,
+        content: nextContent,
+        choices: [{
+            ...currentChoice,
+            message: { ...currentChoice.message, content: nextContent },
+            logprobs: { content: nextLogprobs },
+        }],
+    };
+
+    return {
+        updatedMessage,
+        updatedToken: nextLogprobs[tokenIndex],
+    };
+};

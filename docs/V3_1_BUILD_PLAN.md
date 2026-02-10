@@ -261,6 +261,12 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 194: add guarded lazy-load patching in `useChat` (`collectMessageIndicesToLoad`, `buildMessageLoadPatch`) so message-cache/index state updates are skipped when no new messages are loaded.
    - Pass 195: add message patch no-op guard in `useChat` via `buildUpdatedMessageContent`, skipping redundant history/cache writes when streaming updates are semantically unchanged.
    - Pass 196: add deterministic unit coverage for chat state-guard helpers (`chatStateGuards`) covering load-range patching and message-content no-op/update behavior.
+   - Pass 197: convert chat-level message action handlers (edit/save/cancel/regenerate/branch) to stable callbacks using latest-state refs + functional updates, reducing handler identity churn feeding row renders.
+   - Pass 198: stabilize `useChat` hot-path action identities (`loadMessageContent`, `loadMessageRange`, `deleteMessage`, `selectChoice`, `updateMessageContent`, `updateMessageToken`) with callback wrappers and state refs to limit avoidable re-renders.
+   - Pass 199: add explicit no-op guards for choice-selection and token-edit updates (via `buildChoiceSelectionUpdate` / `buildTokenEditUpdate`) so unchanged edits skip history/cache writes.
+   - Pass 200: optimize in-chat search matching by memoizing normalized message-content strings and reusing them during debounced query scans.
+   - Pass 201: reduce streaming tool-call update overhead in `useChat.streamResponse` by replacing per-iteration `Object.keys/Object.values` allocation with dirty-flagged cached tool-call flushes.
+   - Pass 202: expand deterministic state-guard unit coverage for choice/token no-op/update flows alongside existing cache patch tests.
 
 ## Release Checklist for v3.1.x
 

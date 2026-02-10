@@ -4,7 +4,9 @@ import { ChatResponse, Message, TokenLogprob, Model, ChatMessage, ChatSession, T
 import { HistoryService } from '../services/history';
 import { simulateLogprobs, detectIntent, findBestModelForIntent } from '../lib/chatUtils';
 import {
+    buildChoiceSelectionUpdate,
     buildMessageLoadPatch,
+    buildTokenEditUpdate,
     buildUpdatedMessageContent,
     collectMessageIndicesToLoad,
 } from '../lib/chatStateGuards';
@@ -217,6 +219,26 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     });
 
     const [openRouterApiKey, setOpenRouterApiKey] = useState<string | null>(null);
+    const historyRef = useRef<ChatMessage[]>([]);
+    const loadedMessageIndicesRef = useRef<Set<number>>(new Set());
+    const fullMessageCacheRef = useRef<Map<number, ChatMessage>>(new Map());
+    const selectedTokenRef = useRef<SelectedTokenContext | null>(null);
+
+    useEffect(() => {
+        historyRef.current = history;
+    }, [history]);
+
+    useEffect(() => {
+        loadedMessageIndicesRef.current = loadedMessageIndices;
+    }, [loadedMessageIndices]);
+
+    useEffect(() => {
+        fullMessageCacheRef.current = fullMessageCache;
+    }, [fullMessageCache]);
+
+    useEffect(() => {
+        selectedTokenRef.current = selectedToken;
+    }, [selectedToken]);
 
     const logComplianceEvent = useCallback((event: any) => {
         void loadEnterpriseComplianceService()
@@ -800,7 +822,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         });
     };
 
-    const resolveLazyLoadSourceMessages = (): ChatMessage[] => {
+    const resolveLazyLoadSourceMessages = useCallback((): ChatMessage[] => {
         if (sessionId && loadedSessionIdRef.current === sessionId && loadedSessionMessagesRef.current.length > 0) {
             return loadedSessionMessagesRef.current;
         }
@@ -814,34 +836,41 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             }
         }
 
-        return history;
-    };
+        return historyRef.current;
+    }, [sessionId]);
 
     // Lazy loading: Load message content on demand
-    const loadMessageContent = (indices: number[]) => {
+    const loadMessageContent = useCallback((indices: number[]) => {
         const allMessages = resolveLazyLoadSourceMessages();
-        const patch = buildMessageLoadPatch(allMessages, loadedMessageIndices, fullMessageCache, indices);
+        const patch = buildMessageLoadPatch(
+            allMessages,
+            loadedMessageIndicesRef.current,
+            fullMessageCacheRef.current,
+            indices
+        );
         if (!patch) {
             return;
         }
 
+        loadedMessageIndicesRef.current = patch.nextLoadedMessageIndices;
+        fullMessageCacheRef.current = patch.nextFullMessageCache;
         setFullMessageCache(patch.nextFullMessageCache);
         setLoadedMessageIndices(patch.nextLoadedMessageIndices);
-    };
+    }, [resolveLazyLoadSourceMessages]);
 
     // Load a range of messages (for scrolling/pagination)
-    const loadMessageRange = (startIndex: number, endIndex: number) => {
+    const loadMessageRange = useCallback((startIndex: number, endIndex: number) => {
         const allMessages = resolveLazyLoadSourceMessages();
         const indicesToLoad = collectMessageIndicesToLoad(
             startIndex,
             endIndex,
             allMessages.length,
-            loadedMessageIndices
+            loadedMessageIndicesRef.current
         );
         if (indicesToLoad.length > 0) {
             loadMessageContent(indicesToLoad);
         }
-    };
+    }, [loadMessageContent, resolveLazyLoadSourceMessages]);
 
     const executeWebFetch = async () => {
         if (!urlInput) { setShowUrlInput(false); return; }
@@ -883,59 +912,87 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         }
     };
 
-    const deleteMessage = (index: number) => {
-        const newHistory = history.slice(0, index);
-        setHistory(newHistory);
+    const deleteMessage = useCallback((index: number) => {
+        const currentHistory = historyRef.current;
+        if (index < 0 || index >= currentHistory.length) {
+            return;
+        }
+
+        setHistory((prev) => {
+            if (index < 0 || index >= prev.length) return prev;
+            const nextHistory = prev.slice(0, index);
+            historyRef.current = nextHistory;
+            return nextHistory;
+        });
+        selectedTokenRef.current = null;
         setSelectedToken(null);
 
         // Clean up lazy loading cache - remove entries for deleted messages
-        setFullMessageCache(cache => {
+        setFullMessageCache((cache) => {
+            let changed = false;
             const newCache = new Map(cache);
-            // Remove all entries >= index
-            for (let i = index; i < history.length; i++) {
-                newCache.delete(i);
+            for (let i = index; i < currentHistory.length; i += 1) {
+                if (newCache.delete(i)) {
+                    changed = true;
+                }
             }
+            if (!changed) return cache;
+            fullMessageCacheRef.current = newCache;
             return newCache;
         });
 
-        setLoadedMessageIndices(indices => {
+        setLoadedMessageIndices((indices) => {
+            let changed = false;
             const newIndices = new Set(indices);
-            // Remove all indices >= index
-            for (let i = index; i < history.length; i++) {
-                newIndices.delete(i);
+            for (let i = index; i < currentHistory.length; i += 1) {
+                if (newIndices.delete(i)) {
+                    changed = true;
+                }
             }
+            if (!changed) return indices;
+            loadedMessageIndicesRef.current = newIndices;
             return newIndices;
         });
-    };
+    }, []);
 
-    const selectChoice = (messageIndex: number, choiceIndex: number) => {
-        setHistory(prev => {
+    const selectChoice = useCallback((messageIndex: number, choiceIndex: number) => {
+        let updatedMessage: ChatMessage | null = null;
+        setHistory((prev) => {
+            const targetMsg = prev[messageIndex];
+            if (!targetMsg) return prev;
+
+            updatedMessage = buildChoiceSelectionUpdate(targetMsg, choiceIndex);
+            if (!updatedMessage) {
+                return prev;
+            }
+
             const newHistory = [...prev];
-            const targetMsg = newHistory[messageIndex];
-            if (!targetMsg || !targetMsg.choices || !targetMsg.choices[choiceIndex]) return prev;
-
-            const updatedMessage: ChatMessage = {
-                ...targetMsg,
-                selectedChoiceIndex: choiceIndex,
-                content: targetMsg.choices[choiceIndex].message.content
-            };
             newHistory[messageIndex] = updatedMessage;
-
-            // Update cache for lazy loading
-            setFullMessageCache(cache => {
-                const newCache = new Map(cache);
-                newCache.set(messageIndex, updatedMessage);
-                return newCache;
-            });
-
+            historyRef.current = newHistory;
             return newHistory;
         });
+
+        if (!updatedMessage) {
+            return;
+        }
+
+        setFullMessageCache((cache) => {
+            if (cache.get(messageIndex) === updatedMessage) {
+                return cache;
+            }
+            const newCache = new Map(cache);
+            newCache.set(messageIndex, updatedMessage);
+            fullMessageCacheRef.current = newCache;
+            return newCache;
+        });
+
+        selectedTokenRef.current = null;
         setSelectedToken(null);
-    };
+    }, []);
 
 
 
-    const updateMessageContent = (index: number, content: string, isLoading: boolean, logprobs?: TokenLogprob[], generationTime?: number, toolCalls?: ToolCall[]) => {
+    const updateMessageContent = useCallback((index: number, content: string, isLoading: boolean, logprobs?: TokenLogprob[], generationTime?: number, toolCalls?: ToolCall[]) => {
         setHistory(prev => {
             const newHistory = [...prev];
             if (!newHistory[index]) return prev;
@@ -953,6 +1010,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                 return prev;
             }
             newHistory[index] = updatedMessage;
+            historyRef.current = newHistory;
 
             // Update cache for lazy loading
             setFullMessageCache(cache => {
@@ -961,51 +1019,52 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                 }
                 const newCache = new Map(cache);
                 newCache.set(index, updatedMessage);
+                fullMessageCacheRef.current = newCache;
                 return newCache;
             });
 
             return newHistory;
         });
-    };
+    }, []);
 
-    const updateMessageToken = (messageIndex: number, tokenIndex: number, newToken: string) => {
+    const updateMessageToken = useCallback((messageIndex: number, tokenIndex: number, newToken: string) => {
+        let tokenUpdate: { updatedMessage: ChatMessage; updatedToken: TokenLogprob } | null = null;
         setHistory(prev => {
             const newHistory = [...prev];
             const msg = newHistory[messageIndex];
-            if (!msg || !msg.choices?.[0]?.logprobs?.content) return prev;
+            if (!msg) return prev;
 
-            const newLogprobs = [...msg.choices[0].logprobs.content];
-            newLogprobs[tokenIndex] = { ...newLogprobs[tokenIndex], token: newToken };
+            tokenUpdate = buildTokenEditUpdate(msg, tokenIndex, newToken);
+            if (!tokenUpdate) return prev;
 
-            const newContent = newLogprobs.map(lp => lp.token).join('');
-
-            const updatedMessage: ChatMessage = {
-                ...msg,
-                content: newContent,
-                choices: [{
-                    ...msg.choices[0],
-                    message: { ...msg.choices[0].message, content: newContent },
-                    logprobs: { content: newLogprobs }
-                }]
-            };
-
-            newHistory[messageIndex] = updatedMessage;
+            newHistory[messageIndex] = tokenUpdate.updatedMessage;
+            historyRef.current = newHistory;
 
             // Update cache for lazy loading
             setFullMessageCache(cache => {
+                if (cache.get(messageIndex) === tokenUpdate?.updatedMessage) {
+                    return cache;
+                }
                 const newCache = new Map(cache);
-                newCache.set(messageIndex, updatedMessage);
+                newCache.set(messageIndex, tokenUpdate!.updatedMessage);
+                fullMessageCacheRef.current = newCache;
                 return newCache;
             });
 
-            // Also update selected token if it matches
-            if (selectedToken && selectedToken.messageIndex === messageIndex && selectedToken.tokenIndex === tokenIndex) {
-                setSelectedToken({ ...selectedToken, logprob: newLogprobs[tokenIndex] });
-            }
-
             return newHistory;
         });
-    };
+        if (!tokenUpdate) {
+            return;
+        }
+        setSelectedToken((prevSelectedToken) => {
+            if (!prevSelectedToken || prevSelectedToken.messageIndex !== messageIndex || prevSelectedToken.tokenIndex !== tokenIndex) {
+                return prevSelectedToken;
+            }
+            const nextSelectedToken = { ...prevSelectedToken, logprob: tokenUpdate.updatedToken };
+            selectedTokenRef.current = nextSelectedToken;
+            return nextSelectedToken;
+        });
+    }, []);
 
     const deriveSessionTitleFromMessages = (messages: ChatMessage[]): string => {
         const firstUserMessage = messages.find(
@@ -1116,7 +1175,18 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                 let streamBuffer = '';
                 let lastUpdate = Date.now();
 
-                let toolCallsBuffer: Record<number, any> = {};
+                let toolCallsBuffer: Record<number, ToolCall> = {};
+                let toolCallsDirty = false;
+                let cachedToolCalls: ToolCall[] = [];
+
+                const flushToolCalls = () => {
+                    if (!toolCallsDirty) return;
+                    cachedToolCalls = Object.keys(toolCallsBuffer)
+                        .map((key) => Number(key))
+                        .sort((a, b) => a - b)
+                        .map((index) => toolCallsBuffer[index]);
+                    toolCallsDirty = false;
+                };
 
                 while (!done) {
                     const { value, done: isDone } = await reader.read();
@@ -1147,10 +1217,20 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                                                         type: 'function',
                                                         function: { name: tc.function?.name || '', arguments: '' }
                                                     };
+                                                    toolCallsDirty = true;
                                                 }
-                                                if (tc.id) toolCallsBuffer[idx].id = tc.id;
-                                                if (tc.function?.name) toolCallsBuffer[idx].function.name += tc.function.name;
-                                                if (tc.function?.arguments) toolCallsBuffer[idx].function.arguments += tc.function.arguments;
+                                                if (tc.id && toolCallsBuffer[idx].id !== tc.id) {
+                                                    toolCallsBuffer[idx].id = tc.id;
+                                                    toolCallsDirty = true;
+                                                }
+                                                if (tc.function?.name) {
+                                                    toolCallsBuffer[idx].function.name += tc.function.name;
+                                                    toolCallsDirty = true;
+                                                }
+                                                if (tc.function?.arguments) {
+                                                    toolCallsBuffer[idx].function.arguments += tc.function.arguments;
+                                                    toolCallsDirty = true;
+                                                }
                                             }
                                         }
                                     }
@@ -1161,21 +1241,29 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
                     const now = Date.now();
                     // Optimize: Update more frequently for better UX, but batch small updates
-                    const toolCallsKeys = Object.keys(toolCallsBuffer);
                     const shouldUpdate = (
                         done ||
                         buffer.length > 50 ||
-                        toolCallsKeys.length > 0 && (now - lastUpdate > 100) ||
-                        (now - lastUpdate > 100 && buffer.length > 0)
+                        (toolCallsDirty && (now - lastUpdate > 100)) ||
+                        ((now - lastUpdate > 100) && buffer.length > 0)
                     );
                     if (shouldUpdate) {
+                        flushToolCalls();
                         fullContent += buffer;
                         buffer = '';
                         lastUpdate = now;
-                        updateMessageContent(targetIndex, fullContent, !done, undefined, undefined, Object.values(toolCallsBuffer));
+                        updateMessageContent(
+                            targetIndex,
+                            fullContent,
+                            !done,
+                            undefined,
+                            undefined,
+                            cachedToolCalls.length > 0 ? cachedToolCalls : undefined
+                        );
                     }
                 }
-                const completedToolCalls = Object.values(toolCallsBuffer) as ToolCall[];
+                flushToolCalls();
+                const completedToolCalls = cachedToolCalls;
                 if (completedToolCalls.length > 0) {
                     finalToolCalls = completedToolCalls;
                 }

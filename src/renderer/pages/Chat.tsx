@@ -2430,6 +2430,10 @@ const Chat: React.FC = () => {
 
         return () => clearTimeout(timer);
     }, [searchQuery]);
+    const searchableMessageContent = React.useMemo(
+        () => history.map((msg) => (typeof msg.content === 'string' ? msg.content.toLowerCase() : '')),
+        [history]
+    );
 
     // Search within chat
     React.useEffect(() => {
@@ -2442,15 +2446,15 @@ const Chat: React.FC = () => {
         const query = debouncedSearchQuery.toLowerCase();
         const matches: number[] = [];
 
-        history.forEach((msg, index) => {
-            if (msg.content && msg.content.toLowerCase().includes(query)) {
+        searchableMessageContent.forEach((content, index) => {
+            if (content.includes(query)) {
                 matches.push(index);
             }
         });
 
         setSearchResults(matches);
         setCurrentSearchIndex(0);
-    }, [debouncedSearchQuery, history]);
+    }, [debouncedSearchQuery, searchableMessageContent]);
 
     // Navigate to specific search result
     const navigateToSearchResult = React.useCallback((resultIndex: number) => {
@@ -2524,79 +2528,124 @@ const Chat: React.FC = () => {
             setIsLoadingMessages(false);
         }, 300);
     }, [loadSession]);
+    const latestMessageActionsRef = React.useRef({
+        history,
+        sessionId,
+        currentModel,
+        expertMode,
+        thinkingEnabled,
+        editedMessageContent,
+        sendMessageWithContext,
+    });
+
+    React.useEffect(() => {
+        latestMessageActionsRef.current = {
+            history,
+            sessionId,
+            currentModel,
+            expertMode,
+            thinkingEnabled,
+            editedMessageContent,
+            sendMessageWithContext,
+        };
+    }, [
+        history,
+        sessionId,
+        currentModel,
+        expertMode,
+        thinkingEnabled,
+        editedMessageContent,
+        sendMessageWithContext,
+    ]);
 
     // Message Actions Handlers
-    const handleEditMessage = (index: number) => {
-        const message = history[index];
+    const handleEditMessage = React.useCallback((index: number) => {
+        const message = latestMessageActionsRef.current.history[index];
         if (message && message.role === 'user') {
             setEditingMessageIndex(index);
             setEditedMessageContent(message.content || '');
         }
-    };
+    }, []);
 
-    const handleSaveEdit = (index: number) => {
-        if (editedMessageContent.trim() === '') {
+    const handleSaveEdit = React.useCallback((index: number) => {
+        const editContent = latestMessageActionsRef.current.editedMessageContent;
+        if (editContent.trim() === '') {
             toast.error('Message cannot be empty');
             return;
         }
 
-        // Update the message content
-        const newHistory = [...history];
-        newHistory[index] = {
-            ...newHistory[index],
-            content: editedMessageContent
-        };
+        let updated = false;
+        setHistory((prev) => {
+            if (!prev[index]) return prev;
+            const newHistory = [...prev];
+            newHistory[index] = {
+                ...newHistory[index],
+                content: editContent,
+            };
+            updated = true;
+            return newHistory.slice(0, index + 1);
+        });
 
-        // Remove all messages after this one (since we're re-prompting)
-        const updatedHistory = newHistory.slice(0, index + 1);
-        setHistory(updatedHistory);
+        if (!updated) {
+            return;
+        }
 
-        // Clear editing state
         setEditingMessageIndex(null);
         setEditedMessageContent('');
-
-        // Re-send the message
         toast.success('Message updated. Regenerating response...');
 
-        // Trigger regeneration
         setTimeout(() => {
-            sendMessageWithContext();
+            void latestMessageActionsRef.current.sendMessageWithContext();
         }, 100);
-    };
+    }, [setHistory, setEditedMessageContent]);
 
-    const handleCancelEdit = () => {
+    const handleCancelEdit = React.useCallback(() => {
         setEditingMessageIndex(null);
         setEditedMessageContent('');
-    };
+    }, [setEditedMessageContent]);
 
-    const handleRegenerateResponse = (index: number) => {
-        // Remove all messages after and including this assistant message
-        const newHistory = history.slice(0, index);
-        setHistory(newHistory);
+    const handleRegenerateResponse = React.useCallback((index: number) => {
+        let updated = false;
+        setHistory((prev) => {
+            if (index < 0 || index > prev.length) return prev;
+            updated = true;
+            return prev.slice(0, index);
+        });
 
-        // Re-send to get a new response
+        if (!updated) {
+            return;
+        }
+
         toast.info('Regenerating response...');
         setTimeout(() => {
-            sendMessageWithContext();
+            void latestMessageActionsRef.current.sendMessageWithContext();
         }, 100);
-    };
+    }, [setHistory]);
 
-    const handleBranchConversation = (index: number) => {
+    const handleBranchConversation = React.useCallback((index: number) => {
+        const {
+            history: currentHistory,
+            sessionId: currentSessionId,
+            currentModel: currentModelId,
+            expertMode: currentExpertMode,
+            thinkingEnabled: currentThinkingEnabled,
+        } = latestMessageActionsRef.current;
+
         // Create a new session with history up to this point
-        const branchHistory = history.slice(0, index + 1);
+        const branchHistory = currentHistory.slice(0, index + 1);
 
         // Create new session ID
         const newSessionId = `session-${Date.now()}`;
 
         // Save current session first
         const currentSession = {
-            id: sessionId,
+            id: currentSessionId,
             title: `Chat ${new Date().toLocaleDateString()}`,
             lastModified: Date.now(),
-            modelId: currentModel,
-            messages: history,
-            expertMode,
-            thinkingEnabled
+            modelId: currentModelId,
+            messages: currentHistory,
+            expertMode: currentExpertMode,
+            thinkingEnabled: currentThinkingEnabled
         };
 
         // Create branched session
@@ -2604,17 +2653,17 @@ const Chat: React.FC = () => {
             id: newSessionId,
             title: `Branch from ${new Date().toLocaleDateString()}`,
             lastModified: Date.now(),
-            modelId: currentModel,
+            modelId: currentModelId,
             messages: branchHistory,
-            expertMode,
-            thinkingEnabled
+            expertMode: currentExpertMode,
+            thinkingEnabled: currentThinkingEnabled
         };
 
         // Save both sessions to localStorage
         try {
             const sessions = JSON.parse(localStorage.getItem('app_chat_sessions') || '[]');
             const updatedSessions = sessions.map((s: any) =>
-                s.id === sessionId ? currentSession : s
+                s.id === currentSessionId ? currentSession : s
             );
             updatedSessions.push(branchedSession);
             localStorage.setItem('app_chat_sessions', JSON.stringify(updatedSessions));
@@ -2625,7 +2674,7 @@ const Chat: React.FC = () => {
         } catch (err) {
             toast.error('Failed to branch conversation');
         }
-    };
+    }, [handleLoadSession]);
 
     const executeChatCompletion = React.useCallback(async (params: {
         prompt: string;

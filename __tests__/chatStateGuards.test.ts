@@ -1,7 +1,9 @@
 import { ChatMessage, ToolCall } from '../src/shared/types';
 import {
   areToolCallsEquivalent,
+  buildChoiceSelectionUpdate,
   buildMessageLoadPatch,
+  buildTokenEditUpdate,
   buildUpdatedMessageContent,
   collectMessageIndicesToLoad,
 } from '../src/renderer/lib/chatStateGuards';
@@ -103,6 +105,85 @@ describe('chatStateGuards', () => {
       expect(next!.content).toBe('new');
       expect(next!.isLoading).toBe(false);
       expect(next!.generationTime).toBe(120);
+    });
+  });
+
+  describe('buildChoiceSelectionUpdate', () => {
+    it('returns null when selected choice would not change content/index', () => {
+      const existing: ChatMessage = {
+        role: 'assistant',
+        content: 'choice-a',
+        selectedChoiceIndex: 0,
+        choices: [
+          { index: 0, message: { role: 'assistant', content: 'choice-a' } },
+          { index: 1, message: { role: 'assistant', content: 'choice-b' } },
+        ],
+      };
+
+      const next = buildChoiceSelectionUpdate(existing, 0);
+      expect(next).toBeNull();
+    });
+
+    it('returns updated message when selecting a different valid choice', () => {
+      const existing: ChatMessage = {
+        role: 'assistant',
+        content: 'choice-a',
+        selectedChoiceIndex: 0,
+        choices: [
+          { index: 0, message: { role: 'assistant', content: 'choice-a' } },
+          { index: 1, message: { role: 'assistant', content: 'choice-b' } },
+        ],
+      };
+
+      const next = buildChoiceSelectionUpdate(existing, 1);
+      expect(next).not.toBeNull();
+      expect(next!.selectedChoiceIndex).toBe(1);
+      expect(next!.content).toBe('choice-b');
+    });
+  });
+
+  describe('buildTokenEditUpdate', () => {
+    it('returns null for no-op token edits', () => {
+      const existing: ChatMessage = {
+        role: 'assistant',
+        content: 'Hello',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'Hello' },
+          logprobs: {
+            content: [
+              { token: 'Hel', logprob: -0.1 },
+              { token: 'lo', logprob: -0.2 },
+            ],
+          },
+        }],
+      };
+
+      const next = buildTokenEditUpdate(existing, 1, 'lo');
+      expect(next).toBeNull();
+    });
+
+    it('returns updated message and token for meaningful edits', () => {
+      const existing: ChatMessage = {
+        role: 'assistant',
+        content: 'Hello',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'Hello' },
+          logprobs: {
+            content: [
+              { token: 'Hel', logprob: -0.1 },
+              { token: 'lo', logprob: -0.2 },
+            ],
+          },
+        }],
+      };
+
+      const next = buildTokenEditUpdate(existing, 1, 'LA');
+      expect(next).not.toBeNull();
+      expect(next!.updatedToken.token).toBe('LA');
+      expect(next!.updatedMessage.content).toBe('HelLA');
+      expect(next!.updatedMessage.choices?.[0].message.content).toBe('HelLA');
     });
   });
 });
