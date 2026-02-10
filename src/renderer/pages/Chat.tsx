@@ -416,18 +416,21 @@ interface ChatMessageRowProps {
     index: number;
     msg: any;
     isLoadingMessages: boolean;
-    searchResults: number[];
-    currentSearchIndex: number;
-    history: any[];
-    comparisonIndex: number | null;
-    bookmarkedMessages: Set<number>;
+    isSearchResult: boolean;
+    isCurrentSearchResult: boolean;
+    isLastMessage: boolean;
+    previousMessage: any | null;
+    nextMessage: any | null;
+    isShowingComparison: boolean;
+    isComparisonPartnerHidden: boolean;
+    isBookmarked: boolean;
     deleteMessage: (index: number) => void;
     handleEditMessage: (index: number) => void;
     handleRegenerateResponse: (index: number) => void;
     handleBranchConversation: (index: number) => void;
     mcpAvailable: boolean;
     handleInsertToFile: (code: string, language: string, filePath: string) => void;
-    selectedToken: any;
+    selectedTokenForMessage: any;
     setSelectedToken: (value: any) => void;
     setActiveTab: (value: 'inspector' | 'controls' | 'prompts' | 'documents') => void;
     setComparisonIndex: React.Dispatch<React.SetStateAction<number | null>>;
@@ -435,7 +438,8 @@ interface ChatMessageRowProps {
     currentModel: string;
     secondaryModel: string;
     handleRateMessage: (index: number, rating: 'up' | 'down') => void;
-    messageRatings: Record<number, 'up' | 'down'>;
+    messageRating?: 'up' | 'down';
+    showInspector: boolean;
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
     setInput: React.Dispatch<React.SetStateAction<string>>;
     editingMessageIndex: number | null;
@@ -447,7 +451,7 @@ interface ChatMessageRowProps {
     toggleBookmark: (index: number) => void;
     conversationFontSize: number;
     isCompactViewport: boolean;
-    loadedMessageIndices: Set<number>;
+    isLazyLoaded: boolean;
     loadMessageRange: (startIndex: number, endIndex: number) => void;
 }
 
@@ -455,18 +459,21 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
     index,
     msg,
     isLoadingMessages,
-    searchResults,
-    currentSearchIndex,
-    history,
-    comparisonIndex,
-    bookmarkedMessages,
+    isSearchResult,
+    isCurrentSearchResult,
+    isLastMessage,
+    previousMessage,
+    nextMessage,
+    isShowingComparison,
+    isComparisonPartnerHidden,
+    isBookmarked,
     deleteMessage,
     handleEditMessage,
     handleRegenerateResponse,
     handleBranchConversation,
     mcpAvailable,
     handleInsertToFile,
-    selectedToken,
+    selectedTokenForMessage,
     setSelectedToken,
     setActiveTab,
     setComparisonIndex,
@@ -474,7 +481,8 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
     currentModel,
     secondaryModel,
     handleRateMessage,
-    messageRatings,
+    messageRating,
+    showInspector,
     textareaRef,
     setInput,
     editingMessageIndex,
@@ -486,35 +494,30 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
     toggleBookmark,
     conversationFontSize,
     isCompactViewport,
-    loadedMessageIndices,
+    isLazyLoaded,
     loadMessageRange,
 }) => {
     if (isLoadingMessages) {
         return <MessageSkeleton isUser={index % 2 === 0} />;
     }
 
-    const isSearchResult = searchResults.includes(index);
-    const isCurrentSearchResult = searchResults[currentSearchIndex] === index;
-    const isLastMessage = index === history.length - 1;
     const activeChoice = msg.choices?.[msg.selectedChoiceIndex || 0];
     const currentLogprobs = activeChoice?.logprobs?.content || [];
     const hasLogprobs = Array.isArray(currentLogprobs) && currentLogprobs.length > 0;
     const showMissingLogprobsWarning = msg.role === 'assistant' && !hasLogprobs && isLastMessage;
 
     const isBattleModePair = msg.role === 'assistant' &&
-        index < history.length - 1 &&
-        history[index + 1]?.role === 'assistant' &&
+        Boolean(nextMessage) &&
+        nextMessage?.role === 'assistant' &&
         msg.content?.includes('Model A:') &&
-        history[index + 1].content?.includes('Model B:');
-
-    const isShowingComparison = comparisonIndex === index;
+        nextMessage?.content?.includes('Model B:');
 
     const isSecondInBattlePair = msg.role === 'assistant' &&
-        index > 0 &&
-        history[index - 1]?.role === 'assistant' &&
-        history[index - 1].content?.includes('Model A:') &&
+        Boolean(previousMessage) &&
+        previousMessage?.role === 'assistant' &&
+        previousMessage?.content?.includes('Model A:') &&
         msg.content?.includes('Model B:') &&
-        comparisonIndex === index - 1;
+        isComparisonPartnerHidden;
 
     if (isSecondInBattlePair) {
         return null;
@@ -538,13 +541,13 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                 <div className="absolute top-2 right-2 flex items-center gap-1.5 rounded-xl border border-slate-700/70 bg-slate-900/85 px-1 py-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto transition-opacity z-20 backdrop-blur-sm">
                     <button
                         onClick={() => toggleBookmark(index)}
-                        className={`h-8 w-8 rounded-lg text-white flex items-center justify-center shadow-sm cursor-pointer transition-colors ${bookmarkedMessages.has(index)
+                        className={`h-8 w-8 rounded-lg text-white flex items-center justify-center shadow-sm cursor-pointer transition-colors ${isBookmarked
                             ? 'bg-yellow-500 hover:bg-yellow-600'
                             : 'bg-slate-700/90 hover:bg-slate-600'
                             }`}
-                        title={bookmarkedMessages.has(index) ? 'Remove bookmark' : 'Bookmark message'}
+                        title={isBookmarked ? 'Remove bookmark' : 'Bookmark message'}
                     >
-                        <Star size={12} fill={bookmarkedMessages.has(index) ? 'currentColor' : 'none'} />
+                        <Star size={12} fill={isBookmarked ? 'currentColor' : 'none'} />
                     </button>
                     <React.Suspense fallback={null}>
                         <MessageActionsMenu
@@ -589,7 +592,7 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                             mcpAvailable={mcpAvailable}
                                             onInsertToFile={handleInsertToFile}
                                             isStreaming={true}
-                                            isLazyLoaded={!loadedMessageIndices.has(index)}
+                                            isLazyLoaded={isLazyLoaded}
                                             onLoadContent={() => loadMessageRange(index, index)}
                                             messageIndex={index}
                                         />
@@ -621,13 +624,13 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                         <React.Suspense fallback={<div className="text-xs text-slate-500">Rendering response...</div>}>
                                             <MessageContent
                                                 content={msg.content || ""}
-                                                isUser={false}
-                                                mcpAvailable={mcpAvailable}
-                                                onInsertToFile={handleInsertToFile}
-                                                isLazyLoaded={!loadedMessageIndices.has(index)}
-                                                onLoadContent={() => loadMessageRange(index, index)}
-                                                messageIndex={index}
-                                            />
+                                            isUser={false}
+                                            mcpAvailable={mcpAvailable}
+                                            onInsertToFile={handleInsertToFile}
+                                            isLazyLoaded={isLazyLoaded}
+                                            onLoadContent={() => loadMessageRange(index, index)}
+                                            messageIndex={index}
+                                        />
                                         </React.Suspense>
                                     </>
                                 )}
@@ -637,7 +640,7 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                         {currentLogprobs.map((lp: any, i: number) => {
                                             if (!lp || typeof lp !== 'object') return null;
                                             const entropy = calculateEntropy(lp.top_logprobs);
-                                            const isSelected = selectedToken?.logprob === lp;
+                                            const isSelected = selectedTokenForMessage?.logprob === lp;
                                             const redIntensity = Math.min(255, entropy * 100);
                                             const bgAlpha = entropy > 0.5 ? 0.3 : 0.05;
 
@@ -657,7 +660,7 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                 )}
                             </>
                         )}
-                        {isBattleModePair && !msg.isLoading && !history[index + 1]?.isLoading && (
+                        {isBattleModePair && !msg.isLoading && !nextMessage?.isLoading && (
                             <div className="mt-2 mb-2">
                                 <button
                                     onClick={() => setComparisonIndex(isShowingComparison ? null : index)}
@@ -669,14 +672,18 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                             </div>
                         )}
 
-                        {isShowingComparison && isBattleModePair && !msg.isLoading && !history[index + 1]?.isLoading && (
+                        {isShowingComparison && isBattleModePair && !msg.isLoading && !nextMessage?.isLoading && (
                             <div className="mt-4 mb-4">
                                 {(() => {
-                                    const msgB = history[index + 1];
+                                    const msgB = nextMessage;
                                     const modelAMatch = msg.content?.match(/\*\*Model A:\s*(.+?)\*\*/);
-                                    const modelBMatch = msgB.content?.match(/\*\*Model B:\s*(.+?)\*\*/);
+                                    const modelBMatch = msgB?.content?.match(/\*\*Model B:\s*(.+?)\*\*/);
                                     const modelAName = modelAMatch?.[1] || availableModels.find((m: any) => m.id === currentModel)?.name || 'Model A';
                                     const modelBName = modelBMatch?.[1] || availableModels.find((m: any) => m.id === secondaryModel)?.name || 'Model B';
+
+                                    if (!msgB) {
+                                        return null;
+                                    }
 
                                     return (
                                         <React.Suspense fallback={<div className="text-xs text-slate-500">Loading comparison...</div>}>
@@ -700,23 +707,23 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                 <div className="flex items-center gap-1">
                                     <button
                                         onClick={() => handleRateMessage(index, 'up')}
-                                        className={`p-1 rounded transition-colors ${messageRatings[index] === 'up'
+                                        className={`p-1 rounded transition-colors ${messageRating === 'up'
                                             ? 'text-green-500 bg-green-500/20'
                                             : 'text-slate-500 hover:text-green-400 hover:bg-slate-800'
                                             }`}
                                         title="Good response"
                                     >
-                                        <ThumbsUp size={12} fill={messageRatings[index] === 'up' ? 'currentColor' : 'none'} />
+                                        <ThumbsUp size={12} fill={messageRating === 'up' ? 'currentColor' : 'none'} />
                                     </button>
                                     <button
                                         onClick={() => handleRateMessage(index, 'down')}
-                                        className={`p-1 rounded transition-colors ${messageRatings[index] === 'down'
+                                        className={`p-1 rounded transition-colors ${messageRating === 'down'
                                             ? 'text-red-500 bg-red-500/20'
                                             : 'text-slate-500 hover:text-red-400 hover:bg-slate-800'
                                             }`}
                                         title="Poor response"
                                     >
-                                        <ThumbsDown size={12} fill={messageRatings[index] === 'down' ? 'currentColor' : 'none'} />
+                                        <ThumbsDown size={12} fill={messageRating === 'down' ? 'currentColor' : 'none'} />
                                     </button>
                                 </div>
                             )}
@@ -774,7 +781,7 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                         isUser={true}
                                         mcpAvailable={mcpAvailable}
                                         onInsertToFile={handleInsertToFile}
-                                        isLazyLoaded={!loadedMessageIndices.has(index)}
+                                        isLazyLoaded={isLazyLoaded}
                                         onLoadContent={() => loadMessageRange(index, index)}
                                         messageIndex={index}
                                     />
@@ -821,6 +828,75 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                 </div>
             )}
         </motion.div>
+    );
+}, (prev, next) => {
+    return (
+        prev.index === next.index &&
+        prev.msg === next.msg &&
+        prev.isLoadingMessages === next.isLoadingMessages &&
+        prev.isSearchResult === next.isSearchResult &&
+        prev.isCurrentSearchResult === next.isCurrentSearchResult &&
+        prev.isLastMessage === next.isLastMessage &&
+        prev.previousMessage === next.previousMessage &&
+        prev.nextMessage === next.nextMessage &&
+        prev.isShowingComparison === next.isShowingComparison &&
+        prev.isComparisonPartnerHidden === next.isComparisonPartnerHidden &&
+        prev.isBookmarked === next.isBookmarked &&
+        prev.selectedTokenForMessage === next.selectedTokenForMessage &&
+        prev.messageRating === next.messageRating &&
+        prev.showInspector === next.showInspector &&
+        prev.editingMessageIndex === next.editingMessageIndex &&
+        prev.editedMessageContent === next.editedMessageContent &&
+        prev.conversationFontSize === next.conversationFontSize &&
+        prev.isCompactViewport === next.isCompactViewport &&
+        prev.isLazyLoaded === next.isLazyLoaded
+    );
+});
+
+interface SearchResultRowProps {
+    resultIndex: number;
+    messageIndex: number;
+    message: any;
+    isActive: boolean;
+    onNavigate: (resultIndex: number) => void;
+}
+
+const SearchResultRow: React.FC<SearchResultRowProps> = React.memo(({
+    resultIndex,
+    messageIndex,
+    message,
+    isActive,
+    onNavigate,
+}) => {
+    const preview = message?.content
+        ? message.content.substring(0, 100) + (message.content.length > 100 ? '...' : '')
+        : '';
+    const roleLabel = message?.role === 'user' ? 'You' : 'Assistant';
+    const roleClass = message?.role === 'user' ? 'text-blue-400' : 'text-emerald-400';
+
+    return (
+        <button
+            onClick={() => onNavigate(resultIndex)}
+            className={`w-full text-left px-6 py-3 hover:bg-slate-800 transition-colors border-b border-slate-800/50 ${
+                isActive ? 'bg-primary/10 border-l-2 border-l-primary' : ''
+            }`}
+        >
+            <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-xs text-slate-400">
+                    {resultIndex + 1}
+                </div>
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-xs font-semibold ${roleClass}`}>{roleLabel}</span>
+                        <span className="text-xs text-slate-500">Message #{messageIndex + 1}</span>
+                    </div>
+                    <p className="text-sm text-slate-300 truncate">{preview}</p>
+                </div>
+                {isActive && (
+                    <Check size={16} className="text-primary flex-shrink-0 mt-1" />
+                )}
+            </div>
+        </button>
     );
 });
 
@@ -2902,50 +2978,58 @@ const Chat: React.FC = () => {
     }, [createNewSession, setShowHistory, stopGeneration, showShortcutsModal, editingMessageIndex, history, handleCancelEdit, setHistory]);
 
     // Memoized itemContent callback to prevent recreation on every render
-    const renderItemContent = React.useCallback((index: number, msg: any) => (
-        <ChatMessageRow
-            index={index}
-            msg={msg}
-            isLoadingMessages={isLoadingMessages}
-            searchResults={searchResults}
-            currentSearchIndex={currentSearchIndex}
-            history={history}
-            comparisonIndex={comparisonIndex}
-            bookmarkedMessages={bookmarkedMessages}
-            deleteMessage={deleteMessage}
-            handleEditMessage={handleEditMessage}
-            handleRegenerateResponse={handleRegenerateResponse}
-            handleBranchConversation={handleBranchConversation}
-            mcpAvailable={mcpAvailable}
-            handleInsertToFile={handleInsertToFile}
-            selectedToken={selectedToken}
-            setSelectedToken={setSelectedToken}
-            setActiveTab={setActiveTab}
-            setComparisonIndex={setComparisonIndex}
-            availableModels={availableModels}
-            currentModel={currentModel}
-            secondaryModel={secondaryModel}
-            handleRateMessage={handleRateMessage}
-            messageRatings={messageRatings}
-            textareaRef={textareaRef}
-            setInput={setInput}
-            editingMessageIndex={editingMessageIndex}
-            editedMessageContent={editedMessageContent}
-            setEditedMessageContent={setEditedMessageContent}
-            handleCancelEdit={handleCancelEdit}
-            handleSaveEdit={handleSaveEdit}
-            selectChoice={selectChoice}
-            toggleBookmark={toggleBookmark}
-            conversationFontSize={conversationFontSize}
-            isCompactViewport={isCompactViewport}
-            loadedMessageIndices={loadedMessageIndices}
-            loadMessageRange={loadMessageRange}
-        />
-    ), [
+    const renderItemContent = React.useCallback((index: number, msg: any) => {
+        const nextMessage = index < history.length - 1 ? history[index + 1] : null;
+        const previousMessage = index > 0 ? history[index - 1] : null;
+        return (
+            <ChatMessageRow
+                index={index}
+                msg={msg}
+                isLoadingMessages={isLoadingMessages}
+                isSearchResult={searchResults.includes(index)}
+                isCurrentSearchResult={searchResults[currentSearchIndex] === index}
+                isLastMessage={index === history.length - 1}
+                previousMessage={previousMessage}
+                nextMessage={nextMessage}
+                isShowingComparison={comparisonIndex === index}
+                isComparisonPartnerHidden={comparisonIndex === index - 1}
+                isBookmarked={bookmarkedMessages.has(index)}
+                deleteMessage={deleteMessage}
+                handleEditMessage={handleEditMessage}
+                handleRegenerateResponse={handleRegenerateResponse}
+                handleBranchConversation={handleBranchConversation}
+                mcpAvailable={mcpAvailable}
+                handleInsertToFile={handleInsertToFile}
+                selectedTokenForMessage={selectedToken?.messageIndex === index ? selectedToken : null}
+                setSelectedToken={setSelectedToken}
+                setActiveTab={setActiveTab}
+                setComparisonIndex={setComparisonIndex}
+                availableModels={availableModels}
+                currentModel={currentModel}
+                secondaryModel={secondaryModel}
+                handleRateMessage={handleRateMessage}
+                messageRating={messageRatings[index]}
+                showInspector={showInspector}
+                textareaRef={textareaRef}
+                setInput={setInput}
+                editingMessageIndex={editingMessageIndex}
+                editedMessageContent={editedMessageContent}
+                setEditedMessageContent={setEditedMessageContent}
+                handleCancelEdit={handleCancelEdit}
+                handleSaveEdit={handleSaveEdit}
+                selectChoice={selectChoice}
+                toggleBookmark={toggleBookmark}
+                conversationFontSize={conversationFontSize}
+                isCompactViewport={isCompactViewport}
+                isLazyLoaded={!loadedMessageIndices.has(index)}
+                loadMessageRange={loadMessageRange}
+            />
+        );
+    }, [
+        history,
         isLoadingMessages,
         searchResults,
         currentSearchIndex,
-        history,
         comparisonIndex,
         bookmarkedMessages,
         deleteMessage,
@@ -2963,6 +3047,7 @@ const Chat: React.FC = () => {
         secondaryModel,
         handleRateMessage,
         messageRatings,
+        showInspector,
         textareaRef,
         setInput,
         editingMessageIndex,
@@ -2977,6 +3062,23 @@ const Chat: React.FC = () => {
         loadedMessageIndices,
         loadMessageRange,
     ]);
+
+    const renderSearchResultItem = React.useCallback((resultIndex: number) => {
+        const messageIndex = searchResults[resultIndex];
+        const message = history[messageIndex];
+        if (!message) {
+            return null;
+        }
+        return (
+            <SearchResultRow
+                resultIndex={resultIndex}
+                messageIndex={messageIndex}
+                message={message}
+                isActive={resultIndex === currentSearchIndex}
+                onNavigate={navigateToSearchResult}
+            />
+        );
+    }, [searchResults, history, currentSearchIndex, navigateToSearchResult]);
 
     const longPressMessage = longPressMenu ? history[longPressMenu.messageIndex] : null;
     const composerBottomInset = isCompactViewport ? 16 : 24;
@@ -3572,47 +3674,7 @@ const Chat: React.FC = () => {
                                                     <VirtuosoComponent
                                                         style={{ height: Math.min(searchResults.length * 60, 320) }}
                                                         totalCount={searchResults.length}
-                                                        itemContent={(index: number) => {
-                                                            const messageIndex = searchResults[index];
-                                                            const message = history[messageIndex];
-                                                            const isActive = index === currentSearchIndex;
-                                                            const preview = message.content ?
-                                                                message.content.substring(0, 100) + (message.content.length > 100 ? '...' : '') :
-                                                                '';
-
-                                                            return (
-                                                                <button
-                                                                    onClick={() => navigateToSearchResult(index)}
-                                                                    className={`w-full text-left px-6 py-3 hover:bg-slate-800 transition-colors border-b border-slate-800/50 ${
-                                                                        isActive ? 'bg-primary/10 border-l-2 border-l-primary' : ''
-                                                                    }`}
-                                                                >
-                                                                    <div className="flex items-start gap-3">
-                                                                        <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-xs text-slate-400">
-                                                                            {index + 1}
-                                                                        </div>
-                                                                        <div className="flex-1 min-w-0">
-                                                                            <div className="flex items-center gap-2 mb-1">
-                                                                                <span className={`text-xs font-semibold ${
-                                                                                    message.role === 'user' ? 'text-blue-400' : 'text-emerald-400'
-                                                                                }`}>
-                                                                                    {message.role === 'user' ? 'You' : 'Assistant'}
-                                                                                </span>
-                                                                                <span className="text-xs text-slate-500">
-                                                                                    Message #{messageIndex + 1}
-                                                                                </span>
-                                                                            </div>
-                                                                            <p className="text-sm text-slate-300 truncate">
-                                                                                {preview}
-                                                                            </p>
-                                                                        </div>
-                                                                        {isActive && (
-                                                                            <Check size={16} className="text-primary flex-shrink-0 mt-1" />
-                                                                        )}
-                                                                    </div>
-                                                                </button>
-                                                            );
-                                                        }}
+                                                        itemContent={renderSearchResultItem}
                                                     />
                                                 ) : (
                                                     <div className="h-24 flex items-center justify-center text-xs text-slate-500">

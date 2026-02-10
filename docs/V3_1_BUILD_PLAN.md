@@ -242,6 +242,8 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 175: fix chat lazy-message hydration to load full message content from authoritative session snapshots/cache (instead of truncated `history` placeholders), ensuring on-demand expansion restores complete messages.
    - Pass 176: remove dead lazy-history projection (`getVisibleHistory`) and keep range hydration sourced from authoritative full-session message snapshots, trimming unused work and API surface.
    - Pass 177: extract the heavy chat message row renderer into a memoized `ChatMessageRow` component and keep `Virtuoso` `itemContent` as a thin wrapper, reducing hot-path render churn in `Chat.tsx`.
+   - Pass 178: precompute chat row state in `renderItemContent` (search/comparison/bookmark/rating/token/lazy flags + neighbor messages) and pass stable scalar props into `ChatMessageRow`, reducing repeated derived work and prop churn inside hot row renders.
+   - Pass 179: extract search-results rows into memoized `SearchResultRow` and route the search `Virtuoso` list through a stable `renderSearchResultItem` callback, trimming inline closure/JSX allocations during search panel updates.
 
 ## Release Checklist for v3.1.x
 
