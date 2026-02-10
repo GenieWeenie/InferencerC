@@ -192,6 +192,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 123: in `getUniqueQueryTerms`, add a thirty-one-token dedupe fast path that preserves first-seen order while avoiding general `Set` allocation for common short queries.
    - Pass 124: in `getUniqueQueryTerms`, add a thirty-two-token dedupe fast path that preserves first-seen order while avoiding general `Set` allocation for common short queries.
    - Pass 125: in `getUniqueQueryTerms`, add a thirty-three-token dedupe fast path that preserves first-seen order while avoiding general `Set` allocation for common short queries.
+   - Pass 126: in `searchSessions`, add a dedicated four-term intersection fast path that scans the smallest posting list against three cached membership sets, bypassing generic multi-term setup for common short queries.
 
 ## Release Checklist for v3.1.x
 

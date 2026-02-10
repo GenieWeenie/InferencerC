@@ -2823,6 +2823,76 @@ export const SearchIndexService = {
             }
             return resultIds ?? new Set<string>();
         }
+        if (queryTermCount === 4) {
+            const firstTerm = queryTerms[0];
+            const secondTerm = queryTerms[1];
+            const thirdTerm = queryTerms[2];
+            const fourthTerm = queryTerms[3];
+            const firstIds = index.terms[firstTerm];
+            const secondIds = index.terms[secondTerm];
+            const thirdIds = index.terms[thirdTerm];
+            const fourthIds = index.terms[fourthTerm];
+
+            if (
+                !firstIds || firstIds.length === 0 ||
+                !secondIds || secondIds.length === 0 ||
+                !thirdIds || thirdIds.length === 0 ||
+                !fourthIds || fourthIds.length === 0
+            ) {
+                return new Set<string>();
+            }
+
+            let resultIds: Set<string> | null = null;
+            let candidateIds = firstIds;
+            let membershipTermA = secondTerm;
+            let membershipIdsA = secondIds;
+            let membershipTermB = thirdTerm;
+            let membershipIdsB = thirdIds;
+            let membershipTermC = fourthTerm;
+            let membershipIdsC = fourthIds;
+
+            if (secondIds.length < candidateIds.length) {
+                candidateIds = secondIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = thirdTerm;
+                membershipIdsB = thirdIds;
+                membershipTermC = fourthTerm;
+                membershipIdsC = fourthIds;
+            }
+            if (thirdIds.length < candidateIds.length) {
+                candidateIds = thirdIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+                membershipTermC = fourthTerm;
+                membershipIdsC = fourthIds;
+            }
+            if (fourthIds.length < candidateIds.length) {
+                candidateIds = fourthIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+                membershipTermC = thirdTerm;
+                membershipIdsC = thirdIds;
+            }
+
+            const membershipSetA = getPostingSet(membershipTermA, membershipIdsA);
+            const membershipSetB = getPostingSet(membershipTermB, membershipIdsB);
+            const membershipSetC = getPostingSet(membershipTermC, membershipIdsC);
+            for (let i = 0; i < candidateIds.length; i++) {
+                const sessionId = candidateIds[i];
+                if (membershipSetA.has(sessionId) && membershipSetB.has(sessionId) && membershipSetC.has(sessionId)) {
+                    if (!resultIds) {
+                        resultIds = new Set<string>();
+                    }
+                    resultIds.add(sessionId);
+                }
+            }
+            return resultIds ?? new Set<string>();
+        }
 
         const initialIds = index.terms[queryTerms[0]];
         if (!initialIds || initialIds.length === 0) {
