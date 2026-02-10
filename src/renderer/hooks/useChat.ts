@@ -4,7 +4,10 @@ import { ChatResponse, Message, TokenLogprob, Model, ChatMessage, ChatSession, T
 import { HistoryService } from '../services/history';
 import { simulateLogprobs, detectIntent, findBestModelForIntent } from '../lib/chatUtils';
 import {
+    buildContextMessagesPatch,
+    buildInitialLazySessionState,
     buildOutgoingMessagePatch,
+    buildSavedSessionsPatch,
     buildChoiceSelectionUpdate,
     buildMessageLoadPatch,
     buildStopGenerationPatch,
@@ -634,18 +637,8 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                     maxTokens,
                     batchSize,
                 };
-
-                const existingIndex = prev.findIndex((session) => session.id === sessionId);
-                if (existingIndex === -1) {
-                    return [metadata, ...prev];
-                }
-
-                const merged = { ...prev[existingIndex], ...metadata };
-                if (existingIndex === 0) {
-                    return [merged, ...prev.slice(1)];
-                }
-
-                return [merged, ...prev.slice(0, existingIndex), ...prev.slice(existingIndex + 1)];
+                const patch = buildSavedSessionsPatch(prev, { type: 'upsertTop', metadata });
+                return patch ?? prev;
             });
         }, 1000); // 1s debounce
 
@@ -722,7 +715,8 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                 ...newSession,
                 messages: [],
             };
-            return [metadata, ...prev.filter((session) => session.id !== newSession.id)];
+            const patch = buildSavedSessionsPatch(prev, { type: 'upsertTop', metadata });
+            return patch ?? prev;
         });
         setShowHistory(false);
 
@@ -758,46 +752,14 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const messageCount = allMessages.length;
             loadedSessionIdRef.current = session.id;
             loadedSessionMessagesRef.current = allMessages;
+            const lazySessionState = buildInitialLazySessionState({
+                allMessages,
+                initialLoadCount: INITIAL_LOAD_COUNT,
+            });
 
-            // Reset lazy loading state
-            const newCache = new Map<number, ChatMessage>();
-            const newLoadedIndices = new Set<number>();
-
-            let lightweightHistory: ChatMessage[];
-
-            if (messageCount <= INITIAL_LOAD_COUNT) {
-                // Load all messages if count is small
-                lightweightHistory = allMessages;
-                allMessages.forEach((msg, index) => {
-                    newCache.set(index, msg);
-                    newLoadedIndices.add(index);
-                });
-            } else {
-                // Create lightweight versions for old messages
-                lightweightHistory = allMessages.map((msg, index) => {
-                    const shouldLoadFull = index >= messageCount - INITIAL_LOAD_COUNT;
-
-                    if (shouldLoadFull) {
-                        // Load recent messages with full content
-                        newCache.set(index, msg);
-                        newLoadedIndices.add(index);
-                        return msg;
-                    } else {
-                        // Create lightweight placeholder for old messages
-                        return {
-                            role: msg.role,
-                            content: msg.content.length > 100
-                                ? msg.content.substring(0, 100) + '...'
-                                : msg.content,
-                            isLoading: false
-                        } as ChatMessage;
-                    }
-                });
-            }
-
-            setHistory(lightweightHistory);
-            setFullMessageCache(newCache);
-            setLoadedMessageIndices(newLoadedIndices);
+            setHistory(lazySessionState.lightweightHistory);
+            setFullMessageCache(lazySessionState.nextFullMessageCache);
+            setLoadedMessageIndices(lazySessionState.nextLoadedMessageIndices);
 
             if (session.modelId) {
                 setCurrentModel(session.modelId);
@@ -840,7 +802,10 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     const deleteSession = (id: string) => {
         lastSidebarMetadataSignatureRef.current = '';
         HistoryService.deleteSession(id);
-        setSavedSessions((prev) => prev.filter((session) => session.id !== id));
+        setSavedSessions((prev) => {
+            const patch = buildSavedSessionsPatch(prev, { type: 'removeById', id });
+            return patch ?? prev;
+        });
         if (id === sessionId) createNewSession();
         logComplianceEvent({
             category: 'chat.session',
@@ -1542,16 +1507,13 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         }
 
         const excludedIndices = new Set(contextOptions?.excludedMessageIndices || []);
-        const contextHistory = history.filter((_, index) => !excludedIndices.has(index));
-
-        const baseMessages: Message[] = [
-            { role: 'system', content: finalSystemPrompt },
-            ...(contextOptions?.contextSummary
-                ? [{ role: 'system' as const, content: contextOptions.contextSummary }]
-                : []),
-            ...contextHistory.map(m => ({ role: m.role, content: m.content })),
-            { role: 'user', content: userMessageContent }
-        ];
+        const baseMessages: Message[] = buildContextMessagesPatch({
+            history,
+            excludedIndices,
+            finalSystemPrompt,
+            contextSummary: contextOptions?.contextSummary,
+            userMessageContent,
+        });
 
         // UI display content
         const imageCountText = imageAttachments.length > 0 ? `[${imageAttachments.length} image(s)]` : '';
@@ -1683,11 +1645,12 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         renameSession: (id: string, newTitle: string) => {
             HistoryService.renameSession(id, newTitle);
             setSavedSessions((prev) => {
-                const index = prev.findIndex((session) => session.id === id);
-                if (index === -1) return prev;
-                const next = [...prev];
-                next[index] = { ...next[index], title: newTitle };
-                return next;
+                const patch = buildSavedSessionsPatch(prev, {
+                    type: 'updateById',
+                    id,
+                    updater: (session) => ({ ...session, title: newTitle }),
+                });
+                return patch ?? prev;
             });
             logComplianceEvent({
                 category: 'chat.session',
@@ -1701,11 +1664,12 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         togglePinSession: (id: string) => {
             HistoryService.togglePinSession(id);
             setSavedSessions((prev) => {
-                const index = prev.findIndex((session) => session.id === id);
-                if (index === -1) return prev;
-                const next = [...prev];
-                next[index] = { ...next[index], pinned: !Boolean(next[index].pinned) };
-                return next;
+                const patch = buildSavedSessionsPatch(prev, {
+                    type: 'updateById',
+                    id,
+                    updater: (session) => ({ ...session, pinned: !Boolean(session.pinned) }),
+                });
+                return patch ?? prev;
             });
             logComplianceEvent({
                 category: 'chat.session',

@@ -1,4 +1,4 @@
-import { ChatMessage, TokenLogprob, ToolCall } from '../../shared/types';
+import { ChatMessage, ChatSession, Message, TokenLogprob, ToolCall } from '../../shared/types';
 
 export const collectMessageIndicesToLoad = (
     startIndex: number,
@@ -320,4 +320,167 @@ export const buildOutgoingMessagePatch = ({
         userMessageIndex,
         assistantStartIndex,
     };
+};
+
+interface BuildContextMessagesPatchInput {
+    history: ChatMessage[];
+    excludedIndices: Set<number>;
+    finalSystemPrompt: string;
+    contextSummary?: string;
+    userMessageContent: any;
+}
+
+export const buildContextMessagesPatch = ({
+    history,
+    excludedIndices,
+    finalSystemPrompt,
+    contextSummary,
+    userMessageContent,
+}: BuildContextMessagesPatchInput): Message[] => {
+    const messages: Message[] = [{ role: 'system', content: finalSystemPrompt }];
+    if (contextSummary) {
+        messages.push({ role: 'system', content: contextSummary });
+    }
+
+    for (let index = 0; index < history.length; index += 1) {
+        if (excludedIndices.has(index)) {
+            continue;
+        }
+        const message = history[index];
+        messages.push({ role: message.role, content: message.content });
+    }
+
+    messages.push({ role: 'user', content: userMessageContent });
+    return messages;
+};
+
+interface BuildInitialLazySessionStateInput {
+    allMessages: ChatMessage[];
+    initialLoadCount: number;
+    previewLength?: number;
+}
+
+export const buildInitialLazySessionState = ({
+    allMessages,
+    initialLoadCount,
+    previewLength = 100,
+}: BuildInitialLazySessionStateInput): {
+    lightweightHistory: ChatMessage[];
+    nextFullMessageCache: Map<number, ChatMessage>;
+    nextLoadedMessageIndices: Set<number>;
+} => {
+    const nextFullMessageCache = new Map<number, ChatMessage>();
+    const nextLoadedMessageIndices = new Set<number>();
+    const messageCount = allMessages.length;
+
+    if (messageCount <= initialLoadCount) {
+        for (let index = 0; index < messageCount; index += 1) {
+            nextFullMessageCache.set(index, allMessages[index]);
+            nextLoadedMessageIndices.add(index);
+        }
+        return {
+            lightweightHistory: allMessages,
+            nextFullMessageCache,
+            nextLoadedMessageIndices,
+        };
+    }
+
+    const lightweightHistory = allMessages.map((message, index) => {
+        const shouldLoadFull = index >= messageCount - initialLoadCount;
+        if (shouldLoadFull) {
+            nextFullMessageCache.set(index, message);
+            nextLoadedMessageIndices.add(index);
+            return message;
+        }
+
+        const previewContent = message.content.length > previewLength
+            ? `${message.content.substring(0, previewLength)}...`
+            : message.content;
+        return {
+            role: message.role,
+            content: previewContent,
+            isLoading: false,
+        } as ChatMessage;
+    });
+
+    return {
+        lightweightHistory,
+        nextFullMessageCache,
+        nextLoadedMessageIndices,
+    };
+};
+
+const areChatSessionMetadataEqual = (a: ChatSession, b: ChatSession): boolean => {
+    return (
+        a.id === b.id &&
+        a.title === b.title &&
+        a.lastModified === b.lastModified &&
+        a.modelId === b.modelId &&
+        a.expertMode === b.expertMode &&
+        a.thinkingEnabled === b.thinkingEnabled &&
+        a.pinned === b.pinned &&
+        a.systemPrompt === b.systemPrompt &&
+        a.temperature === b.temperature &&
+        a.topP === b.topP &&
+        a.maxTokens === b.maxTokens &&
+        a.batchSize === b.batchSize &&
+        a.encrypted === b.encrypted &&
+        a.encryptedHash === b.encryptedHash &&
+        a.usesTreeStructure === b.usesTreeStructure
+    );
+};
+
+type SavedSessionsPatchOperation =
+    | {
+        type: 'upsertTop';
+        metadata: ChatSession;
+    }
+    | {
+        type: 'updateById';
+        id: string;
+        updater: (session: ChatSession) => ChatSession;
+    }
+    | {
+        type: 'removeById';
+        id: string;
+    };
+
+export const buildSavedSessionsPatch = (
+    sessions: ChatSession[],
+    operation: SavedSessionsPatchOperation
+): ChatSession[] | null => {
+    if (operation.type === 'removeById') {
+        const index = sessions.findIndex((session) => session.id === operation.id);
+        if (index === -1) {
+            return null;
+        }
+        return [...sessions.slice(0, index), ...sessions.slice(index + 1)];
+    }
+
+    if (operation.type === 'updateById') {
+        const index = sessions.findIndex((session) => session.id === operation.id);
+        if (index === -1) {
+            return null;
+        }
+        const updatedSession = operation.updater(sessions[index]);
+        if (areChatSessionMetadataEqual(updatedSession, sessions[index])) {
+            return null;
+        }
+        const nextSessions = [...sessions];
+        nextSessions[index] = updatedSession;
+        return nextSessions;
+    }
+
+    const { metadata } = operation;
+    const index = sessions.findIndex((session) => session.id === metadata.id);
+    if (index === -1) {
+        return [metadata, ...sessions];
+    }
+
+    const merged = { ...sessions[index], ...metadata };
+    if (index === 0 && areChatSessionMetadataEqual(merged, sessions[0])) {
+        return null;
+    }
+
+    return [merged, ...sessions.slice(0, index), ...sessions.slice(index + 1)];
 };

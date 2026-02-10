@@ -1,9 +1,12 @@
-import { ChatMessage, ToolCall } from '../src/shared/types';
+import { ChatMessage, ChatSession, ToolCall } from '../src/shared/types';
 import {
   areToolCallsEquivalent,
   buildChoiceSelectionUpdate,
+  buildContextMessagesPatch,
+  buildInitialLazySessionState,
   buildMessageLoadPatch,
   buildOutgoingMessagePatch,
+  buildSavedSessionsPatch,
   buildStopGenerationPatch,
   buildTokenEditUpdate,
   buildUpdatedMessageContent,
@@ -255,6 +258,167 @@ describe('chatStateGuards', () => {
       expect(Array.from(patch.nextLoadedMessageIndices).sort((a, b) => a - b)).toEqual([0, 1, 2, 3]);
       expect(patch.nextFullMessageCache.get(1)).toEqual(userMessage);
       expect(patch.nextFullMessageCache.get(3)).toEqual(assistants[1]);
+    });
+  });
+
+  describe('buildContextMessagesPatch', () => {
+    it('builds a system + filtered history + user sequence in one pass', () => {
+      const history: ChatMessage[] = [
+        { role: 'user', content: 'first' },
+        { role: 'assistant', content: 'second' },
+        { role: 'user', content: 'third' },
+      ];
+      const messages = buildContextMessagesPatch({
+        history,
+        excludedIndices: new Set([1]),
+        finalSystemPrompt: 'system',
+        contextSummary: 'summary',
+        userMessageContent: 'latest',
+      });
+
+      expect(messages).toEqual([
+        { role: 'system', content: 'system' },
+        { role: 'system', content: 'summary' },
+        { role: 'user', content: 'first' },
+        { role: 'user', content: 'third' },
+        { role: 'user', content: 'latest' },
+      ]);
+    });
+
+    it('omits summary when not provided', () => {
+      const messages = buildContextMessagesPatch({
+        history: [],
+        excludedIndices: new Set(),
+        finalSystemPrompt: 'system',
+        userMessageContent: 'hello',
+      });
+      expect(messages).toEqual([
+        { role: 'system', content: 'system' },
+        { role: 'user', content: 'hello' },
+      ]);
+    });
+  });
+
+  describe('buildInitialLazySessionState', () => {
+    it('keeps all messages loaded when history size is below threshold', () => {
+      const allMessages: ChatMessage[] = [
+        { role: 'user', content: 'a' },
+        { role: 'assistant', content: 'b' },
+      ];
+      const patch = buildInitialLazySessionState({
+        allMessages,
+        initialLoadCount: 5,
+      });
+
+      expect(patch.lightweightHistory).toBe(allMessages);
+      expect(Array.from(patch.nextLoadedMessageIndices).sort((a, b) => a - b)).toEqual([0, 1]);
+      expect(patch.nextFullMessageCache.get(1)).toEqual(allMessages[1]);
+    });
+
+    it('returns lightweight previews for older messages', () => {
+      const allMessages: ChatMessage[] = [
+        { role: 'user', content: 'old-message-1' },
+        { role: 'assistant', content: 'old-message-2' },
+        { role: 'user', content: 'recent-message' },
+      ];
+      const patch = buildInitialLazySessionState({
+        allMessages,
+        initialLoadCount: 1,
+        previewLength: 4,
+      });
+
+      expect(patch.lightweightHistory[0].content).toBe('old-...');
+      expect(patch.lightweightHistory[1].content).toBe('old-...');
+      expect(patch.lightweightHistory[2]).toBe(allMessages[2]);
+      expect(Array.from(patch.nextLoadedMessageIndices)).toEqual([2]);
+      expect(patch.nextFullMessageCache.get(2)).toEqual(allMessages[2]);
+    });
+  });
+
+  describe('buildSavedSessionsPatch', () => {
+    const baseSession = (overrides: Partial<ChatSession>): ChatSession => ({
+      id: overrides.id ?? 'session-1',
+      title: overrides.title ?? 'Session 1',
+      lastModified: overrides.lastModified ?? 1,
+      modelId: overrides.modelId ?? 'model',
+      messages: overrides.messages ?? [],
+      expertMode: overrides.expertMode,
+      thinkingEnabled: overrides.thinkingEnabled,
+      pinned: overrides.pinned,
+      systemPrompt: overrides.systemPrompt,
+      temperature: overrides.temperature,
+      topP: overrides.topP,
+      maxTokens: overrides.maxTokens,
+      batchSize: overrides.batchSize,
+      encrypted: overrides.encrypted,
+      encryptedHash: overrides.encryptedHash,
+      usesTreeStructure: overrides.usesTreeStructure,
+    });
+
+    it('upserts metadata to top and moves existing entries', () => {
+      const sessions = [
+        baseSession({ id: 'a', title: 'A' }),
+        baseSession({ id: 'b', title: 'B' }),
+      ];
+      const patch = buildSavedSessionsPatch(sessions, {
+        type: 'upsertTop',
+        metadata: baseSession({ id: 'b', title: 'B2', lastModified: 5 }),
+      });
+
+      expect(patch).not.toBeNull();
+      expect(patch![0].id).toBe('b');
+      expect(patch![0].title).toBe('B2');
+      expect(patch![1].id).toBe('a');
+    });
+
+    it('returns null for no-op top upsert', () => {
+      const sessions = [
+        baseSession({ id: 'a', title: 'A' }),
+      ];
+      const patch = buildSavedSessionsPatch(sessions, {
+        type: 'upsertTop',
+        metadata: baseSession({ id: 'a', title: 'A' }),
+      });
+      expect(patch).toBeNull();
+    });
+
+    it('updates by id only when data actually changes', () => {
+      const sessions = [
+        baseSession({ id: 'a', title: 'A' }),
+      ];
+
+      const changed = buildSavedSessionsPatch(sessions, {
+        type: 'updateById',
+        id: 'a',
+        updater: (session) => ({ ...session, title: 'A+' }),
+      });
+      expect(changed).not.toBeNull();
+      expect(changed![0].title).toBe('A+');
+
+      const unchanged = buildSavedSessionsPatch(sessions, {
+        type: 'updateById',
+        id: 'a',
+        updater: (session) => ({ ...session }),
+      });
+      expect(unchanged).toBeNull();
+    });
+
+    it('removes by id and no-ops when id is missing', () => {
+      const sessions = [
+        baseSession({ id: 'a', title: 'A' }),
+        baseSession({ id: 'b', title: 'B' }),
+      ];
+      const removed = buildSavedSessionsPatch(sessions, {
+        type: 'removeById',
+        id: 'a',
+      });
+      expect(removed).toEqual([sessions[1]]);
+
+      const missing = buildSavedSessionsPatch(sessions, {
+        type: 'removeById',
+        id: 'missing',
+      });
+      expect(missing).toBeNull();
     });
   });
 });
