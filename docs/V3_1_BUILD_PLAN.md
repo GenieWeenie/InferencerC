@@ -267,6 +267,12 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 200: optimize in-chat search matching by memoizing normalized message-content strings and reusing them during debounced query scans.
    - Pass 201: reduce streaming tool-call update overhead in `useChat.streamResponse` by replacing per-iteration `Object.keys/Object.values` allocation with dirty-flagged cached tool-call flushes.
    - Pass 202: expand deterministic state-guard unit coverage for choice/token no-op/update flows alongside existing cache patch tests.
+   - Pass 203: attach the chat keyboard shortcut listener once and route live chat state through refs so key handling no longer re-subscribes on routine state updates.
+   - Pass 204: extract chat shortcut resolution/dispatch into pure helper functions (`chatKeyboardShortcuts`) to keep key-combo matching deterministic and testable.
+   - Pass 205: precompute per-message row metadata in a memoized index map before `renderItemContent`, reducing repeated hot-path state derivation inside row renders.
+   - Pass 206: split the top-header primary action cluster into a memoized child component driven by stable callback/config props to lower header rerender churn.
+   - Pass 207: extract SSE chunk parsing + tool-call delta merge into a dedicated stream parser helper (`chatStreamParser`) and reuse it in `useChat.streamResponse`.
+   - Pass 208: add deterministic unit tests for the chat shortcut resolver/dispatcher and the stream parser’s content/tool-call merge behavior.
 
 ## Release Checklist for v3.1.x
 

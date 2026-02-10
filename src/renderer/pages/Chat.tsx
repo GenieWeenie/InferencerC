@@ -13,6 +13,11 @@ import { usePrompts, PromptSnippet } from '../hooks/usePrompts';
 import { useConversationTree } from '../hooks/useConversationTree';
 import { useLongPress, usePinchZoom, useSwipeNavigation } from '../hooks/useGestures';
 import { calculateEntropy, compressImage } from '../lib/chatDisplayUtils';
+import {
+    dispatchChatShortcutAction,
+    isTypingShortcutTarget,
+    resolveChatShortcutAction,
+} from '../lib/chatKeyboardShortcuts';
 import { useMCP } from '../hooks/useMCP';
 import type { UsageStatsRecord } from '../services/analyticsStore';
 import type { ProjectContext } from '../services/projectContext';
@@ -1020,6 +1025,62 @@ const SearchResultRow: React.FC<SearchResultRowProps> = React.memo(({
         prev.isActive === next.isActive
     );
 });
+
+interface HeaderPrimaryActionConfig {
+    key: string;
+    title: string;
+    label: string;
+    icon: React.ComponentType<{ size?: number }>;
+    onClick: () => void;
+    variant?: 'default' | 'primary';
+}
+
+interface TopHeaderPrimaryActionsProps {
+    isCompactViewport: boolean;
+    showHistory: boolean;
+    onToggleHistory: () => void;
+    actions: HeaderPrimaryActionConfig[];
+}
+
+const TopHeaderPrimaryActions: React.FC<TopHeaderPrimaryActionsProps> = React.memo(({
+    isCompactViewport,
+    showHistory,
+    onToggleHistory,
+    actions,
+}) => (
+    <>
+        <button
+            onClick={onToggleHistory}
+            title="View History"
+            className={`p-1.5 rounded-md transition-colors border border-slate-700 flex-shrink-0 ${showHistory ? 'bg-slate-800 text-white' : 'hover:bg-slate-800 text-slate-400'}`}
+        >
+            {isCompactViewport ? <Menu size={16} /> : <Clock size={16} />}
+        </button>
+        {actions.map((action) => {
+            const Icon = action.icon;
+            const buttonClassName = action.variant === 'primary'
+                ? 'flex items-center gap-1.5 px-2.5 py-1.5 bg-gradient-to-r from-emerald-600 to-emerald-500 text-white rounded-md hover:brightness-110 transition-all shadow-md shadow-emerald-900/20 font-medium text-xs flex-shrink-0'
+                : 'flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap';
+
+            return (
+                <button
+                    key={action.key}
+                    onClick={action.onClick}
+                    title={action.title}
+                    className={buttonClassName}
+                >
+                    <Icon size={14} />
+                    <span>{action.label}</span>
+                </button>
+            );
+        })}
+    </>
+), (prev, next) => (
+    prev.isCompactViewport === next.isCompactViewport &&
+    prev.showHistory === next.showHistory &&
+    prev.onToggleHistory === next.onToggleHistory &&
+    prev.actions === next.actions
+));
 
 const readPersistedApiLogCount = (): number => {
     try {
@@ -2815,6 +2876,157 @@ const Chat: React.FC = () => {
         });
     };
 
+    const handleToggleHistoryPanel = React.useCallback(() => {
+        setShowHistory((prev) => !prev);
+    }, []);
+
+    const handleOpenTemplateLibrary = React.useCallback(() => {
+        setShowTemplateLibrary(true);
+    }, []);
+
+    const handleOpenABTesting = React.useCallback(() => {
+        setShowABTesting(true);
+    }, []);
+
+    const handleOpenPromptOptimization = React.useCallback(() => {
+        setShowPromptOptimization(true);
+    }, []);
+
+    const handleOpenWorkflows = React.useCallback(() => {
+        setShowWorkflows(true);
+    }, []);
+
+    const handleOpenAPIPlayground = React.useCallback(() => {
+        setShowAPIPlayground(true);
+    }, []);
+
+    const handleOpenDeveloperDocs = React.useCallback(() => {
+        setShowDeveloperDocs(true);
+    }, []);
+
+    const handleOpenPluginManager = React.useCallback(() => {
+        setShowPluginManager(true);
+    }, []);
+
+    const handleOpenWorkspaceViews = React.useCallback(() => {
+        setShowWorkspaceViews(true);
+    }, []);
+
+    const handleOpenCloudSyncPanel = React.useCallback(() => {
+        setShowCloudSync(true);
+    }, []);
+
+    const handleOpenCodeIntegration = React.useCallback(() => {
+        const lastMessage = history[history.length - 1];
+        if (!lastMessage?.content) {
+            return;
+        }
+
+        const codeBlockMatch = lastMessage.content.match(/```(\w+)?\n([\s\S]*?)```/);
+        if (codeBlockMatch) {
+            setSelectedCode({
+                code: codeBlockMatch[2],
+                language: codeBlockMatch[1] || 'javascript',
+            });
+        } else {
+            setSelectedCode({
+                code: lastMessage.content,
+                language: 'javascript',
+            });
+        }
+        setShowCodeIntegration(true);
+    }, [history]);
+
+    const handleOpenExportDialog = React.useCallback(() => {
+        setShowExportDialog(true);
+    }, []);
+
+    const handleExportSessionToObsidian = React.useCallback(() => {
+        try {
+            HistoryService.exportSessionToObsidian(sessionId);
+            toast.success('Chat exported as Obsidian markdown');
+        } catch (error: any) {
+            toast.error(error.message || 'Failed to export');
+        }
+    }, [sessionId]);
+
+    const topHeaderPrimaryActions = React.useMemo<HeaderPrimaryActionConfig[]>(() => ([
+        {
+            key: 'new-chat',
+            title: 'New Chat',
+            label: 'New',
+            icon: Plus,
+            onClick: createNewSession,
+            variant: 'primary',
+        },
+        {
+            key: 'templates',
+            title: 'Templates',
+            label: 'Templates',
+            icon: FileText,
+            onClick: handleOpenTemplateLibrary,
+        },
+        {
+            key: 'ab-test',
+            title: 'A/B Testing (Test different prompts)',
+            label: 'A/B Test',
+            icon: TestTube,
+            onClick: handleOpenABTesting,
+        },
+        {
+            key: 'optimize',
+            title: 'Prompt Optimization (AI-powered suggestions)',
+            label: 'Optimize',
+            icon: Sparkles,
+            onClick: handleOpenPromptOptimization,
+        },
+        {
+            key: 'workflows',
+            title: 'Workflows (Automation)',
+            label: 'Workflows',
+            icon: Zap,
+            onClick: handleOpenWorkflows,
+        },
+        {
+            key: 'api',
+            title: 'API Playground (Developer Tools)',
+            label: 'API',
+            icon: Code2,
+            onClick: handleOpenAPIPlayground,
+        },
+        {
+            key: 'docs',
+            title: 'Developer Documentation',
+            label: 'Docs',
+            icon: HelpCircle,
+            onClick: handleOpenDeveloperDocs,
+        },
+        {
+            key: 'plugins',
+            title: 'Plugin Manager',
+            label: 'Plugins',
+            icon: Package,
+            onClick: handleOpenPluginManager,
+        },
+        {
+            key: 'views',
+            title: 'Workspace Views',
+            label: 'Views',
+            icon: LayoutGrid,
+            onClick: handleOpenWorkspaceViews,
+        },
+    ]), [
+        createNewSession,
+        handleOpenABTesting,
+        handleOpenAPIPlayground,
+        handleOpenDeveloperDocs,
+        handleOpenPluginManager,
+        handleOpenPromptOptimization,
+        handleOpenTemplateLibrary,
+        handleOpenWorkflows,
+        handleOpenWorkspaceViews,
+    ]);
+
     const clampLongPressMenuPosition = React.useCallback((x: number, y: number) => {
         const margin = 8;
         const menuWidth = 240;
@@ -3011,141 +3223,129 @@ const Chat: React.FC = () => {
         }
     }, [sessionId]);
 
-    // Keyboard Shortcuts
+    const handleClearChat = React.useCallback(() => {
+        if (history.length > 0 && window.confirm('Clear all messages in this chat?')) {
+            setHistory([]);
+            toast.success('Chat cleared');
+        }
+    }, [history.length, setHistory]);
+
+    const handleCopyLastResponse = React.useCallback(() => {
+        const lastAssistantMessage = [...history].reverse().find((message) => message.role === 'assistant');
+        if (lastAssistantMessage?.content) {
+            void navigator.clipboard.writeText(lastAssistantMessage.content);
+            toast.success('Last response copied to clipboard');
+        }
+    }, [history]);
+
+    const handleOpenExportDialogShortcut = React.useCallback(() => {
+        if (history.length > 0) {
+            setShowExportDialog(true);
+            return;
+        }
+        toast.info('No messages to export');
+    }, [history.length]);
+
+    const handleToggleTreeView = React.useCallback(() => {
+        setShowTreeView((prev) => !prev);
+        if (!branchingEnabled) {
+            setBranchingEnabled(true);
+            toast.info('Conversation branching enabled');
+        }
+    }, [branchingEnabled]);
+
+    const handleToggleBranching = React.useCallback(() => {
+        if (!branchingEnabled) {
+            setBranchingEnabled(true);
+            toast.success('Conversation branching enabled! Create branches by sending different messages.');
+            return;
+        }
+        toast.info('Branching is ready - send a different message to create a branch');
+    }, [branchingEnabled]);
+
+    const handleNavigateBranch = React.useCallback((direction: -1 | 1) => {
+        const currentIndex = treeHook.getCurrentSiblingIndex();
+        treeHook.switchToSibling(currentIndex + direction);
+    }, [treeHook]);
+
+    const handleShortcutEscape = React.useCallback(() => {
+        if (showShortcutsModal) {
+            setShowShortcutsModal(false);
+        } else if (editingMessageIndex !== null) {
+            handleCancelEdit();
+        } else {
+            stopGeneration();
+        }
+    }, [showShortcutsModal, editingMessageIndex, handleCancelEdit, stopGeneration]);
+
+    const shortcutStateRef = React.useRef({
+        historyLength: history.length,
+        branchingEnabled,
+    });
+    const shortcutDispatcherRef = React.useRef<(action: ReturnType<typeof resolveChatShortcutAction>) => void>(() => {});
+
     React.useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            // Ignore shortcuts when typing in input fields
-            const target = e.target as HTMLElement;
-            const isTyping = target.tagName === 'TEXTAREA' || target.tagName === 'INPUT';
+        shortcutStateRef.current = {
+            historyLength: history.length,
+            branchingEnabled,
+        };
+    }, [history.length, branchingEnabled]);
 
-            // Ctrl+?: Show keyboard shortcuts modal
-            if ((e.metaKey || e.ctrlKey) && (e.key === '?' || e.key === '/') && e.shiftKey) {
-                e.preventDefault();
-                setShowShortcutsModal(true);
+    React.useEffect(() => {
+        shortcutDispatcherRef.current = (action) => {
+            if (!action) {
                 return;
             }
 
-            // Ctrl+N: New Chat
-            if ((e.metaKey || e.ctrlKey) && e.key === 'n' && !isTyping) {
-                e.preventDefault();
-                createNewSession();
+            dispatchChatShortcutAction(action, {
+                openShortcutsModal: () => setShowShortcutsModal(true),
+                newChat: createNewSession,
+                toggleHistory: handleToggleHistoryPanel,
+                clearChat: handleClearChat,
+                toggleSearch: () => setShowSearch((prev) => !prev),
+                copyLastResponse: handleCopyLastResponse,
+                openExportDialog: handleOpenExportDialogShortcut,
+                openGlobalSearch: () => setShowGlobalSearch(true),
+                openRecommendations: () => setShowRecommendations(true),
+                toggleTreeView: handleToggleTreeView,
+                toggleBranching: handleToggleBranching,
+                navigateBranch: handleNavigateBranch,
+                escape: handleShortcutEscape,
+            });
+        };
+    }, [
+        createNewSession,
+        handleClearChat,
+        handleCopyLastResponse,
+        handleNavigateBranch,
+        handleOpenExportDialogShortcut,
+        handleShortcutEscape,
+        handleToggleBranching,
+        handleToggleHistoryPanel,
+        handleToggleTreeView,
+    ]);
+
+    // Keyboard shortcuts listener attaches once and delegates via refs.
+    React.useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            const action = resolveChatShortcutAction(event, {
+                isTyping: isTypingShortcutTarget(event.target),
+                branchingEnabled: shortcutStateRef.current.branchingEnabled,
+                allowClearChat: shortcutStateRef.current.historyLength > 0,
+                allowExportDialog: shortcutStateRef.current.historyLength > 0,
+            });
+
+            if (!action) {
                 return;
             }
 
-            // Ctrl+K: Focus on model selector (or new chat as fallback)
-            if ((e.metaKey || e.ctrlKey) && e.key === 'k' && !isTyping) {
-                e.preventDefault();
-                createNewSession();
-                return;
-            }
-
-            // Ctrl+/: Toggle History
-            if ((e.metaKey || e.ctrlKey) && e.key === '/' && !e.shiftKey) {
-                e.preventDefault();
-                setShowHistory(prev => !prev);
-                return;
-            }
-
-            // Ctrl+L: Clear Chat
-            if ((e.metaKey || e.ctrlKey) && e.key === 'l' && !isTyping) {
-                e.preventDefault();
-                if (history.length > 0 && confirm('Clear all messages in this chat?')) {
-                    setHistory([]);
-                }
-                return;
-            }
-
-            // Ctrl+F: Toggle Search
-            if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
-                e.preventDefault();
-                setShowSearch(prev => !prev);
-                return;
-            }
-
-            // Ctrl+Shift+C: Copy last response
-            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'C' && !isTyping) {
-                e.preventDefault();
-                const lastAssistantMessage = [...history].reverse().find(m => m.role === 'assistant');
-                if (lastAssistantMessage?.content) {
-                    navigator.clipboard.writeText(lastAssistantMessage.content);
-                    toast.success('Last response copied to clipboard');
-                }
-                return;
-            }
-
-            // Ctrl+Shift+E: Open Export Dialog
-            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'E' && !isTyping) {
-                e.preventDefault();
-                if (history.length > 0) {
-                    setShowExportDialog(true);
-                } else {
-                    toast.info('No messages to export');
-                }
-                return;
-            }
-
-            // Ctrl+Shift+F: Open Global Search
-            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'F') {
-                e.preventDefault();
-                setShowGlobalSearch(true);
-                return;
-            }
-
-            // Ctrl+Shift+R: Open Recommendations
-            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'r') {
-                e.preventDefault();
-                setShowRecommendations(true);
-                return;
-            }
-
-            // Ctrl+T: Toggle Tree View
-            if ((e.metaKey || e.ctrlKey) && e.key === 't' && !isTyping) {
-                e.preventDefault();
-                setShowTreeView(prev => !prev);
-                if (!branchingEnabled) {
-                    setBranchingEnabled(true);
-                    toast.info('Conversation branching enabled');
-                }
-                return;
-            }
-
-            // Ctrl+B: Create Branch (enable branching first if needed)
-            if ((e.metaKey || e.ctrlKey) && e.key === 'b' && !isTyping) {
-                e.preventDefault();
-                if (!branchingEnabled) {
-                    setBranchingEnabled(true);
-                    toast.success('Conversation branching enabled! Create branches by sending different messages.');
-                } else {
-                    toast.info('Branching is ready - send a different message to create a branch');
-                }
-                return;
-            }
-
-            // Alt+Left/Right: Navigate branches
-            if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && branchingEnabled) {
-                e.preventDefault();
-                const direction = e.key === 'ArrowLeft' ? -1 : 1;
-                const currentIndex = treeHook.getCurrentSiblingIndex();
-                treeHook.switchToSibling(currentIndex + direction);
-                return;
-            }
-
-            // Esc: Stop Generation or Close Modals
-            if (e.key === 'Escape') {
-                if (showShortcutsModal) {
-                    setShowShortcutsModal(false);
-                } else if (editingMessageIndex !== null) {
-                    handleCancelEdit();
-                } else {
-                    stopGeneration();
-                }
-                return;
-            }
+            event.preventDefault();
+            shortcutDispatcherRef.current(action);
         };
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [createNewSession, setShowHistory, stopGeneration, showShortcutsModal, editingMessageIndex, history, handleCancelEdit, setHistory]);
+    }, []);
 
     const searchResultSet = React.useMemo(() => new Set(searchResults), [searchResults]);
     const activeSearchMessageIndex = React.useMemo(
@@ -3176,32 +3376,83 @@ const Chat: React.FC = () => {
     const onEditingContentChange = React.useCallback((value: string) => {
         setEditedMessageContent(value);
     }, []);
+    const rowMetadataByIndex = React.useMemo(() => {
+        const metadata = new Map<number, {
+            previousMessage: any | null;
+            nextMessage: any | null;
+            isSearchResult: boolean;
+            isCurrentSearchResult: boolean;
+            isLastMessage: boolean;
+            isShowingComparison: boolean;
+            isComparisonPartnerHidden: boolean;
+            isBookmarked: boolean;
+            selectedTokenForMessage: typeof selectedToken;
+            messageRating: 'up' | 'down' | undefined;
+            isEditingRow: boolean;
+            editingContentForRow: string;
+            isLazyLoaded: boolean;
+        }>();
+
+        for (let index = 0; index < history.length; index += 1) {
+            const isEditingRow = editingMessageIndex === index;
+            metadata.set(index, {
+                previousMessage: index > 0 ? history[index - 1] : null,
+                nextMessage: index < history.length - 1 ? history[index + 1] : null,
+                isSearchResult: searchResultSet.has(index),
+                isCurrentSearchResult: activeSearchMessageIndex === index,
+                isLastMessage: index === history.length - 1,
+                isShowingComparison: comparisonIndex === index,
+                isComparisonPartnerHidden: comparisonIndex === index - 1,
+                isBookmarked: bookmarkedMessages.has(index),
+                selectedTokenForMessage: selectedToken?.messageIndex === index ? selectedToken : null,
+                messageRating: messageRatings[index],
+                isEditingRow,
+                editingContentForRow: isEditingRow ? editedMessageContent : '',
+                isLazyLoaded: !loadedMessageIndices.has(index),
+            });
+        }
+
+        return metadata;
+    }, [
+        history,
+        editingMessageIndex,
+        searchResultSet,
+        activeSearchMessageIndex,
+        comparisonIndex,
+        bookmarkedMessages,
+        selectedToken,
+        messageRatings,
+        editedMessageContent,
+        loadedMessageIndices,
+    ]);
 
     // Memoized itemContent callback to prevent recreation on every render
     const renderItemContent = React.useCallback((index: number, msg: any) => {
-        const nextMessage = index < history.length - 1 ? history[index + 1] : null;
-        const previousMessage = index > 0 ? history[index - 1] : null;
-        const isEditingRow = editingMessageIndex === index;
+        const rowMetadata = rowMetadataByIndex.get(index);
+        if (!rowMetadata) {
+            return null;
+        }
+
         return (
             <ChatMessageRow
                 index={index}
                 msg={msg}
                 isLoadingMessages={isLoadingMessages}
-                isSearchResult={searchResultSet.has(index)}
-                isCurrentSearchResult={activeSearchMessageIndex === index}
-                isLastMessage={index === history.length - 1}
-                previousMessage={previousMessage}
-                nextMessage={nextMessage}
-                isShowingComparison={comparisonIndex === index}
-                isComparisonPartnerHidden={comparisonIndex === index - 1}
-                isBookmarked={bookmarkedMessages.has(index)}
+                isSearchResult={rowMetadata.isSearchResult}
+                isCurrentSearchResult={rowMetadata.isCurrentSearchResult}
+                isLastMessage={rowMetadata.isLastMessage}
+                previousMessage={rowMetadata.previousMessage}
+                nextMessage={rowMetadata.nextMessage}
+                isShowingComparison={rowMetadata.isShowingComparison}
+                isComparisonPartnerHidden={rowMetadata.isComparisonPartnerHidden}
+                isBookmarked={rowMetadata.isBookmarked}
                 deleteMessage={deleteMessage}
                 handleEditMessage={handleEditMessage}
                 handleRegenerateResponse={handleRegenerateResponse}
                 handleBranchConversation={handleBranchConversation}
                 mcpAvailable={mcpAvailable}
                 handleInsertToFile={handleInsertToFile}
-                selectedTokenForMessage={selectedToken?.messageIndex === index ? selectedToken : null}
+                selectedTokenForMessage={rowMetadata.selectedTokenForMessage}
                 setSelectedToken={setSelectedToken}
                 setActiveTab={setActiveTab}
                 setComparisonIndex={setComparisonIndex}
@@ -3209,12 +3460,12 @@ const Chat: React.FC = () => {
                 currentModel={currentModel}
                 secondaryModel={secondaryModel}
                 handleRateMessage={handleRateMessage}
-                messageRating={messageRatings[index]}
+                messageRating={rowMetadata.messageRating}
                 showInspector={showInspector}
                 textareaRef={textareaRef}
                 setInput={setInput}
-                isEditingRow={isEditingRow}
-                editingContentForRow={isEditingRow ? editedMessageContent : ''}
+                isEditingRow={rowMetadata.isEditingRow}
+                editingContentForRow={rowMetadata.editingContentForRow}
                 onEditingContentChange={onEditingContentChange}
                 handleCancelEdit={handleCancelEdit}
                 handleSaveEdit={handleSaveEdit}
@@ -3222,24 +3473,19 @@ const Chat: React.FC = () => {
                 toggleBookmark={toggleBookmark}
                 conversationFontSize={conversationFontSize}
                 isCompactViewport={isCompactViewport}
-                isLazyLoaded={!loadedMessageIndices.has(index)}
+                isLazyLoaded={rowMetadata.isLazyLoaded}
                 loadMessageAtIndex={loadMessageAtIndex}
             />
         );
     }, [
-        history,
         isLoadingMessages,
-        searchResultSet,
-        activeSearchMessageIndex,
-        comparisonIndex,
-        bookmarkedMessages,
+        rowMetadataByIndex,
         deleteMessage,
         handleEditMessage,
         handleRegenerateResponse,
         handleBranchConversation,
         mcpAvailable,
         handleInsertToFile,
-        selectedToken,
         setSelectedToken,
         setActiveTab,
         setComparisonIndex,
@@ -3247,12 +3493,9 @@ const Chat: React.FC = () => {
         currentModel,
         secondaryModel,
         handleRateMessage,
-        messageRatings,
         showInspector,
         textareaRef,
         setInput,
-        editingMessageIndex,
-        editedMessageContent,
         onEditingContentChange,
         handleCancelEdit,
         handleSaveEdit,
@@ -3260,7 +3503,6 @@ const Chat: React.FC = () => {
         toggleBookmark,
         conversationFontSize,
         isCompactViewport,
-        loadedMessageIndices,
         loadMessageAtIndex,
     ]);
 
@@ -3313,90 +3555,15 @@ const Chat: React.FC = () => {
             <div className={`flex-1 flex flex-col h-full relative transition-[margin] duration-300 min-w-0 overflow-hidden ${showHistory && !isCompactViewport ? 'ml-64' : 'ml-0'}`}>
                 {/* Top Header */}
                 <div className="px-4 py-2 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2 backdrop-blur-sm shadow-sm z-10 flex-wrap">
-                    <button onClick={() => setShowHistory(!showHistory)} title="View History" className={`p-1.5 rounded-md transition-colors border border-slate-700 flex-shrink-0 ${showHistory ? 'bg-slate-800 text-white' : 'hover:bg-slate-800 text-slate-400'}`}>
-                        {isCompactViewport ? <Menu size={16} /> : <Clock size={16} />}
-                    </button>
-                    <button onClick={createNewSession} title="New Chat" className="flex items-center gap-1.5 px-2.5 py-1.5 bg-gradient-to-r from-emerald-600 to-emerald-500 text-white rounded-md hover:brightness-110 transition-all shadow-md shadow-emerald-900/20 font-medium text-xs flex-shrink-0">
-                        <Plus size={14} /> <span>New</span>
-                    </button>
-                    <button
-                        onClick={() => setShowTemplateLibrary(true)}
-                        title="Templates"
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                    >
-                        <FileText size={14} /> <span>Templates</span>
-                    </button>
-                    <button
-                        onClick={() => setShowABTesting(true)}
-                        title="A/B Testing (Test different prompts)"
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                    >
-                        <TestTube size={14} /> <span>A/B Test</span>
-                    </button>
-                    <button
-                        onClick={() => setShowPromptOptimization(true)}
-                        title="Prompt Optimization (AI-powered suggestions)"
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                    >
-                        <Sparkles size={14} /> <span>Optimize</span>
-                    </button>
-                    <button
-                        onClick={() => setShowWorkflows(true)}
-                        title="Workflows (Automation)"
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                    >
-                        <Zap size={14} /> <span>Workflows</span>
-                    </button>
-                    <button
-                        onClick={() => setShowAPIPlayground(true)}
-                        title="API Playground (Developer Tools)"
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                    >
-                        <Code2 size={14} /> <span>API</span>
-                    </button>
-                    <button
-                        onClick={() => setShowDeveloperDocs(true)}
-                        title="Developer Documentation"
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                    >
-                        <HelpCircle size={14} /> <span>Docs</span>
-                    </button>
-                    <button
-                        onClick={() => setShowPluginManager(true)}
-                        title="Plugin Manager"
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                    >
-                        <Package size={14} /> <span>Plugins</span>
-                    </button>
-                    <button
-                        onClick={() => setShowWorkspaceViews(true)}
-                        title="Workspace Views"
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
-                    >
-                        <LayoutGrid size={14} /> <span>Views</span>
-                    </button>
+                    <TopHeaderPrimaryActions
+                        isCompactViewport={isCompactViewport}
+                        showHistory={showHistory}
+                        onToggleHistory={handleToggleHistoryPanel}
+                        actions={topHeaderPrimaryActions}
+                    />
                     {history.length > 0 && (
                         <button
-                            onClick={() => {
-                                // Extract code from last assistant message
-                                const lastMessage = history[history.length - 1];
-                                if (lastMessage?.content) {
-                                    // Try to extract code block
-                                    const codeBlockMatch = lastMessage.content.match(/```(\w+)?\n([\s\S]*?)```/);
-                                    if (codeBlockMatch) {
-                                        setSelectedCode({
-                                            code: codeBlockMatch[2],
-                                            language: codeBlockMatch[1] || 'javascript',
-                                        });
-                                    } else {
-                                        setSelectedCode({
-                                            code: lastMessage.content,
-                                            language: 'javascript',
-                                        });
-                                    }
-                                    setShowCodeIntegration(true);
-                                }
-                            }}
+                            onClick={handleOpenCodeIntegration}
                             title="Code Integration (Review, Refactor, Docs, Tests, Git)"
                             className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
                         >
@@ -3471,7 +3638,7 @@ const Chat: React.FC = () => {
                         </div>
                     </div>
                     <button
-                        onClick={() => setShowCloudSync(true)}
+                        onClick={handleOpenCloudSyncPanel}
                         title={cloudSyncBadge.title}
                         className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap ${cloudSyncBadge.className}`}
                     >
@@ -3479,12 +3646,7 @@ const Chat: React.FC = () => {
                     </button>
                     {history.length > 0 && (
                         <button
-                            onClick={() => {
-                                if (window.confirm('Clear all messages in this chat?')) {
-                                    setHistory([]);
-                                    toast.success('Chat cleared');
-                                }
-                            }}
+                            onClick={handleClearChat}
                             title="Clear Chat"
                             className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
                         >
@@ -3494,20 +3656,14 @@ const Chat: React.FC = () => {
                     {history.length > 0 && (
                         <>
                             <button
-                                onClick={() => setShowExportDialog(true)}
+                                onClick={handleOpenExportDialog}
                                 title="Export Chat (Ctrl+Shift+E)"
                                 className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
                             >
                                 <Download size={14} /> <span>Export</span>
                             </button>
                             <button
-                                onClick={() => {
-                                    setShowTreeView(!showTreeView);
-                                    if (!branchingEnabled) {
-                                        setBranchingEnabled(true);
-                                        toast.info('Conversation branching enabled');
-                                    }
-                                }}
+                                onClick={handleToggleTreeView}
                                 title="Conversation Tree (Ctrl+T)"
                                 className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap ${showTreeView
                                     ? 'bg-blue-600 text-white'
@@ -3517,14 +3673,7 @@ const Chat: React.FC = () => {
                                 <Network size={14} /> <span>Tree</span>
                             </button>
                             <button
-                                onClick={() => {
-                                    try {
-                                        HistoryService.exportSessionToObsidian(sessionId);
-                                        toast.success('Chat exported as Obsidian markdown');
-                                    } catch (error: any) {
-                                        toast.error(error.message || 'Failed to export');
-                                    }
-                                }}
+                                onClick={handleExportSessionToObsidian}
                                 title="Export to Obsidian"
                                 className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap"
                             >

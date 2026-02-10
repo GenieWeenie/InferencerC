@@ -10,6 +10,12 @@ import {
     buildUpdatedMessageContent,
     collectMessageIndicesToLoad,
 } from '../lib/chatStateGuards';
+import {
+    applyChatStreamChunk,
+    consumeChatStreamContent,
+    createChatStreamParseState,
+    flushChatStreamToolCalls,
+} from '../lib/chatStreamParser';
 import { AVAILABLE_TOOLS } from '../lib/tools';
 import { crashRecoveryService } from '../services/crashRecovery';
 import { performanceService } from '../services/performance';
@@ -1171,86 +1177,32 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                 const reader = res.body.getReader();
                 const decoder = new TextDecoder();
                 let done = false;
-                let buffer = '';
-                let streamBuffer = '';
                 let lastUpdate = Date.now();
-
-                let toolCallsBuffer: Record<number, ToolCall> = {};
-                let toolCallsDirty = false;
+                const parserState = createChatStreamParseState();
                 let cachedToolCalls: ToolCall[] = [];
-
-                const flushToolCalls = () => {
-                    if (!toolCallsDirty) return;
-                    cachedToolCalls = Object.keys(toolCallsBuffer)
-                        .map((key) => Number(key))
-                        .sort((a, b) => a - b)
-                        .map((index) => toolCallsBuffer[index]);
-                    toolCallsDirty = false;
-                };
 
                 while (!done) {
                     const { value, done: isDone } = await reader.read();
                     done = isDone;
                     if (value) {
                         const chunk = decoder.decode(value, { stream: true });
-                        streamBuffer += chunk;
-                        const lines = streamBuffer.split('\n');
-                        streamBuffer = isDone ? '' : lines.pop() || '';
-
-                        for (const line of lines) {
-                            const trimmed = line.trim();
-                            if (trimmed.startsWith('data:')) {
-                                const dataStr = trimmed.replace(/^data:\s*/, '').trim();
-                                if (!dataStr || dataStr === '[DONE]') continue;
-                                try {
-                                    const parsed = JSON.parse(dataStr);
-                                    const delta = parsed.choices?.[0]?.delta;
-
-                                    if (delta) {
-                                        if (delta.content) buffer += delta.content;
-                                        if (delta.tool_calls) {
-                                            for (const tc of delta.tool_calls) {
-                                                const idx = tc.index;
-                                                if (!toolCallsBuffer[idx]) {
-                                                    toolCallsBuffer[idx] = {
-                                                        id: tc.id || '',
-                                                        type: 'function',
-                                                        function: { name: tc.function?.name || '', arguments: '' }
-                                                    };
-                                                    toolCallsDirty = true;
-                                                }
-                                                if (tc.id && toolCallsBuffer[idx].id !== tc.id) {
-                                                    toolCallsBuffer[idx].id = tc.id;
-                                                    toolCallsDirty = true;
-                                                }
-                                                if (tc.function?.name) {
-                                                    toolCallsBuffer[idx].function.name += tc.function.name;
-                                                    toolCallsDirty = true;
-                                                }
-                                                if (tc.function?.arguments) {
-                                                    toolCallsBuffer[idx].function.arguments += tc.function.arguments;
-                                                    toolCallsDirty = true;
-                                                }
-                                            }
-                                        }
-                                    }
-                                } catch (e) { }
-                            }
-                        }
+                        applyChatStreamChunk(parserState, chunk, isDone);
                     }
 
                     const now = Date.now();
                     // Optimize: Update more frequently for better UX, but batch small updates
                     const shouldUpdate = (
                         done ||
-                        buffer.length > 50 ||
-                        (toolCallsDirty && (now - lastUpdate > 100)) ||
-                        ((now - lastUpdate > 100) && buffer.length > 0)
+                        parserState.contentBuffer.length > 50 ||
+                        (parserState.toolCallsDirty && (now - lastUpdate > 100)) ||
+                        ((now - lastUpdate > 100) && parserState.contentBuffer.length > 0)
                     );
                     if (shouldUpdate) {
-                        flushToolCalls();
-                        fullContent += buffer;
-                        buffer = '';
+                        const flushedToolCalls = flushChatStreamToolCalls(parserState);
+                        if (flushedToolCalls) {
+                            cachedToolCalls = flushedToolCalls;
+                        }
+                        fullContent += consumeChatStreamContent(parserState);
                         lastUpdate = now;
                         updateMessageContent(
                             targetIndex,
@@ -1262,7 +1214,10 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
                         );
                     }
                 }
-                flushToolCalls();
+                const flushedToolCalls = flushChatStreamToolCalls(parserState);
+                if (flushedToolCalls) {
+                    cachedToolCalls = flushedToolCalls;
+                }
                 const completedToolCalls = cachedToolCalls;
                 if (completedToolCalls.length > 0) {
                     finalToolCalls = completedToolCalls;
