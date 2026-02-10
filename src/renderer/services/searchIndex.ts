@@ -2488,6 +2488,12 @@ const getPostingSet = (term: string, ids: string[]): Set<string> => {
     return idsSet;
 };
 
+const createSingletonResult = (sessionId: string): Set<string> => {
+    const result = new Set<string>();
+    result.add(sessionId);
+    return result;
+};
+
 const extractSessionTerms = (session: ChatSession): Set<string> => {
     const terms = new Set<string>();
     const titleTerms = SearchIndexService.tokenize(session.title);
@@ -2677,8 +2683,8 @@ export const SearchIndexService = {
                     const term = termList[termIndex];
                     let termIds = indexTerms[term];
                     if (!termIds) {
-                        termIds = [];
-                        indexTerms[term] = termIds;
+                        indexTerms[term] = [sessionId];
+                        continue;
                     }
                     if (previousTermsLookup.has(term)) {
                         termIds.push(sessionId);
@@ -2694,8 +2700,8 @@ export const SearchIndexService = {
                     const term = termList[termIndex];
                     let termIds = indexTerms[term];
                     if (!termIds) {
-                        termIds = [];
-                        indexTerms[term] = termIds;
+                        indexTerms[term] = [sessionId];
+                        continue;
                     }
                     if (termIds.includes(sessionId)) {
                         continue;
@@ -2787,6 +2793,13 @@ export const SearchIndexService = {
             const candidateIds = scanFirstTerm ? firstIds : secondIds;
             const membershipTerm = scanFirstTerm ? secondTerm : firstTerm;
             const membershipIds = scanFirstTerm ? secondIds : firstIds;
+            if (candidateIds.length === 1) {
+                const sessionId = candidateIds[0];
+                if (membershipIds.includes(sessionId)) {
+                    return createSingletonResult(sessionId);
+                }
+                return new Set<string>();
+            }
             const membershipSet = getPostingSet(membershipTerm, membershipIds);
 
             for (let i = 0; i < candidateIds.length; i++) {
@@ -2834,6 +2847,13 @@ export const SearchIndexService = {
                 membershipIdsB = secondIds;
             }
 
+            if (candidateIds.length === 1) {
+                const sessionId = candidateIds[0];
+                if (membershipIdsA.includes(sessionId) && membershipIdsB.includes(sessionId)) {
+                    return createSingletonResult(sessionId);
+                }
+                return new Set<string>();
+            }
             const membershipSetA = getPostingSet(membershipTermA, membershipIdsA);
             const membershipSetB = getPostingSet(membershipTermB, membershipIdsB);
             for (let i = 0; i < candidateIds.length; i++) {
@@ -2903,6 +2923,17 @@ export const SearchIndexService = {
                 membershipIdsC = thirdIds;
             }
 
+            if (candidateIds.length === 1) {
+                const sessionId = candidateIds[0];
+                if (
+                    membershipIdsA.includes(sessionId) &&
+                    membershipIdsB.includes(sessionId) &&
+                    membershipIdsC.includes(sessionId)
+                ) {
+                    return createSingletonResult(sessionId);
+                }
+                return new Set<string>();
+            }
             const membershipSetA = getPostingSet(membershipTermA, membershipIdsA);
             const membershipSetB = getPostingSet(membershipTermB, membershipIdsB);
             const membershipSetC = getPostingSet(membershipTermC, membershipIdsC);
@@ -2995,6 +3026,18 @@ export const SearchIndexService = {
                 membershipIdsD = fourthIds;
             }
 
+            if (candidateIds.length === 1) {
+                const sessionId = candidateIds[0];
+                if (
+                    membershipIdsA.includes(sessionId) &&
+                    membershipIdsB.includes(sessionId) &&
+                    membershipIdsC.includes(sessionId) &&
+                    membershipIdsD.includes(sessionId)
+                ) {
+                    return createSingletonResult(sessionId);
+                }
+                return new Set<string>();
+            }
             const membershipSetA = getPostingSet(membershipTermA, membershipIdsA);
             const membershipSetB = getPostingSet(membershipTermB, membershipIdsB);
             const membershipSetC = getPostingSet(membershipTermC, membershipIdsC);
@@ -3006,6 +3049,319 @@ export const SearchIndexService = {
                     membershipSetB.has(sessionId) &&
                     membershipSetC.has(sessionId) &&
                     membershipSetD.has(sessionId)
+                ) {
+                    if (!resultIds) {
+                        resultIds = new Set<string>();
+                    }
+                    resultIds.add(sessionId);
+                }
+            }
+            return resultIds ?? new Set<string>();
+        }
+        if (queryTermCount === 6) {
+            const firstTerm = queryTerms[0];
+            const secondTerm = queryTerms[1];
+            const thirdTerm = queryTerms[2];
+            const fourthTerm = queryTerms[3];
+            const fifthTerm = queryTerms[4];
+            const sixthTerm = queryTerms[5];
+            const firstIds = index.terms[firstTerm];
+            const secondIds = index.terms[secondTerm];
+            const thirdIds = index.terms[thirdTerm];
+            const fourthIds = index.terms[fourthTerm];
+            const fifthIds = index.terms[fifthTerm];
+            const sixthIds = index.terms[sixthTerm];
+
+            if (
+                !firstIds || firstIds.length === 0 ||
+                !secondIds || secondIds.length === 0 ||
+                !thirdIds || thirdIds.length === 0 ||
+                !fourthIds || fourthIds.length === 0 ||
+                !fifthIds || fifthIds.length === 0 ||
+                !sixthIds || sixthIds.length === 0
+            ) {
+                return new Set<string>();
+            }
+
+            let resultIds: Set<string> | null = null;
+            let candidateIds = firstIds;
+            let membershipTermA = secondTerm;
+            let membershipIdsA = secondIds;
+            let membershipTermB = thirdTerm;
+            let membershipIdsB = thirdIds;
+            let membershipTermC = fourthTerm;
+            let membershipIdsC = fourthIds;
+            let membershipTermD = fifthTerm;
+            let membershipIdsD = fifthIds;
+            let membershipTermE = sixthTerm;
+            let membershipIdsE = sixthIds;
+
+            if (secondIds.length < candidateIds.length) {
+                candidateIds = secondIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = thirdTerm;
+                membershipIdsB = thirdIds;
+                membershipTermC = fourthTerm;
+                membershipIdsC = fourthIds;
+                membershipTermD = fifthTerm;
+                membershipIdsD = fifthIds;
+                membershipTermE = sixthTerm;
+                membershipIdsE = sixthIds;
+            }
+            if (thirdIds.length < candidateIds.length) {
+                candidateIds = thirdIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+                membershipTermC = fourthTerm;
+                membershipIdsC = fourthIds;
+                membershipTermD = fifthTerm;
+                membershipIdsD = fifthIds;
+                membershipTermE = sixthTerm;
+                membershipIdsE = sixthIds;
+            }
+            if (fourthIds.length < candidateIds.length) {
+                candidateIds = fourthIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+                membershipTermC = thirdTerm;
+                membershipIdsC = thirdIds;
+                membershipTermD = fifthTerm;
+                membershipIdsD = fifthIds;
+                membershipTermE = sixthTerm;
+                membershipIdsE = sixthIds;
+            }
+            if (fifthIds.length < candidateIds.length) {
+                candidateIds = fifthIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+                membershipTermC = thirdTerm;
+                membershipIdsC = thirdIds;
+                membershipTermD = fourthTerm;
+                membershipIdsD = fourthIds;
+                membershipTermE = sixthTerm;
+                membershipIdsE = sixthIds;
+            }
+            if (sixthIds.length < candidateIds.length) {
+                candidateIds = sixthIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+                membershipTermC = thirdTerm;
+                membershipIdsC = thirdIds;
+                membershipTermD = fourthTerm;
+                membershipIdsD = fourthIds;
+                membershipTermE = fifthTerm;
+                membershipIdsE = fifthIds;
+            }
+
+            if (candidateIds.length === 1) {
+                const sessionId = candidateIds[0];
+                if (
+                    membershipIdsA.includes(sessionId) &&
+                    membershipIdsB.includes(sessionId) &&
+                    membershipIdsC.includes(sessionId) &&
+                    membershipIdsD.includes(sessionId) &&
+                    membershipIdsE.includes(sessionId)
+                ) {
+                    return createSingletonResult(sessionId);
+                }
+                return new Set<string>();
+            }
+
+            const membershipSetA = getPostingSet(membershipTermA, membershipIdsA);
+            const membershipSetB = getPostingSet(membershipTermB, membershipIdsB);
+            const membershipSetC = getPostingSet(membershipTermC, membershipIdsC);
+            const membershipSetD = getPostingSet(membershipTermD, membershipIdsD);
+            const membershipSetE = getPostingSet(membershipTermE, membershipIdsE);
+            for (let i = 0; i < candidateIds.length; i++) {
+                const sessionId = candidateIds[i];
+                if (
+                    membershipSetA.has(sessionId) &&
+                    membershipSetB.has(sessionId) &&
+                    membershipSetC.has(sessionId) &&
+                    membershipSetD.has(sessionId) &&
+                    membershipSetE.has(sessionId)
+                ) {
+                    if (!resultIds) {
+                        resultIds = new Set<string>();
+                    }
+                    resultIds.add(sessionId);
+                }
+            }
+            return resultIds ?? new Set<string>();
+        }
+        if (queryTermCount === 7) {
+            const firstTerm = queryTerms[0];
+            const secondTerm = queryTerms[1];
+            const thirdTerm = queryTerms[2];
+            const fourthTerm = queryTerms[3];
+            const fifthTerm = queryTerms[4];
+            const sixthTerm = queryTerms[5];
+            const seventhTerm = queryTerms[6];
+            const firstIds = index.terms[firstTerm];
+            const secondIds = index.terms[secondTerm];
+            const thirdIds = index.terms[thirdTerm];
+            const fourthIds = index.terms[fourthTerm];
+            const fifthIds = index.terms[fifthTerm];
+            const sixthIds = index.terms[sixthTerm];
+            const seventhIds = index.terms[seventhTerm];
+
+            if (
+                !firstIds || firstIds.length === 0 ||
+                !secondIds || secondIds.length === 0 ||
+                !thirdIds || thirdIds.length === 0 ||
+                !fourthIds || fourthIds.length === 0 ||
+                !fifthIds || fifthIds.length === 0 ||
+                !sixthIds || sixthIds.length === 0 ||
+                !seventhIds || seventhIds.length === 0
+            ) {
+                return new Set<string>();
+            }
+
+            let resultIds: Set<string> | null = null;
+            let candidateIds = firstIds;
+            let membershipTermA = secondTerm;
+            let membershipIdsA = secondIds;
+            let membershipTermB = thirdTerm;
+            let membershipIdsB = thirdIds;
+            let membershipTermC = fourthTerm;
+            let membershipIdsC = fourthIds;
+            let membershipTermD = fifthTerm;
+            let membershipIdsD = fifthIds;
+            let membershipTermE = sixthTerm;
+            let membershipIdsE = sixthIds;
+            let membershipTermF = seventhTerm;
+            let membershipIdsF = seventhIds;
+
+            if (secondIds.length < candidateIds.length) {
+                candidateIds = secondIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = thirdTerm;
+                membershipIdsB = thirdIds;
+                membershipTermC = fourthTerm;
+                membershipIdsC = fourthIds;
+                membershipTermD = fifthTerm;
+                membershipIdsD = fifthIds;
+                membershipTermE = sixthTerm;
+                membershipIdsE = sixthIds;
+                membershipTermF = seventhTerm;
+                membershipIdsF = seventhIds;
+            }
+            if (thirdIds.length < candidateIds.length) {
+                candidateIds = thirdIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+                membershipTermC = fourthTerm;
+                membershipIdsC = fourthIds;
+                membershipTermD = fifthTerm;
+                membershipIdsD = fifthIds;
+                membershipTermE = sixthTerm;
+                membershipIdsE = sixthIds;
+                membershipTermF = seventhTerm;
+                membershipIdsF = seventhIds;
+            }
+            if (fourthIds.length < candidateIds.length) {
+                candidateIds = fourthIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+                membershipTermC = thirdTerm;
+                membershipIdsC = thirdIds;
+                membershipTermD = fifthTerm;
+                membershipIdsD = fifthIds;
+                membershipTermE = sixthTerm;
+                membershipIdsE = sixthIds;
+                membershipTermF = seventhTerm;
+                membershipIdsF = seventhIds;
+            }
+            if (fifthIds.length < candidateIds.length) {
+                candidateIds = fifthIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+                membershipTermC = thirdTerm;
+                membershipIdsC = thirdIds;
+                membershipTermD = fourthTerm;
+                membershipIdsD = fourthIds;
+                membershipTermE = sixthTerm;
+                membershipIdsE = sixthIds;
+                membershipTermF = seventhTerm;
+                membershipIdsF = seventhIds;
+            }
+            if (sixthIds.length < candidateIds.length) {
+                candidateIds = sixthIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+                membershipTermC = thirdTerm;
+                membershipIdsC = thirdIds;
+                membershipTermD = fourthTerm;
+                membershipIdsD = fourthIds;
+                membershipTermE = fifthTerm;
+                membershipIdsE = fifthIds;
+                membershipTermF = seventhTerm;
+                membershipIdsF = seventhIds;
+            }
+            if (seventhIds.length < candidateIds.length) {
+                candidateIds = seventhIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+                membershipTermC = thirdTerm;
+                membershipIdsC = thirdIds;
+                membershipTermD = fourthTerm;
+                membershipIdsD = fourthIds;
+                membershipTermE = fifthTerm;
+                membershipIdsE = fifthIds;
+                membershipTermF = sixthTerm;
+                membershipIdsF = sixthIds;
+            }
+
+            if (candidateIds.length === 1) {
+                const sessionId = candidateIds[0];
+                if (
+                    membershipIdsA.includes(sessionId) &&
+                    membershipIdsB.includes(sessionId) &&
+                    membershipIdsC.includes(sessionId) &&
+                    membershipIdsD.includes(sessionId) &&
+                    membershipIdsE.includes(sessionId) &&
+                    membershipIdsF.includes(sessionId)
+                ) {
+                    return createSingletonResult(sessionId);
+                }
+                return new Set<string>();
+            }
+
+            const membershipSetA = getPostingSet(membershipTermA, membershipIdsA);
+            const membershipSetB = getPostingSet(membershipTermB, membershipIdsB);
+            const membershipSetC = getPostingSet(membershipTermC, membershipIdsC);
+            const membershipSetD = getPostingSet(membershipTermD, membershipIdsD);
+            const membershipSetE = getPostingSet(membershipTermE, membershipIdsE);
+            const membershipSetF = getPostingSet(membershipTermF, membershipIdsF);
+            for (let i = 0; i < candidateIds.length; i++) {
+                const sessionId = candidateIds[i];
+                if (
+                    membershipSetA.has(sessionId) &&
+                    membershipSetB.has(sessionId) &&
+                    membershipSetC.has(sessionId) &&
+                    membershipSetD.has(sessionId) &&
+                    membershipSetE.has(sessionId) &&
+                    membershipSetF.has(sessionId)
                 ) {
                     if (!resultIds) {
                         resultIds = new Set<string>();

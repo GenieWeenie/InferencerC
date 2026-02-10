@@ -135,6 +135,32 @@ describe('SearchIndexService', () => {
     expect(result).toEqual(new Set(['s1']));
   });
 
+  it('intersects seven-term queries correctly', () => {
+    const sessions: ChatSession[] = [
+      createSession('s1', 'alpha beta gamma', 'delta epsilon zeta eta'),
+      createSession('s2', 'alpha beta gamma', 'delta epsilon zeta'),
+      createSession('s3', 'alpha beta gamma delta', 'epsilon zeta eta'),
+    ];
+    SearchIndexService.rebuildIndex(sessions);
+
+    const result = SearchIndexService.searchSessions('alpha beta gamma delta epsilon zeta eta');
+
+    expect(result).toEqual(new Set(['s1', 's3']));
+  });
+
+  it('handles singleton-candidate intersections without changing results', () => {
+    const sessions: ChatSession[] = [
+      createSession('s1', 'rareterm alpha beta', 'gamma delta epsilon'),
+      createSession('s2', 'alpha beta', 'gamma delta epsilon'),
+      createSession('s3', 'alpha gamma', 'delta epsilon'),
+    ];
+    SearchIndexService.rebuildIndex(sessions);
+
+    const result = SearchIndexService.searchSessions('rareterm alpha beta gamma delta epsilon');
+
+    expect(result).toEqual(new Set(['s1']));
+  });
+
   it('returns all matching sessions for one-term queries', () => {
     const sessions: ChatSession[] = [
       createSession('s1', 'alpha beta', 'gamma'),

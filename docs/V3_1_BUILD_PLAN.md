@@ -198,6 +198,11 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 129: in generic multi-term `searchSessions`, reuse a module-scope membership-set scratch array to avoid per-query temporary array allocation.
    - Pass 130: add targeted `searchIndex` unit coverage for two/three/five-term fast paths plus six-term fallback behavior.
    - Pass 131: in `applyOperations` upserts, split prior-term and new-term insert handling so existing-term continuations skip unnecessary duplicate-check branching.
+   - Pass 132: in `searchSessions`, add a dedicated six-term intersection fast path that scans the smallest posting list against five cached membership sets.
+   - Pass 133: in `searchSessions`, add a dedicated seven-term intersection fast path that scans the smallest posting list against six cached membership sets.
+   - Pass 134: in two-to-seven-term `searchSessions` fast paths, add singleton-candidate short-circuits to avoid unnecessary set construction while preserving results.
+   - Pass 135: in `applyOperations` upserts, directly assign `[sessionId]` for missing posting lists to skip unnecessary duplicate checks on first insert.
+   - Pass 136: expand `searchIndex` tests to cover seven-term intersections and singleton-candidate multi-term behavior.
 
 ## Release Checklist for v3.1.x
 
