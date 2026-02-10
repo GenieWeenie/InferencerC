@@ -65,20 +65,25 @@ describe('testDataGenerator', () => {
         });
 
         it('should include images when requested', () => {
-            const messages = generateLargeConversation({
-                messageCount: 200,
-                includeImages: true
-            });
+            const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
+            try {
+                const messages = generateLargeConversation({
+                    messageCount: 200,
+                    includeImages: true
+                });
 
-            const withImages = messages.filter(m => m.images && m.images.length > 0);
-            expect(withImages.length).toBeGreaterThan(0);
+                const withImages = messages.filter(m => m.images && m.images.length > 0);
+                expect(withImages.length).toBeGreaterThan(0);
 
-            const firstImage = withImages[0].images![0];
-            expect(firstImage.id).toBeDefined();
-            expect(firstImage.name).toBeDefined();
-            expect(firstImage.mimeType).toBeDefined();
-            expect(firstImage.base64).toBeDefined();
-            expect(firstImage.thumbnailUrl).toBeDefined();
+                const firstImage = withImages[0].images![0];
+                expect(firstImage.id).toBeDefined();
+                expect(firstImage.name).toBeDefined();
+                expect(firstImage.mimeType).toBeDefined();
+                expect(firstImage.base64).toBeDefined();
+                expect(firstImage.thumbnailUrl).toBeDefined();
+            } finally {
+                randomSpy.mockRestore();
+            }
         });
 
         it('should include logprobs when requested', () => {
