@@ -7,14 +7,17 @@ import {
   buildDeleteMessagePatch,
   buildHistoryResetPatch,
   buildInitialLazySessionState,
+  buildLazySessionLoadPatch,
   buildMessageLoadPatch,
   buildMessageReplacePatch,
   buildOutgoingMessagePatch,
   buildSavedSessionsPatch,
+  buildSessionReloadSignature,
   buildStopGenerationPatch,
   buildTokenEditUpdate,
   buildUpdatedMessageContent,
   collectMessageIndicesToLoad,
+  shouldSkipSessionReload,
 } from '../src/renderer/lib/chatStateGuards';
 
 const createMessage = (content: string, isLoading = false): ChatMessage => ({
@@ -481,6 +484,79 @@ describe('chatStateGuards', () => {
       expect(patch.lightweightHistory[2]).toBe(allMessages[2]);
       expect(Array.from(patch.nextLoadedMessageIndices)).toEqual([2]);
       expect(patch.nextFullMessageCache.get(2)).toEqual(allMessages[2]);
+    });
+  });
+
+  describe('buildLazySessionLoadPatch', () => {
+    it('returns full history/cache/index when message count is below initial load threshold', () => {
+      const allMessages: ChatMessage[] = [
+        { role: 'user', content: 'a' },
+        { role: 'assistant', content: 'b' },
+      ];
+
+      const patch = buildLazySessionLoadPatch({
+        allMessages,
+        initialLoadCount: 5,
+      });
+
+      expect(patch.nextHistory).toBe(allMessages);
+      expect(Array.from(patch.nextLoadedMessageIndices).sort((a, b) => a - b)).toEqual([0, 1]);
+      expect(patch.nextFullMessageCache.get(0)).toBe(allMessages[0]);
+      expect(patch.nextFullMessageCache.get(1)).toBe(allMessages[1]);
+    });
+
+    it('returns lightweight history while keeping full cache for initial loaded window', () => {
+      const allMessages: ChatMessage[] = [
+        { role: 'user', content: 'first-message' },
+        { role: 'assistant', content: 'second-message' },
+        { role: 'assistant', content: 'recent-message' },
+      ];
+
+      const patch = buildLazySessionLoadPatch({
+        allMessages,
+        initialLoadCount: 1,
+        previewLength: 5,
+      });
+
+      expect(patch.nextHistory[0].content).toBe('first...');
+      expect(patch.nextHistory[1].content).toBe('secon...');
+      expect(patch.nextHistory[2]).toBe(allMessages[2]);
+      expect(Array.from(patch.nextLoadedMessageIndices)).toEqual([2]);
+      expect(patch.nextFullMessageCache.has(0)).toBe(false);
+      expect(patch.nextFullMessageCache.get(2)).toBe(allMessages[2]);
+    });
+  });
+
+  describe('session reload guards', () => {
+    it('builds deterministic reload signatures', () => {
+      expect(buildSessionReloadSignature('session-1', 42)).toBe('session-1:42');
+      expect(buildSessionReloadSignature('session-1', 43)).toBe('session-1:43');
+    });
+
+    it('returns true only for active session with unchanged signature', () => {
+      const signature = buildSessionReloadSignature('session-1', 100);
+      expect(shouldSkipSessionReload({
+        activeSessionId: 'session-1',
+        loadedSessionSignature: signature,
+        nextSessionId: 'session-1',
+        nextSessionLastModified: 100,
+      })).toBe(true);
+    });
+
+    it('returns false when lastModified or session id changed', () => {
+      const signature = buildSessionReloadSignature('session-1', 100);
+      expect(shouldSkipSessionReload({
+        activeSessionId: 'session-1',
+        loadedSessionSignature: signature,
+        nextSessionId: 'session-1',
+        nextSessionLastModified: 101,
+      })).toBe(false);
+      expect(shouldSkipSessionReload({
+        activeSessionId: 'session-2',
+        loadedSessionSignature: signature,
+        nextSessionId: 'session-1',
+        nextSessionLastModified: 100,
+      })).toBe(false);
     });
   });
 

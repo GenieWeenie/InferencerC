@@ -1,5 +1,11 @@
 import { ChatMessage, ChatSession, Message, TokenLogprob, ToolCall } from '../../shared/types';
 
+export interface ChatHistoryStatePatch {
+    nextHistory: ChatMessage[];
+    nextFullMessageCache: Map<number, ChatMessage>;
+    nextLoadedMessageIndices: Set<number>;
+}
+
 export const collectMessageIndicesToLoad = (
     startIndex: number,
     endIndex: number,
@@ -181,11 +187,7 @@ export const buildAppendMessagePatch = (
 
 export const buildHistoryResetPatch = (
     nextHistory: ChatMessage[]
-): {
-    nextHistory: ChatMessage[];
-    nextFullMessageCache: Map<number, ChatMessage>;
-    nextLoadedMessageIndices: Set<number>;
-} => {
+): ChatHistoryStatePatch => {
     const nextFullMessageCache = new Map<number, ChatMessage>();
     const nextLoadedMessageIndices = new Set<number>();
 
@@ -552,6 +554,52 @@ export const buildInitialLazySessionState = ({
         nextFullMessageCache,
         nextLoadedMessageIndices,
     };
+};
+
+interface BuildLazySessionLoadPatchInput {
+    allMessages: ChatMessage[];
+    initialLoadCount: number;
+    previewLength?: number;
+}
+
+export const buildLazySessionLoadPatch = ({
+    allMessages,
+    initialLoadCount,
+    previewLength,
+}: BuildLazySessionLoadPatchInput): ChatHistoryStatePatch => {
+    const lazySessionState = buildInitialLazySessionState({
+        allMessages,
+        initialLoadCount,
+        previewLength,
+    });
+    return {
+        nextHistory: lazySessionState.lightweightHistory,
+        nextFullMessageCache: lazySessionState.nextFullMessageCache,
+        nextLoadedMessageIndices: lazySessionState.nextLoadedMessageIndices,
+    };
+};
+
+export const buildSessionReloadSignature = (sessionId: string, lastModified: number): string => {
+    return `${sessionId}:${lastModified}`;
+};
+
+interface ShouldSkipSessionReloadInput {
+    activeSessionId: string;
+    loadedSessionSignature: string;
+    nextSessionId: string;
+    nextSessionLastModified: number;
+}
+
+export const shouldSkipSessionReload = ({
+    activeSessionId,
+    loadedSessionSignature,
+    nextSessionId,
+    nextSessionLastModified,
+}: ShouldSkipSessionReloadInput): boolean => {
+    return (
+        activeSessionId === nextSessionId
+        && loadedSessionSignature === buildSessionReloadSignature(nextSessionId, nextSessionLastModified)
+    );
 };
 
 const areChatSessionMetadataEqual = (a: ChatSession, b: ChatSession): boolean => {

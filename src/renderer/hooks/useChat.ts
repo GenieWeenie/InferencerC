@@ -8,9 +8,10 @@ import {
     buildContextMessagesPatch,
     buildDeleteMessagePatch,
     buildHistoryResetPatch,
-    buildInitialLazySessionState,
+    buildLazySessionLoadPatch,
     buildMessageReplacePatch,
     buildOutgoingMessagePatch,
+    buildSessionReloadSignature,
     buildSavedSessionsPatch,
     buildChoiceSelectionUpdate,
     buildMessageLoadPatch,
@@ -18,6 +19,7 @@ import {
     buildTokenEditUpdate,
     buildUpdatedMessageContent,
     collectMessageIndicesToLoad,
+    shouldSkipSessionReload,
 } from '../lib/chatStateGuards';
 import {
     applyChatStreamChunk,
@@ -192,6 +194,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     const didApplyInitialModelSelectionRef = useRef(false);
     const loadedSessionIdRef = useRef<string | null>(null);
     const loadedSessionMessagesRef = useRef<ChatMessage[]>([]);
+    const loadedSessionSignatureRef = useRef<string>('');
     const lastSidebarMetadataSignatureRef = useRef<string>('');
 
     // Logic State
@@ -255,6 +258,25 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     useEffect(() => {
         selectedTokenRef.current = selectedToken;
     }, [selectedToken]);
+
+    const applyHistoryStatePatch = useCallback((patch: {
+        nextHistory: ChatMessage[];
+        nextFullMessageCache: Map<number, ChatMessage>;
+        nextLoadedMessageIndices: Set<number>;
+    }) => {
+        if (historyRef.current !== patch.nextHistory) {
+            historyRef.current = patch.nextHistory;
+            setHistory(patch.nextHistory);
+        }
+        if (fullMessageCacheRef.current !== patch.nextFullMessageCache) {
+            fullMessageCacheRef.current = patch.nextFullMessageCache;
+            setFullMessageCache(patch.nextFullMessageCache);
+        }
+        if (loadedMessageIndicesRef.current !== patch.nextLoadedMessageIndices) {
+            loadedMessageIndicesRef.current = patch.nextLoadedMessageIndices;
+            setLoadedMessageIndices(patch.nextLoadedMessageIndices);
+        }
+    }, []);
 
     const logComplianceEvent = useCallback((event: any) => {
         void loadEnterpriseComplianceService()
@@ -703,15 +725,15 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
     const createNewSession = () => {
         const newSession = HistoryService.createNewSession(currentModel || 'local-lmstudio');
+        const resetPatch = buildHistoryResetPatch([]);
         lastSidebarMetadataSignatureRef.current = '';
         setSessionId(newSession.id);
         loadedSessionIdRef.current = newSession.id;
         loadedSessionMessagesRef.current = [];
-        setHistory([]);
+        loadedSessionSignatureRef.current = buildSessionReloadSignature(newSession.id, newSession.lastModified);
+        applyHistoryStatePatch(resetPatch);
+        selectedTokenRef.current = null;
         setSelectedToken(null);
-        // Reset lazy loading state
-        setLoadedMessageIndices(new Set());
-        setFullMessageCache(new Map());
         HistoryService.setLastActiveSessionId(newSession.id);
         HistoryService.saveSession(newSession);
         setSavedSessions((prev) => {
@@ -747,6 +769,16 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     const loadSession = (id: string) => {
         const session = HistoryService.getSession(id);
         if (session) {
+            if (shouldSkipSessionReload({
+                activeSessionId: sessionId,
+                loadedSessionSignature: loadedSessionSignatureRef.current,
+                nextSessionId: session.id,
+                nextSessionLastModified: session.lastModified,
+            })) {
+                setShowHistory(false);
+                return;
+            }
+
             lastSidebarMetadataSignatureRef.current = '';
             setSessionId(session.id);
 
@@ -756,14 +788,12 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             const messageCount = allMessages.length;
             loadedSessionIdRef.current = session.id;
             loadedSessionMessagesRef.current = allMessages;
-            const lazySessionState = buildInitialLazySessionState({
+            loadedSessionSignatureRef.current = buildSessionReloadSignature(session.id, session.lastModified);
+            const lazySessionPatch = buildLazySessionLoadPatch({
                 allMessages,
                 initialLoadCount: INITIAL_LOAD_COUNT,
             });
-
-            setHistory(lazySessionState.lightweightHistory);
-            setFullMessageCache(lazySessionState.nextFullMessageCache);
-            setLoadedMessageIndices(lazySessionState.nextLoadedMessageIndices);
+            applyHistoryStatePatch(lazySessionPatch);
 
             if (session.modelId) {
                 setCurrentModel(session.modelId);
@@ -872,22 +902,12 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     }, [loadMessageContent, resolveLazyLoadSourceMessages]);
 
     const applyAppendedMessagePatch = useCallback((patch: ReturnType<typeof buildAppendMessagePatch>) => {
-        historyRef.current = patch.nextHistory;
-        fullMessageCacheRef.current = patch.nextFullMessageCache;
-        loadedMessageIndicesRef.current = patch.nextLoadedMessageIndices;
-        setHistory(patch.nextHistory);
-        setFullMessageCache(patch.nextFullMessageCache);
-        setLoadedMessageIndices(patch.nextLoadedMessageIndices);
-    }, []);
+        applyHistoryStatePatch(patch);
+    }, [applyHistoryStatePatch]);
 
     const replaceHistory = useCallback((nextHistory: ChatMessage[]) => {
         const resetPatch = buildHistoryResetPatch(nextHistory);
-        historyRef.current = resetPatch.nextHistory;
-        fullMessageCacheRef.current = resetPatch.nextFullMessageCache;
-        loadedMessageIndicesRef.current = resetPatch.nextLoadedMessageIndices;
-        setHistory(resetPatch.nextHistory);
-        setFullMessageCache(resetPatch.nextFullMessageCache);
-        setLoadedMessageIndices(resetPatch.nextLoadedMessageIndices);
+        applyHistoryStatePatch(resetPatch);
         setSelectedToken((prevSelectedToken) => {
             if (!prevSelectedToken || prevSelectedToken.messageIndex < nextHistory.length) {
                 return prevSelectedToken;
@@ -895,7 +915,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             selectedTokenRef.current = null;
             return null;
         });
-    }, []);
+    }, [applyHistoryStatePatch]);
 
     const truncateHistory = useCallback((endExclusive: number) => {
         const currentHistory = historyRef.current;
@@ -957,20 +977,16 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     }, [appendMessage, logComplianceEvent, urlInput]);
 
     const applyDeleteMessagePatch = useCallback((patch: NonNullable<ReturnType<typeof buildDeleteMessagePatch>>) => {
-        historyRef.current = patch.nextHistory;
-        fullMessageCacheRef.current = patch.nextFullMessageCache;
-        loadedMessageIndicesRef.current = patch.nextLoadedMessageIndices;
-        setHistory(patch.nextHistory);
-        setFullMessageCache(patch.nextFullMessageCache);
-        setLoadedMessageIndices(patch.nextLoadedMessageIndices);
-    }, []);
+        applyHistoryStatePatch(patch);
+    }, [applyHistoryStatePatch]);
 
     const applyMessageReplacePatch = useCallback((patch: NonNullable<ReturnType<typeof buildMessageReplacePatch>>) => {
-        historyRef.current = patch.nextHistory;
-        fullMessageCacheRef.current = patch.nextFullMessageCache;
-        setHistory(patch.nextHistory);
-        setFullMessageCache(patch.nextFullMessageCache);
-    }, []);
+        applyHistoryStatePatch({
+            nextHistory: patch.nextHistory,
+            nextFullMessageCache: patch.nextFullMessageCache,
+            nextLoadedMessageIndices: loadedMessageIndicesRef.current,
+        });
+    }, [applyHistoryStatePatch]);
 
     const deleteMessage = useCallback((index: number) => {
         const patch = buildDeleteMessagePatch(
@@ -1392,11 +1408,12 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     };
 
     const applyStopGenerationPatch = useCallback((patch: NonNullable<ReturnType<typeof buildStopGenerationPatch>>) => {
-        historyRef.current = patch.nextHistory;
-        fullMessageCacheRef.current = patch.nextFullMessageCache;
-        setHistory(patch.nextHistory);
-        setFullMessageCache(patch.nextFullMessageCache);
-    }, []);
+        applyHistoryStatePatch({
+            nextHistory: patch.nextHistory,
+            nextFullMessageCache: patch.nextFullMessageCache,
+            nextLoadedMessageIndices: loadedMessageIndicesRef.current,
+        });
+    }, [applyHistoryStatePatch]);
 
     const stopGeneration = useCallback(() => {
         abortControllers.forEach(c => c.abort());
@@ -1440,13 +1457,8 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
     }, []);
 
     const applyOutgoingPatch = useCallback((outgoingPatch: ReturnType<typeof buildOutgoingMessagePatch>) => {
-        historyRef.current = outgoingPatch.nextHistory;
-        fullMessageCacheRef.current = outgoingPatch.nextFullMessageCache;
-        loadedMessageIndicesRef.current = outgoingPatch.nextLoadedMessageIndices;
-        setFullMessageCache(outgoingPatch.nextFullMessageCache);
-        setLoadedMessageIndices(outgoingPatch.nextLoadedMessageIndices);
-        setHistory(outgoingPatch.nextHistory);
-    }, []);
+        applyHistoryStatePatch(outgoingPatch);
+    }, [applyHistoryStatePatch]);
 
     const buildComposerResetPatch = () => ({
         nextInput: '',
