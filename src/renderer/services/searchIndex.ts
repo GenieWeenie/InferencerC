@@ -2322,6 +2322,143 @@ const getUniqueQueryTerms = (query: string): string[] => {
         return deduped;
     }
 
+    if (tokens.length === 33) {
+        const first = tokens[0];
+        const second = tokens[1];
+        const third = tokens[2];
+        const fourth = tokens[3];
+        const fifth = tokens[4];
+        const sixth = tokens[5];
+        const seventh = tokens[6];
+        const eighth = tokens[7];
+        const ninth = tokens[8];
+        const tenth = tokens[9];
+        const eleventh = tokens[10];
+        const twelfth = tokens[11];
+        const thirteenth = tokens[12];
+        const fourteenth = tokens[13];
+        const fifteenth = tokens[14];
+        const sixteenth = tokens[15];
+        const seventeenth = tokens[16];
+        const eighteenth = tokens[17];
+        const nineteenth = tokens[18];
+        const twentieth = tokens[19];
+        const twentyFirst = tokens[20];
+        const twentySecond = tokens[21];
+        const twentyThird = tokens[22];
+        const twentyFourth = tokens[23];
+        const twentyFifth = tokens[24];
+        const twentySixth = tokens[25];
+        const twentySeventh = tokens[26];
+        const twentyEighth = tokens[27];
+        const twentyNinth = tokens[28];
+        const thirtieth = tokens[29];
+        const thirtyFirst = tokens[30];
+        const thirtySecond = tokens[31];
+        const thirtyThird = tokens[32];
+        const deduped: string[] = [first];
+
+        if (second !== first) {
+            deduped.push(second);
+        }
+        if (third !== first && third !== second) {
+            deduped.push(third);
+        }
+        if (fourth !== first && fourth !== second && fourth !== third) {
+            deduped.push(fourth);
+        }
+        if (fifth !== first && fifth !== second && fifth !== third && fifth !== fourth) {
+            deduped.push(fifth);
+        }
+        if (sixth !== first && sixth !== second && sixth !== third && sixth !== fourth && sixth !== fifth) {
+            deduped.push(sixth);
+        }
+        if (seventh !== first && seventh !== second && seventh !== third && seventh !== fourth && seventh !== fifth && seventh !== sixth) {
+            deduped.push(seventh);
+        }
+        if (eighth !== first && eighth !== second && eighth !== third && eighth !== fourth && eighth !== fifth && eighth !== sixth && eighth !== seventh) {
+            deduped.push(eighth);
+        }
+        if (ninth !== first && ninth !== second && ninth !== third && ninth !== fourth && ninth !== fifth && ninth !== sixth && ninth !== seventh && ninth !== eighth) {
+            deduped.push(ninth);
+        }
+        if (tenth !== first && tenth !== second && tenth !== third && tenth !== fourth && tenth !== fifth && tenth !== sixth && tenth !== seventh && tenth !== eighth && tenth !== ninth) {
+            deduped.push(tenth);
+        }
+        if (eleventh !== first && eleventh !== second && eleventh !== third && eleventh !== fourth && eleventh !== fifth && eleventh !== sixth && eleventh !== seventh && eleventh !== eighth && eleventh !== ninth && eleventh !== tenth) {
+            deduped.push(eleventh);
+        }
+        if (twelfth !== first && twelfth !== second && twelfth !== third && twelfth !== fourth && twelfth !== fifth && twelfth !== sixth && twelfth !== seventh && twelfth !== eighth && twelfth !== ninth && twelfth !== tenth && twelfth !== eleventh) {
+            deduped.push(twelfth);
+        }
+        if (thirteenth !== first && thirteenth !== second && thirteenth !== third && thirteenth !== fourth && thirteenth !== fifth && thirteenth !== sixth && thirteenth !== seventh && thirteenth !== eighth && thirteenth !== ninth && thirteenth !== tenth && thirteenth !== eleventh && thirteenth !== twelfth) {
+            deduped.push(thirteenth);
+        }
+        if (fourteenth !== first && fourteenth !== second && fourteenth !== third && fourteenth !== fourth && fourteenth !== fifth && fourteenth !== sixth && fourteenth !== seventh && fourteenth !== eighth && fourteenth !== ninth && fourteenth !== tenth && fourteenth !== eleventh && fourteenth !== twelfth && fourteenth !== thirteenth) {
+            deduped.push(fourteenth);
+        }
+        if (fifteenth !== first && fifteenth !== second && fifteenth !== third && fifteenth !== fourth && fifteenth !== fifth && fifteenth !== sixth && fifteenth !== seventh && fifteenth !== eighth && fifteenth !== ninth && fifteenth !== tenth && fifteenth !== eleventh && fifteenth !== twelfth && fifteenth !== thirteenth && fifteenth !== fourteenth) {
+            deduped.push(fifteenth);
+        }
+        if (sixteenth !== first && sixteenth !== second && sixteenth !== third && sixteenth !== fourth && sixteenth !== fifth && sixteenth !== sixth && sixteenth !== seventh && sixteenth !== eighth && sixteenth !== ninth && sixteenth !== tenth && sixteenth !== eleventh && sixteenth !== twelfth && sixteenth !== thirteenth && sixteenth !== fourteenth && sixteenth !== fifteenth) {
+            deduped.push(sixteenth);
+        }
+        if (seventeenth !== first && seventeenth !== second && seventeenth !== third && seventeenth !== fourth && seventeenth !== fifth && seventeenth !== sixth && seventeenth !== seventh && seventeenth !== eighth && seventeenth !== ninth && seventeenth !== tenth && seventeenth !== eleventh && seventeenth !== twelfth && seventeenth !== thirteenth && seventeenth !== fourteenth && seventeenth !== fifteenth && seventeenth !== sixteenth) {
+            deduped.push(seventeenth);
+        }
+        if (eighteenth !== first && eighteenth !== second && eighteenth !== third && eighteenth !== fourth && eighteenth !== fifth && eighteenth !== sixth && eighteenth !== seventh && eighteenth !== eighth && eighteenth !== ninth && eighteenth !== tenth && eighteenth !== eleventh && eighteenth !== twelfth && eighteenth !== thirteenth && eighteenth !== fourteenth && eighteenth !== fifteenth && eighteenth !== sixteenth && eighteenth !== seventeenth) {
+            deduped.push(eighteenth);
+        }
+        if (nineteenth !== first && nineteenth !== second && nineteenth !== third && nineteenth !== fourth && nineteenth !== fifth && nineteenth !== sixth && nineteenth !== seventh && nineteenth !== eighth && nineteenth !== ninth && nineteenth !== tenth && nineteenth !== eleventh && nineteenth !== twelfth && nineteenth !== thirteenth && nineteenth !== fourteenth && nineteenth !== fifteenth && nineteenth !== sixteenth && nineteenth !== seventeenth && nineteenth !== eighteenth) {
+            deduped.push(nineteenth);
+        }
+        if (twentieth !== first && twentieth !== second && twentieth !== third && twentieth !== fourth && twentieth !== fifth && twentieth !== sixth && twentieth !== seventh && twentieth !== eighth && twentieth !== ninth && twentieth !== tenth && twentieth !== eleventh && twentieth !== twelfth && twentieth !== thirteenth && twentieth !== fourteenth && twentieth !== fifteenth && twentieth !== sixteenth && twentieth !== seventeenth && twentieth !== eighteenth && twentieth !== nineteenth) {
+            deduped.push(twentieth);
+        }
+        if (twentyFirst !== first && twentyFirst !== second && twentyFirst !== third && twentyFirst !== fourth && twentyFirst !== fifth && twentyFirst !== sixth && twentyFirst !== seventh && twentyFirst !== eighth && twentyFirst !== ninth && twentyFirst !== tenth && twentyFirst !== eleventh && twentyFirst !== twelfth && twentyFirst !== thirteenth && twentyFirst !== fourteenth && twentyFirst !== fifteenth && twentyFirst !== sixteenth && twentyFirst !== seventeenth && twentyFirst !== eighteenth && twentyFirst !== nineteenth && twentyFirst !== twentieth) {
+            deduped.push(twentyFirst);
+        }
+        if (twentySecond !== first && twentySecond !== second && twentySecond !== third && twentySecond !== fourth && twentySecond !== fifth && twentySecond !== sixth && twentySecond !== seventh && twentySecond !== eighth && twentySecond !== ninth && twentySecond !== tenth && twentySecond !== eleventh && twentySecond !== twelfth && twentySecond !== thirteenth && twentySecond !== fourteenth && twentySecond !== fifteenth && twentySecond !== sixteenth && twentySecond !== seventeenth && twentySecond !== eighteenth && twentySecond !== nineteenth && twentySecond !== twentieth && twentySecond !== twentyFirst) {
+            deduped.push(twentySecond);
+        }
+        if (twentyThird !== first && twentyThird !== second && twentyThird !== third && twentyThird !== fourth && twentyThird !== fifth && twentyThird !== sixth && twentyThird !== seventh && twentyThird !== eighth && twentyThird !== ninth && twentyThird !== tenth && twentyThird !== eleventh && twentyThird !== twelfth && twentyThird !== thirteenth && twentyThird !== fourteenth && twentyThird !== fifteenth && twentyThird !== sixteenth && twentyThird !== seventeenth && twentyThird !== eighteenth && twentyThird !== nineteenth && twentyThird !== twentieth && twentyThird !== twentyFirst && twentyThird !== twentySecond) {
+            deduped.push(twentyThird);
+        }
+        if (twentyFourth !== first && twentyFourth !== second && twentyFourth !== third && twentyFourth !== fourth && twentyFourth !== fifth && twentyFourth !== sixth && twentyFourth !== seventh && twentyFourth !== eighth && twentyFourth !== ninth && twentyFourth !== tenth && twentyFourth !== eleventh && twentyFourth !== twelfth && twentyFourth !== thirteenth && twentyFourth !== fourteenth && twentyFourth !== fifteenth && twentyFourth !== sixteenth && twentyFourth !== seventeenth && twentyFourth !== eighteenth && twentyFourth !== nineteenth && twentyFourth !== twentieth && twentyFourth !== twentyFirst && twentyFourth !== twentySecond && twentyFourth !== twentyThird) {
+            deduped.push(twentyFourth);
+        }
+        if (twentyFifth !== first && twentyFifth !== second && twentyFifth !== third && twentyFifth !== fourth && twentyFifth !== fifth && twentyFifth !== sixth && twentyFifth !== seventh && twentyFifth !== eighth && twentyFifth !== ninth && twentyFifth !== tenth && twentyFifth !== eleventh && twentyFifth !== twelfth && twentyFifth !== thirteenth && twentyFifth !== fourteenth && twentyFifth !== fifteenth && twentyFifth !== sixteenth && twentyFifth !== seventeenth && twentyFifth !== eighteenth && twentyFifth !== nineteenth && twentyFifth !== twentieth && twentyFifth !== twentyFirst && twentyFifth !== twentySecond && twentyFifth !== twentyThird && twentyFifth !== twentyFourth) {
+            deduped.push(twentyFifth);
+        }
+        if (twentySixth !== first && twentySixth !== second && twentySixth !== third && twentySixth !== fourth && twentySixth !== fifth && twentySixth !== sixth && twentySixth !== seventh && twentySixth !== eighth && twentySixth !== ninth && twentySixth !== tenth && twentySixth !== eleventh && twentySixth !== twelfth && twentySixth !== thirteenth && twentySixth !== fourteenth && twentySixth !== fifteenth && twentySixth !== sixteenth && twentySixth !== seventeenth && twentySixth !== eighteenth && twentySixth !== nineteenth && twentySixth !== twentieth && twentySixth !== twentyFirst && twentySixth !== twentySecond && twentySixth !== twentyThird && twentySixth !== twentyFourth && twentySixth !== twentyFifth) {
+            deduped.push(twentySixth);
+        }
+        if (twentySeventh !== first && twentySeventh !== second && twentySeventh !== third && twentySeventh !== fourth && twentySeventh !== fifth && twentySeventh !== sixth && twentySeventh !== seventh && twentySeventh !== eighth && twentySeventh !== ninth && twentySeventh !== tenth && twentySeventh !== eleventh && twentySeventh !== twelfth && twentySeventh !== thirteenth && twentySeventh !== fourteenth && twentySeventh !== fifteenth && twentySeventh !== sixteenth && twentySeventh !== seventeenth && twentySeventh !== eighteenth && twentySeventh !== nineteenth && twentySeventh !== twentieth && twentySeventh !== twentyFirst && twentySeventh !== twentySecond && twentySeventh !== twentyThird && twentySeventh !== twentyFourth && twentySeventh !== twentyFifth && twentySeventh !== twentySixth) {
+            deduped.push(twentySeventh);
+        }
+        if (twentyEighth !== first && twentyEighth !== second && twentyEighth !== third && twentyEighth !== fourth && twentyEighth !== fifth && twentyEighth !== sixth && twentyEighth !== seventh && twentyEighth !== eighth && twentyEighth !== ninth && twentyEighth !== tenth && twentyEighth !== eleventh && twentyEighth !== twelfth && twentyEighth !== thirteenth && twentyEighth !== fourteenth && twentyEighth !== fifteenth && twentyEighth !== sixteenth && twentyEighth !== seventeenth && twentyEighth !== eighteenth && twentyEighth !== nineteenth && twentyEighth !== twentieth && twentyEighth !== twentyFirst && twentyEighth !== twentySecond && twentyEighth !== twentyThird && twentyEighth !== twentyFourth && twentyEighth !== twentyFifth && twentyEighth !== twentySixth && twentyEighth !== twentySeventh) {
+            deduped.push(twentyEighth);
+        }
+        if (twentyNinth !== first && twentyNinth !== second && twentyNinth !== third && twentyNinth !== fourth && twentyNinth !== fifth && twentyNinth !== sixth && twentyNinth !== seventh && twentyNinth !== eighth && twentyNinth !== ninth && twentyNinth !== tenth && twentyNinth !== eleventh && twentyNinth !== twelfth && twentyNinth !== thirteenth && twentyNinth !== fourteenth && twentyNinth !== fifteenth && twentyNinth !== sixteenth && twentyNinth !== seventeenth && twentyNinth !== eighteenth && twentyNinth !== nineteenth && twentyNinth !== twentieth && twentyNinth !== twentyFirst && twentyNinth !== twentySecond && twentyNinth !== twentyThird && twentyNinth !== twentyFourth && twentyNinth !== twentyFifth && twentyNinth !== twentySixth && twentyNinth !== twentySeventh && twentyNinth !== twentyEighth) {
+            deduped.push(twentyNinth);
+        }
+        if (thirtieth !== first && thirtieth !== second && thirtieth !== third && thirtieth !== fourth && thirtieth !== fifth && thirtieth !== sixth && thirtieth !== seventh && thirtieth !== eighth && thirtieth !== ninth && thirtieth !== tenth && thirtieth !== eleventh && thirtieth !== twelfth && thirtieth !== thirteenth && thirtieth !== fourteenth && thirtieth !== fifteenth && thirtieth !== sixteenth && thirtieth !== seventeenth && thirtieth !== eighteenth && thirtieth !== nineteenth && thirtieth !== twentieth && thirtieth !== twentyFirst && thirtieth !== twentySecond && thirtieth !== twentyThird && thirtieth !== twentyFourth && thirtieth !== twentyFifth && thirtieth !== twentySixth && thirtieth !== twentySeventh && thirtieth !== twentyEighth && thirtieth !== twentyNinth) {
+            deduped.push(thirtieth);
+        }
+        if (thirtyFirst !== first && thirtyFirst !== second && thirtyFirst !== third && thirtyFirst !== fourth && thirtyFirst !== fifth && thirtyFirst !== sixth && thirtyFirst !== seventh && thirtyFirst !== eighth && thirtyFirst !== ninth && thirtyFirst !== tenth && thirtyFirst !== eleventh && thirtyFirst !== twelfth && thirtyFirst !== thirteenth && thirtyFirst !== fourteenth && thirtyFirst !== fifteenth && thirtyFirst !== sixteenth && thirtyFirst !== seventeenth && thirtyFirst !== eighteenth && thirtyFirst !== nineteenth && thirtyFirst !== twentieth && thirtyFirst !== twentyFirst && thirtyFirst !== twentySecond && thirtyFirst !== twentyThird && thirtyFirst !== twentyFourth && thirtyFirst !== twentyFifth && thirtyFirst !== twentySixth && thirtyFirst !== twentySeventh && thirtyFirst !== twentyEighth && thirtyFirst !== twentyNinth && thirtyFirst !== thirtieth) {
+            deduped.push(thirtyFirst);
+        }
+        if (thirtySecond !== first && thirtySecond !== second && thirtySecond !== third && thirtySecond !== fourth && thirtySecond !== fifth && thirtySecond !== sixth && thirtySecond !== seventh && thirtySecond !== eighth && thirtySecond !== ninth && thirtySecond !== tenth && thirtySecond !== eleventh && thirtySecond !== twelfth && thirtySecond !== thirteenth && thirtySecond !== fourteenth && thirtySecond !== fifteenth && thirtySecond !== sixteenth && thirtySecond !== seventeenth && thirtySecond !== eighteenth && thirtySecond !== nineteenth && thirtySecond !== twentieth && thirtySecond !== twentyFirst && thirtySecond !== twentySecond && thirtySecond !== twentyThird && thirtySecond !== twentyFourth && thirtySecond !== twentyFifth && thirtySecond !== twentySixth && thirtySecond !== twentySeventh && thirtySecond !== twentyEighth && thirtySecond !== twentyNinth && thirtySecond !== thirtieth && thirtySecond !== thirtyFirst) {
+            deduped.push(thirtySecond);
+        }
+        if (thirtyThird !== first && thirtyThird !== second && thirtyThird !== third && thirtyThird !== fourth && thirtyThird !== fifth && thirtyThird !== sixth && thirtyThird !== seventh && thirtyThird !== eighth && thirtyThird !== ninth && thirtyThird !== tenth && thirtyThird !== eleventh && thirtyThird !== twelfth && thirtyThird !== thirteenth && thirtyThird !== fourteenth && thirtyThird !== fifteenth && thirtyThird !== sixteenth && thirtyThird !== seventeenth && thirtyThird !== eighteenth && thirtyThird !== nineteenth && thirtyThird !== twentieth && thirtyThird !== twentyFirst && thirtyThird !== twentySecond && thirtyThird !== twentyThird && thirtyThird !== twentyFourth && thirtyThird !== twentyFifth && thirtyThird !== twentySixth && thirtyThird !== twentySeventh && thirtyThird !== twentyEighth && thirtyThird !== twentyNinth && thirtyThird !== thirtieth && thirtyThird !== thirtyFirst && thirtyThird !== thirtySecond) {
+            deduped.push(thirtyThird);
+        }
+
+        cacheQueryTerms(query, deduped);
+        return deduped;
+    }
+
     const uniqueTerms: string[] = [];
     const seen = new Set<string>();
     for (let i = 0; i < tokens.length; i++) {
