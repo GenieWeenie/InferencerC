@@ -452,7 +452,7 @@ interface ChatMessageRowProps {
     conversationFontSize: number;
     isCompactViewport: boolean;
     isLazyLoaded: boolean;
-    loadMessageRange: (startIndex: number, endIndex: number) => void;
+    loadMessageAtIndex: (messageIndex: number) => void;
 }
 
 const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
@@ -495,7 +495,7 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
     conversationFontSize,
     isCompactViewport,
     isLazyLoaded,
-    loadMessageRange,
+    loadMessageAtIndex,
 }) => {
     if (isLoadingMessages) {
         return <MessageSkeleton isUser={index % 2 === 0} />;
@@ -593,7 +593,7 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                             onInsertToFile={handleInsertToFile}
                                             isStreaming={true}
                                             isLazyLoaded={isLazyLoaded}
-                                            onLoadContent={() => loadMessageRange(index, index)}
+                                            onLoadContent={loadMessageAtIndex}
                                             messageIndex={index}
                                         />
                                     </React.Suspense>
@@ -622,13 +622,13 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                             </div>
                                         )}
                                         <React.Suspense fallback={<div className="text-xs text-slate-500">Rendering response...</div>}>
-                                            <MessageContent
+                                        <MessageContent
                                                 content={msg.content || ""}
                                             isUser={false}
                                             mcpAvailable={mcpAvailable}
                                             onInsertToFile={handleInsertToFile}
                                             isLazyLoaded={isLazyLoaded}
-                                            onLoadContent={() => loadMessageRange(index, index)}
+                                            onLoadContent={loadMessageAtIndex}
                                             messageIndex={index}
                                         />
                                         </React.Suspense>
@@ -782,7 +782,7 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                         mcpAvailable={mcpAvailable}
                                         onInsertToFile={handleInsertToFile}
                                         isLazyLoaded={isLazyLoaded}
-                                        onLoadContent={() => loadMessageRange(index, index)}
+                                        onLoadContent={loadMessageAtIndex}
                                         messageIndex={index}
                                     />
                                 </React.Suspense>
@@ -856,7 +856,9 @@ const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
 interface SearchResultRowProps {
     resultIndex: number;
     messageIndex: number;
-    message: any;
+    preview: string;
+    roleLabel: string;
+    roleClass: string;
     isActive: boolean;
     onNavigate: (resultIndex: number) => void;
 }
@@ -864,16 +866,12 @@ interface SearchResultRowProps {
 const SearchResultRow: React.FC<SearchResultRowProps> = React.memo(({
     resultIndex,
     messageIndex,
-    message,
+    preview,
+    roleLabel,
+    roleClass,
     isActive,
     onNavigate,
 }) => {
-    const preview = message?.content
-        ? message.content.substring(0, 100) + (message.content.length > 100 ? '...' : '')
-        : '';
-    const roleLabel = message?.role === 'user' ? 'You' : 'Assistant';
-    const roleClass = message?.role === 'user' ? 'text-blue-400' : 'text-emerald-400';
-
     return (
         <button
             onClick={() => onNavigate(resultIndex)}
@@ -897,6 +895,15 @@ const SearchResultRow: React.FC<SearchResultRowProps> = React.memo(({
                 )}
             </div>
         </button>
+    );
+}, (prev, next) => {
+    return (
+        prev.resultIndex === next.resultIndex &&
+        prev.messageIndex === next.messageIndex &&
+        prev.preview === next.preview &&
+        prev.roleLabel === next.roleLabel &&
+        prev.roleClass === next.roleClass &&
+        prev.isActive === next.isActive
     );
 });
 
@@ -2977,6 +2984,15 @@ const Chat: React.FC = () => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [createNewSession, setShowHistory, stopGeneration, showShortcutsModal, editingMessageIndex, history, handleCancelEdit, setHistory]);
 
+    const searchResultSet = React.useMemo(() => new Set(searchResults), [searchResults]);
+    const activeSearchMessageIndex = React.useMemo(
+        () => (currentSearchIndex >= 0 ? searchResults[currentSearchIndex] : undefined),
+        [searchResults, currentSearchIndex]
+    );
+    const loadMessageAtIndex = React.useCallback((messageIndex: number) => {
+        loadMessageRange(messageIndex, messageIndex);
+    }, [loadMessageRange]);
+
     // Memoized itemContent callback to prevent recreation on every render
     const renderItemContent = React.useCallback((index: number, msg: any) => {
         const nextMessage = index < history.length - 1 ? history[index + 1] : null;
@@ -2986,8 +3002,8 @@ const Chat: React.FC = () => {
                 index={index}
                 msg={msg}
                 isLoadingMessages={isLoadingMessages}
-                isSearchResult={searchResults.includes(index)}
-                isCurrentSearchResult={searchResults[currentSearchIndex] === index}
+                isSearchResult={searchResultSet.has(index)}
+                isCurrentSearchResult={activeSearchMessageIndex === index}
                 isLastMessage={index === history.length - 1}
                 previousMessage={previousMessage}
                 nextMessage={nextMessage}
@@ -3022,14 +3038,14 @@ const Chat: React.FC = () => {
                 conversationFontSize={conversationFontSize}
                 isCompactViewport={isCompactViewport}
                 isLazyLoaded={!loadedMessageIndices.has(index)}
-                loadMessageRange={loadMessageRange}
+                loadMessageAtIndex={loadMessageAtIndex}
             />
         );
     }, [
         history,
         isLoadingMessages,
-        searchResults,
-        currentSearchIndex,
+        searchResultSet,
+        activeSearchMessageIndex,
         comparisonIndex,
         bookmarkedMessages,
         deleteMessage,
@@ -3060,7 +3076,7 @@ const Chat: React.FC = () => {
         conversationFontSize,
         isCompactViewport,
         loadedMessageIndices,
-        loadMessageRange,
+        loadMessageAtIndex,
     ]);
 
     const renderSearchResultItem = React.useCallback((resultIndex: number) => {
@@ -3069,11 +3085,16 @@ const Chat: React.FC = () => {
         if (!message) {
             return null;
         }
+        const content = message.content || '';
+        const preview = content.substring(0, 100) + (content.length > 100 ? '...' : '');
+        const isUser = message.role === 'user';
         return (
             <SearchResultRow
                 resultIndex={resultIndex}
                 messageIndex={messageIndex}
-                message={message}
+                preview={preview}
+                roleLabel={isUser ? 'You' : 'Assistant'}
+                roleClass={isUser ? 'text-blue-400' : 'text-emerald-400'}
                 isActive={resultIndex === currentSearchIndex}
                 onNavigate={navigateToSearchResult}
             />

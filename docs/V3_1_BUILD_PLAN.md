@@ -244,6 +244,11 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 177: extract the heavy chat message row renderer into a memoized `ChatMessageRow` component and keep `Virtuoso` `itemContent` as a thin wrapper, reducing hot-path render churn in `Chat.tsx`.
    - Pass 178: precompute chat row state in `renderItemContent` (search/comparison/bookmark/rating/token/lazy flags + neighbor messages) and pass stable scalar props into `ChatMessageRow`, reducing repeated derived work and prop churn inside hot row renders.
    - Pass 179: extract search-results rows into memoized `SearchResultRow` and route the search `Virtuoso` list through a stable `renderSearchResultItem` callback, trimming inline closure/JSX allocations during search panel updates.
+   - Pass 180: replace per-row `searchResults.includes(index)` checks with a memoized `Set` lookup and pass the active search message index as a scalar, reducing O(n) membership checks in chat row rendering.
+   - Pass 181: centralize search-state derivation (`searchResultSet`, active search message index) before `renderItemContent`, keeping row callback work focused on lightweight scalar comparisons.
+   - Pass 182: introduce a stable `loadMessageAtIndex` callback in `Chat` and thread it through `ChatMessageRow` so message-content lazy loads no longer create per-render inline range-loader closures.
+   - Pass 183: update `MessageContent` lazy-load triggering to keyed, deduped request dispatch (with stable callback signature), preventing repeated load requests for the same message/lazy state transition.
+   - Pass 184: pass primitive preview/role props into memoized `SearchResultRow` (instead of full message objects) and add explicit row comparator checks to reduce avoidable rerenders in the search results panel.
 
 ## Release Checklist for v3.1.x
 

@@ -8,7 +8,7 @@ interface MessageContentProps {
     onInsertToFile?: (code: string, language: string, filePath: string) => void;
     isStreaming?: boolean;
     isLazyLoaded?: boolean;
-    onLoadContent?: () => void;
+    onLoadContent?: (messageIndex: number) => void;
     messageIndex?: number;
 }
 
@@ -62,6 +62,7 @@ const MessageContent: React.FC<MessageContentProps> = ({
 }) => {
     const [displayContent, setDisplayContent] = React.useState(content);
     const [isLoadingContent, setIsLoadingContent] = React.useState(false);
+    const lastLoadRequestKeyRef = React.useRef<string | null>(null);
 
     React.useEffect(() => {
         if (!isStreaming) {
@@ -83,11 +84,26 @@ const MessageContent: React.FC<MessageContentProps> = ({
 
     React.useEffect(() => {
         const isContentTruncated = content.length > 0 && content.endsWith('...') && content.length <= 103;
-        if ((isLazyLoaded || isContentTruncated) && onLoadContent && !isLoadingContent) {
-            setIsLoadingContent(true);
-            onLoadContent();
+        const shouldAttemptLoad = (isLazyLoaded || isContentTruncated) && typeof messageIndex === 'number';
+
+        if (!shouldAttemptLoad) {
+            lastLoadRequestKeyRef.current = null;
+            return;
         }
-    }, [isLazyLoaded, messageIndex]);
+
+        if (!onLoadContent || isLoadingContent) {
+            return;
+        }
+
+        const requestKey = `${messageIndex}:${isLazyLoaded ? 'lazy' : 'normal'}:${isContentTruncated ? 'truncated' : 'full'}`;
+        if (lastLoadRequestKeyRef.current === requestKey) {
+            return;
+        }
+
+        lastLoadRequestKeyRef.current = requestKey;
+        setIsLoadingContent(true);
+        onLoadContent(messageIndex);
+    }, [content, isLazyLoaded, onLoadContent, messageIndex, isLoadingContent]);
 
     React.useEffect(() => {
         if (isLoadingContent && content.length > 103 && !content.endsWith('...')) {
