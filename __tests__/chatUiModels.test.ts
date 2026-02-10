@@ -1,8 +1,12 @@
 import { getMessageActionCapabilities } from '../src/renderer/lib/chatMessageActions';
 import {
+  buildContextTrimSuggestionRows,
   buildComposerControlPillDescriptors,
   buildLongPressMenuActionItems,
+  buildRecentContextMessageRows,
   getWrappedSearchResultIndex,
+  getMaxTokensSliderConfig,
+  toggleToolNameInSet,
 } from '../src/renderer/lib/chatUiModels';
 
 describe('chatUiModels', () => {
@@ -103,5 +107,76 @@ describe('chatUiModels', () => {
     expect(active.find((item) => item.key === 'control-response')?.active).toBe(true);
     expect(active.find((item) => item.key === 'stream')?.active).toBe(false);
     expect(active.find((item) => item.key === 'recommendations')?.visible).toBe(true);
+  });
+
+  it('toggles tool names in a deterministic copy without mutating input set', () => {
+    const initial = new Set(['web_fetch', 'calculator']);
+    const removed = toggleToolNameInSet(initial, 'web_fetch');
+    const added = toggleToolNameInSet(initial, 'rag_search');
+
+    expect(Array.from(initial).sort()).toEqual(['calculator', 'web_fetch']);
+    expect(Array.from(removed).sort()).toEqual(['calculator']);
+    expect(Array.from(added).sort()).toEqual(['calculator', 'rag_search', 'web_fetch']);
+  });
+
+  it('builds trim rows and recent context rows with stable formatting and keys', () => {
+    const trimRows = buildContextTrimSuggestionRows([
+      { messageIndex: 1, role: 'assistant', estimatedTokenSavings: 250, preview: 'older response' },
+      { messageIndex: 4, role: 'user', estimatedTokenSavings: 120, preview: 'large prompt' },
+    ], 1);
+    expect(trimRows).toEqual([
+      {
+        key: 'trim-1',
+        messageIndex: 1,
+        label: '#2 (assistant) • save ~250 tokens',
+        preview: 'older response',
+      },
+    ]);
+
+    const recentRows = buildRecentContextMessageRows(
+      [
+        { role: 'user', content: 'a' },
+        { role: 'assistant', content: 'bbb' },
+        { role: 'user', content: 'cccc' },
+      ],
+      new Set([1]),
+      (text) => text.length,
+      2
+    );
+
+    expect(recentRows).toEqual([
+      {
+        key: 'ctx-1',
+        index: 1,
+        role: 'assistant',
+        estimatedTokens: 3,
+        included: false,
+      },
+      {
+        key: 'ctx-2',
+        index: 2,
+        role: 'user',
+        estimatedTokens: 4,
+        included: true,
+      },
+    ]);
+  });
+
+  it('computes max-token slider bounds consistently for default and large models', () => {
+    expect(getMaxTokensSliderConfig()).toEqual({
+      maxContextLength: 32768,
+      sliderMax: 31129,
+      sliderStep: 100,
+    });
+    expect(getMaxTokensSliderConfig(8192)).toEqual({
+      maxContextLength: 8192,
+      sliderMax: 7782,
+      sliderStep: 10,
+    });
+    expect(getMaxTokensSliderConfig(200000)).toEqual({
+      maxContextLength: 200000,
+      sliderMax: 190000,
+      sliderStep: 100,
+    });
   });
 });

@@ -1,4 +1,5 @@
 import type { ChatMessageAction, ChatMessageActionCapabilities } from './chatMessageActions';
+import type { ChatMessage } from '../../shared/types';
 
 export type SearchNavigationDirection = 'previous' | 'next';
 
@@ -190,3 +191,82 @@ export const buildComposerControlPillDescriptors = (
     visible: true,
   },
 ];
+
+export const toggleToolNameInSet = (enabledTools: Set<string>, toolName: string): Set<string> => {
+  const next = new Set(enabledTools);
+  if (next.has(toolName)) {
+    next.delete(toolName);
+  } else {
+    next.add(toolName);
+  }
+  return next;
+};
+
+export interface ContextTrimSuggestionLike {
+  messageIndex: number;
+  role: string;
+  estimatedTokenSavings: number;
+  preview: string;
+}
+
+export interface ContextTrimSuggestionRow {
+  key: string;
+  messageIndex: number;
+  label: string;
+  preview: string;
+}
+
+export const buildContextTrimSuggestionRows = (
+  suggestions: ContextTrimSuggestionLike[],
+  limit: number = 3
+): ContextTrimSuggestionRow[] => suggestions.slice(0, Math.max(0, limit)).map((suggestion) => ({
+  key: `trim-${suggestion.messageIndex}`,
+  messageIndex: suggestion.messageIndex,
+  label: `#${suggestion.messageIndex + 1} (${suggestion.role}) • save ~${suggestion.estimatedTokenSavings} tokens`,
+  preview: suggestion.preview,
+}));
+
+export interface RecentContextMessageRow {
+  key: string;
+  index: number;
+  role: ChatMessage['role'];
+  estimatedTokens: number;
+  included: boolean;
+}
+
+export const buildRecentContextMessageRows = (
+  history: ChatMessage[],
+  excludedIndices: Set<number>,
+  estimateTokens: (text: string) => number,
+  limit: number = 20
+): RecentContextMessageRow[] => {
+  const start = Math.max(0, history.length - Math.max(0, limit));
+  return history.slice(start).map((message, offset) => {
+    const index = start + offset;
+    return {
+      key: `ctx-${index}`,
+      index,
+      role: message.role,
+      estimatedTokens: estimateTokens(message.content || ''),
+      included: !excludedIndices.has(index),
+    };
+  });
+};
+
+export interface MaxTokensSliderConfig {
+  maxContextLength: number;
+  sliderMax: number;
+  sliderStep: number;
+}
+
+export const getMaxTokensSliderConfig = (contextLength?: number): MaxTokensSliderConfig => {
+  const maxContextLength = contextLength || 32768;
+  const maxAllowedTokens = Math.floor(maxContextLength * 0.95);
+  const sliderMax = Math.max(4096, maxAllowedTokens);
+  const sliderStep = sliderMax > 10000 ? 100 : 10;
+  return {
+    maxContextLength,
+    sliderMax,
+    sliderStep,
+  };
+};
