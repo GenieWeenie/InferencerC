@@ -680,6 +680,7 @@ const Chat: React.FC = () => {
     // Variable insert menu state
     const [showVariableMenu, setShowVariableMenu] = React.useState(false);
     const messageListRef = React.useRef<HTMLDivElement | null>(null);
+    const composerContainerRef = React.useRef<HTMLDivElement | null>(null);
     const longPressMenuRef = React.useRef<HTMLDivElement | null>(null);
     const diagnosticsPanelRef = React.useRef<HTMLDivElement | null>(null);
     const diagnosticsButtonRef = React.useRef<HTMLButtonElement | null>(null);
@@ -693,6 +694,7 @@ const Chat: React.FC = () => {
     const [longPressMenu, setLongPressMenu] = React.useState<{ messageIndex: number; x: number; y: number } | null>(null);
     const [swipeSessionIndicator, setSwipeSessionIndicator] = React.useState<'previous' | 'next' | null>(null);
     const swipeSessionTimerRef = React.useRef<number | null>(null);
+    const [composerOverlayHeight, setComposerOverlayHeight] = React.useState<number>(showBottomControls ? 300 : 196);
 
     // Initialize conversation tree only when branching is enabled.
     const treeHook = useConversationTree(history, { enabled: branchingEnabled });
@@ -889,6 +891,32 @@ const Chat: React.FC = () => {
             setShowVariableMenu(false);
         }
     }, [showBottomControls]);
+
+    React.useEffect(() => {
+        const composerElement = composerContainerRef.current;
+        if (!composerElement) return;
+
+        const measureComposerHeight = () => {
+            const nextHeight = Math.ceil(composerElement.getBoundingClientRect().height);
+            if (!Number.isFinite(nextHeight) || nextHeight <= 0) return;
+            setComposerOverlayHeight((previousHeight) => (previousHeight === nextHeight ? previousHeight : nextHeight));
+        };
+
+        measureComposerHeight();
+
+        if (typeof ResizeObserver === 'undefined') {
+            return;
+        }
+
+        const resizeObserver = new ResizeObserver(() => {
+            measureComposerHeight();
+        });
+        resizeObserver.observe(composerElement);
+
+        return () => {
+            resizeObserver.disconnect();
+        };
+    }, [showBottomControls, isCompactViewport]);
 
     React.useEffect(() => {
         try {
@@ -2502,9 +2530,9 @@ const Chat: React.FC = () => {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
-                className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} group py-3 min-w-0 w-full overflow-hidden`}
+                className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} group py-3 min-w-0 w-full`}
             >
-                <div className={`relative p-4 rounded-2xl max-w-[85%] min-w-0 shadow-md transition-all break-words overflow-hidden ${isCurrentSearchResult
+                <div className={`relative p-4 pr-24 rounded-2xl max-w-[85%] min-w-0 shadow-md transition-all break-words overflow-visible ${isCurrentSearchResult
                     ? 'ring-2 ring-yellow-500 ring-offset-2 ring-offset-background'
                     : isSearchResult
                         ? 'ring-1 ring-yellow-500/50'
@@ -2513,12 +2541,12 @@ const Chat: React.FC = () => {
                 data-message-bubble-index={index}
                 style={{ wordBreak: 'break-word', overflowWrap: 'anywhere', fontSize: `${conversationFontSize}px`, maxWidth: isCompactViewport ? '95%' : '85%' }}>
                     {/* Message actions */}
-                    <div className="absolute -top-2 -right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                    <div className="absolute top-2 right-2 flex items-center gap-1.5 rounded-xl border border-slate-700/70 bg-slate-900/85 px-1 py-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto transition-opacity z-20 backdrop-blur-sm">
                         <button
                             onClick={() => toggleBookmark(index)}
-                            className={`touch-target touch-target-square rounded-full text-white flex items-center justify-center shadow-lg cursor-pointer transition-all ${bookmarkedMessages.has(index)
+                            className={`h-8 w-8 rounded-lg text-white flex items-center justify-center shadow-sm cursor-pointer transition-colors ${bookmarkedMessages.has(index)
                                 ? 'bg-yellow-500 hover:bg-yellow-600'
-                                : 'bg-slate-700 hover:bg-slate-600'
+                                : 'bg-slate-700/90 hover:bg-slate-600'
                                 }`}
                             title={bookmarkedMessages.has(index) ? 'Remove bookmark' : 'Bookmark message'}
                         >
@@ -2846,6 +2874,8 @@ const Chat: React.FC = () => {
     ]);
 
     const longPressMessage = longPressMenu ? history[longPressMenu.messageIndex] : null;
+    const composerBottomInset = isCompactViewport ? 16 : 24;
+    const messageListFooterHeight = Math.max(132, composerOverlayHeight + composerBottomInset + 16);
 
     return (
         <div className="flex h-full flex-row relative bg-background text-text font-body overflow-hidden min-w-0 max-w-full">
@@ -3567,10 +3597,10 @@ const Chat: React.FC = () => {
                             }}
                             increaseViewportBy={{
                                 top: 200,
-                                bottom: 200
+                                bottom: Math.max(220, messageListFooterHeight)
                             }}
                             defaultItemHeight={150}
-                            atBottomThreshold={100}
+                            atBottomThreshold={Math.max(100, Math.floor(messageListFooterHeight * 0.45))}
                             alignToBottom
                             className="custom-scrollbar px-6"
                             totalCount={isLoadingMessages ? 6 : history.length}
@@ -3578,7 +3608,7 @@ const Chat: React.FC = () => {
                             computeItemKey={(index: number, item: any) => isLoadingMessages ? `skeleton-${index}` : `${index}-${item.role}`}
                             itemContent={renderItemContent}
                             components={{
-                                Footer: () => <div className={showBottomControls ? 'h-48' : 'h-28'} />
+                                Footer: () => <div style={{ height: `${messageListFooterHeight}px` }} />
                             }}
                         />
                     ) : (
@@ -3651,7 +3681,7 @@ const Chat: React.FC = () => {
                 </AnimatePresence>
 
                 {/* Floating Input Area with Control Bar */}
-                <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 w-full ${isCompactViewport ? 'max-w-full' : 'max-w-4xl'} px-4 z-20 min-w-0 overflow-x-hidden`}>
+                <div ref={composerContainerRef} className={`absolute bottom-6 left-1/2 -translate-x-1/2 w-full ${isCompactViewport ? 'max-w-full' : 'max-w-4xl'} px-4 z-20 min-w-0 overflow-x-hidden`}>
                     <div
                         onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
                         onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}

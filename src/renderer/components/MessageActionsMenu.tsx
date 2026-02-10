@@ -53,10 +53,10 @@ const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
             {/* Trigger Button */}
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="touch-target touch-target-square bg-slate-700 hover:bg-slate-600 rounded-full text-white flex items-center justify-center shadow-lg cursor-pointer transition-colors"
+                className="h-8 w-8 bg-slate-700/90 hover:bg-slate-600 rounded-lg text-white flex items-center justify-center shadow-sm cursor-pointer transition-colors"
                 title="Message actions"
             >
-                <MoreVertical size={12} />
+                <MoreVertical size={13} />
             </button>
 
             {/* Dropdown Menu */}
@@ -67,7 +67,7 @@ const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95, y: -5 }}
                         transition={{ duration: 0.15 }}
-                        className="absolute top-8 right-0 bg-slate-800 rounded-lg shadow-xl border border-slate-700/50 overflow-hidden z-50 min-w-[180px]"
+                        className="absolute top-9 right-0 bg-slate-800 rounded-lg shadow-xl border border-slate-700/50 overflow-hidden z-50 min-w-[180px]"
                     >
                         {/* Copy */}
                         <button
