@@ -241,6 +241,7 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 174: add search-index benchmark report helpers (`formatSearchIndexBenchmarkReport`, `saveSearchIndexBenchmarkReport`) to persist JSON snapshots for before/after pass comparisons.
    - Pass 175: fix chat lazy-message hydration to load full message content from authoritative session snapshots/cache (instead of truncated `history` placeholders), ensuring on-demand expansion restores complete messages.
    - Pass 176: remove dead lazy-history projection (`getVisibleHistory`) and keep range hydration sourced from authoritative full-session message snapshots, trimming unused work and API surface.
+   - Pass 177: extract the heavy chat message row renderer into a memoized `ChatMessageRow` component and keep `Virtuoso` `itemContent` as a thin wrapper, reducing hot-path render churn in `Chat.tsx`.
 
 ## Release Checklist for v3.1.x
 
