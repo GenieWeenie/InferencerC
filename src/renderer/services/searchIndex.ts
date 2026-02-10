@@ -439,6 +439,62 @@ const getUniqueQueryTerms = (query: string): string[] => {
         cacheQueryTerms(query, deduped);
         return deduped;
     }
+    if (tokens.length === 13) {
+        const first = tokens[0];
+        const second = tokens[1];
+        const third = tokens[2];
+        const fourth = tokens[3];
+        const fifth = tokens[4];
+        const sixth = tokens[5];
+        const seventh = tokens[6];
+        const eighth = tokens[7];
+        const ninth = tokens[8];
+        const tenth = tokens[9];
+        const eleventh = tokens[10];
+        const twelfth = tokens[11];
+        const thirteenth = tokens[12];
+        const deduped: string[] = [first];
+
+        if (second !== first) {
+            deduped.push(second);
+        }
+        if (third !== first && third !== second) {
+            deduped.push(third);
+        }
+        if (fourth !== first && fourth !== second && fourth !== third) {
+            deduped.push(fourth);
+        }
+        if (fifth !== first && fifth !== second && fifth !== third && fifth !== fourth) {
+            deduped.push(fifth);
+        }
+        if (sixth !== first && sixth !== second && sixth !== third && sixth !== fourth && sixth !== fifth) {
+            deduped.push(sixth);
+        }
+        if (seventh !== first && seventh !== second && seventh !== third && seventh !== fourth && seventh !== fifth && seventh !== sixth) {
+            deduped.push(seventh);
+        }
+        if (eighth !== first && eighth !== second && eighth !== third && eighth !== fourth && eighth !== fifth && eighth !== sixth && eighth !== seventh) {
+            deduped.push(eighth);
+        }
+        if (ninth !== first && ninth !== second && ninth !== third && ninth !== fourth && ninth !== fifth && ninth !== sixth && ninth !== seventh && ninth !== eighth) {
+            deduped.push(ninth);
+        }
+        if (tenth !== first && tenth !== second && tenth !== third && tenth !== fourth && tenth !== fifth && tenth !== sixth && tenth !== seventh && tenth !== eighth && tenth !== ninth) {
+            deduped.push(tenth);
+        }
+        if (eleventh !== first && eleventh !== second && eleventh !== third && eleventh !== fourth && eleventh !== fifth && eleventh !== sixth && eleventh !== seventh && eleventh !== eighth && eleventh !== ninth && eleventh !== tenth) {
+            deduped.push(eleventh);
+        }
+        if (twelfth !== first && twelfth !== second && twelfth !== third && twelfth !== fourth && twelfth !== fifth && twelfth !== sixth && twelfth !== seventh && twelfth !== eighth && twelfth !== ninth && twelfth !== tenth && twelfth !== eleventh) {
+            deduped.push(twelfth);
+        }
+        if (thirteenth !== first && thirteenth !== second && thirteenth !== third && thirteenth !== fourth && thirteenth !== fifth && thirteenth !== sixth && thirteenth !== seventh && thirteenth !== eighth && thirteenth !== ninth && thirteenth !== tenth && thirteenth !== eleventh && thirteenth !== twelfth) {
+            deduped.push(thirteenth);
+        }
+
+        cacheQueryTerms(query, deduped);
+        return deduped;
+    }
 
     const uniqueTerms: string[] = [];
     const seen = new Set<string>();
