@@ -83,6 +83,71 @@ describe('SearchIndexService', () => {
     expect(result).toEqual(new Set(['s1']));
   });
 
+  it('intersects two-term queries correctly', () => {
+    const sessions: ChatSession[] = [
+      createSession('s1', 'alpha beta', 'gamma'),
+      createSession('s2', 'alpha', 'delta'),
+      createSession('s3', 'beta', 'epsilon'),
+    ];
+    SearchIndexService.rebuildIndex(sessions);
+
+    const result = SearchIndexService.searchSessions('alpha beta');
+
+    expect(result).toEqual(new Set(['s1']));
+  });
+
+  it('intersects three-term queries correctly', () => {
+    const sessions: ChatSession[] = [
+      createSession('s1', 'alpha beta', 'gamma'),
+      createSession('s2', 'alpha beta', 'delta'),
+      createSession('s3', 'alpha gamma', 'delta'),
+    ];
+    SearchIndexService.rebuildIndex(sessions);
+
+    const result = SearchIndexService.searchSessions('alpha beta gamma');
+
+    expect(result).toEqual(new Set(['s1']));
+  });
+
+  it('intersects five-term queries correctly', () => {
+    const sessions: ChatSession[] = [
+      createSession('s1', 'alpha beta gamma', 'delta epsilon'),
+      createSession('s2', 'alpha beta gamma', 'delta'),
+      createSession('s3', 'alpha beta', 'gamma delta epsilon'),
+    ];
+    SearchIndexService.rebuildIndex(sessions);
+
+    const result = SearchIndexService.searchSessions('alpha beta gamma delta epsilon');
+
+    expect(result).toEqual(new Set(['s1', 's3']));
+  });
+
+  it('falls back correctly for six-term queries', () => {
+    const sessions: ChatSession[] = [
+      createSession('s1', 'alpha beta gamma', 'delta epsilon zeta'),
+      createSession('s2', 'alpha beta gamma', 'delta epsilon'),
+      createSession('s3', 'alpha beta zeta', 'delta epsilon'),
+    ];
+    SearchIndexService.rebuildIndex(sessions);
+
+    const result = SearchIndexService.searchSessions('alpha beta gamma delta epsilon zeta');
+
+    expect(result).toEqual(new Set(['s1']));
+  });
+
+  it('returns all matching sessions for one-term queries', () => {
+    const sessions: ChatSession[] = [
+      createSession('s1', 'alpha beta', 'gamma'),
+      createSession('s2', 'alpha delta', 'epsilon'),
+      createSession('s3', 'beta gamma', 'delta'),
+    ];
+    SearchIndexService.rebuildIndex(sessions);
+
+    const result = SearchIndexService.searchSessions('alpha');
+
+    expect(result).toEqual(new Set(['s1', 's2']));
+  });
+
   it('returns empty set when any of four terms is missing', () => {
     const sessions: ChatSession[] = [
       createSession('s1', 'alpha beta', 'gamma delta'),

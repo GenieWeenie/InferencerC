@@ -193,6 +193,11 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 124: in `getUniqueQueryTerms`, add a thirty-two-token dedupe fast path that preserves first-seen order while avoiding general `Set` allocation for common short queries.
    - Pass 125: in `getUniqueQueryTerms`, add a thirty-three-token dedupe fast path that preserves first-seen order while avoiding general `Set` allocation for common short queries.
    - Pass 126: in `searchSessions`, add a dedicated four-term intersection fast path that scans the smallest posting list against three cached membership sets, bypassing generic multi-term setup for common short queries.
+   - Pass 127: in `searchSessions`, add a dedicated five-term intersection fast path that scans the smallest posting list against four cached membership sets, bypassing generic multi-term setup for common short queries.
+   - Pass 128: in `searchSessions` one-term branch, add a singleton posting-list fast path before general `Set` construction to trim tiny-query overhead.
+   - Pass 129: in generic multi-term `searchSessions`, reuse a module-scope membership-set scratch array to avoid per-query temporary array allocation.
+   - Pass 130: add targeted `searchIndex` unit coverage for two/three/five-term fast paths plus six-term fallback behavior.
+   - Pass 131: in `applyOperations` upserts, split prior-term and new-term insert handling so existing-term continuations skip unnecessary duplicate-check branching.
 
 ## Release Checklist for v3.1.x
 

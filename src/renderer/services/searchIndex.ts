@@ -34,6 +34,7 @@ let indexCacheRaw: string | null = null;
 const tokenizeCache = new Map<string, string[]>();
 const queryTermCache = new Map<string, string[]>();
 const postingSetCache = new Map<string, { idsRef: string[]; idsSet: Set<string> }>();
+const remainingTermSetScratch: Set<string>[] = [];
 
 const createEmptyIndex = (): InvertedIndex => ({
     version: 1,
@@ -2670,19 +2671,37 @@ export const SearchIndexService = {
             const previousTermsLookup = hasPreviousEntry && previousTerms.length > 0
                 ? new Set(previousTerms)
                 : null;
-            for (let termIndex = 0; termIndex < termList.length; termIndex++) {
-                const term = termList[termIndex];
-                let termIds = index.terms[term];
-                if (!termIds) {
-                    termIds = [];
-                    index.terms[term] = termIds;
+            const indexTerms = index.terms;
+            if (previousTermsLookup && previousTermsLookup.size > 0) {
+                for (let termIndex = 0; termIndex < termList.length; termIndex++) {
+                    const term = termList[termIndex];
+                    let termIds = indexTerms[term];
+                    if (!termIds) {
+                        termIds = [];
+                        indexTerms[term] = termIds;
+                    }
+                    if (previousTermsLookup.has(term)) {
+                        termIds.push(sessionId);
+                        continue;
+                    }
+                    if (termIds.includes(sessionId)) {
+                        continue;
+                    }
+                    termIds.push(sessionId);
                 }
-
-                const requiresExistingCheck = !previousTermsLookup || !previousTermsLookup.has(term);
-                if (requiresExistingCheck && termIds.includes(sessionId)) {
-                    continue;
+            } else {
+                for (let termIndex = 0; termIndex < termList.length; termIndex++) {
+                    const term = termList[termIndex];
+                    let termIds = indexTerms[term];
+                    if (!termIds) {
+                        termIds = [];
+                        indexTerms[term] = termIds;
+                    }
+                    if (termIds.includes(sessionId)) {
+                        continue;
+                    }
+                    termIds.push(sessionId);
                 }
-                termIds.push(sessionId);
             }
             index.sessionTerms[sessionId] = termList;
             didChange = true;
@@ -2744,6 +2763,11 @@ export const SearchIndexService = {
             const ids = index.terms[queryTerms[0]];
             if (!ids || ids.length === 0) {
                 return new Set<string>();
+            }
+            if (ids.length === 1) {
+                const singleton = new Set<string>();
+                singleton.add(ids[0]);
+                return singleton;
             }
             return new Set(ids);
         }
@@ -2893,6 +2917,104 @@ export const SearchIndexService = {
             }
             return resultIds ?? new Set<string>();
         }
+        if (queryTermCount === 5) {
+            const firstTerm = queryTerms[0];
+            const secondTerm = queryTerms[1];
+            const thirdTerm = queryTerms[2];
+            const fourthTerm = queryTerms[3];
+            const fifthTerm = queryTerms[4];
+            const firstIds = index.terms[firstTerm];
+            const secondIds = index.terms[secondTerm];
+            const thirdIds = index.terms[thirdTerm];
+            const fourthIds = index.terms[fourthTerm];
+            const fifthIds = index.terms[fifthTerm];
+
+            if (
+                !firstIds || firstIds.length === 0 ||
+                !secondIds || secondIds.length === 0 ||
+                !thirdIds || thirdIds.length === 0 ||
+                !fourthIds || fourthIds.length === 0 ||
+                !fifthIds || fifthIds.length === 0
+            ) {
+                return new Set<string>();
+            }
+
+            let resultIds: Set<string> | null = null;
+            let candidateIds = firstIds;
+            let membershipTermA = secondTerm;
+            let membershipIdsA = secondIds;
+            let membershipTermB = thirdTerm;
+            let membershipIdsB = thirdIds;
+            let membershipTermC = fourthTerm;
+            let membershipIdsC = fourthIds;
+            let membershipTermD = fifthTerm;
+            let membershipIdsD = fifthIds;
+
+            if (secondIds.length < candidateIds.length) {
+                candidateIds = secondIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = thirdTerm;
+                membershipIdsB = thirdIds;
+                membershipTermC = fourthTerm;
+                membershipIdsC = fourthIds;
+                membershipTermD = fifthTerm;
+                membershipIdsD = fifthIds;
+            }
+            if (thirdIds.length < candidateIds.length) {
+                candidateIds = thirdIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+                membershipTermC = fourthTerm;
+                membershipIdsC = fourthIds;
+                membershipTermD = fifthTerm;
+                membershipIdsD = fifthIds;
+            }
+            if (fourthIds.length < candidateIds.length) {
+                candidateIds = fourthIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+                membershipTermC = thirdTerm;
+                membershipIdsC = thirdIds;
+                membershipTermD = fifthTerm;
+                membershipIdsD = fifthIds;
+            }
+            if (fifthIds.length < candidateIds.length) {
+                candidateIds = fifthIds;
+                membershipTermA = firstTerm;
+                membershipIdsA = firstIds;
+                membershipTermB = secondTerm;
+                membershipIdsB = secondIds;
+                membershipTermC = thirdTerm;
+                membershipIdsC = thirdIds;
+                membershipTermD = fourthTerm;
+                membershipIdsD = fourthIds;
+            }
+
+            const membershipSetA = getPostingSet(membershipTermA, membershipIdsA);
+            const membershipSetB = getPostingSet(membershipTermB, membershipIdsB);
+            const membershipSetC = getPostingSet(membershipTermC, membershipIdsC);
+            const membershipSetD = getPostingSet(membershipTermD, membershipIdsD);
+            for (let i = 0; i < candidateIds.length; i++) {
+                const sessionId = candidateIds[i];
+                if (
+                    membershipSetA.has(sessionId) &&
+                    membershipSetB.has(sessionId) &&
+                    membershipSetC.has(sessionId) &&
+                    membershipSetD.has(sessionId)
+                ) {
+                    if (!resultIds) {
+                        resultIds = new Set<string>();
+                    }
+                    resultIds.add(sessionId);
+                }
+            }
+            return resultIds ?? new Set<string>();
+        }
 
         const initialIds = index.terms[queryTerms[0]];
         if (!initialIds || initialIds.length === 0) {
@@ -2911,7 +3033,11 @@ export const SearchIndexService = {
             }
         }
 
-        const remainingTermSets: Set<string>[] = new Array(queryTerms.length - 1);
+        const remainingTermCount = queryTerms.length - 1;
+        if (remainingTermSetScratch.length < remainingTermCount) {
+            remainingTermSetScratch.length = remainingTermCount;
+        }
+        const remainingTermSets = remainingTermSetScratch;
         let remainingTermSetIndex = 0;
         for (let i = 0; i < smallestTermIndex; i++) {
             const term = queryTerms[i];
@@ -2932,7 +3058,7 @@ export const SearchIndexService = {
             const sessionId = firstIds[i];
             let matchesAll = true;
 
-            for (let j = 0; j < remainingTermSets.length; j++) {
+            for (let j = 0; j < remainingTermCount; j++) {
                 if (!remainingTermSets[j].has(sessionId)) {
                     matchesAll = false;
                     break;
