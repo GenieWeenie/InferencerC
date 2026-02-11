@@ -642,6 +642,164 @@ describe('storage hydration guards', () => {
     });
   });
 
+  test('sanitizes scheduled/mcp/collaboration/workflow/ab persistence mutation paths', () => {
+    jest.isolateModules(() => {
+      const { scheduledConversationsService } = require('../src/renderer/services/scheduledConversations') as typeof import('../src/renderer/services/scheduledConversations');
+      const { mcpClient } = require('../src/renderer/services/mcp') as typeof import('../src/renderer/services/mcp');
+      const { realTimeCollaborationService } = require('../src/renderer/services/realTimeCollaboration') as typeof import('../src/renderer/services/realTimeCollaboration');
+      const { workflowsService } = require('../src/renderer/services/workflows') as typeof import('../src/renderer/services/workflows');
+      const { abTestingService } = require('../src/renderer/services/abTesting') as typeof import('../src/renderer/services/abTesting');
+
+      const schedule = scheduledConversationsService.createSchedule({
+        name: '  Nightly Run  ',
+        prompt: '  Generate summary  ',
+        modelId: '  model-1  ',
+        scheduledTime: Date.now() + 60_000,
+        enabled: true,
+      });
+      expect(schedule.name).toBe('Nightly Run');
+      expect(schedule.prompt).toBe('Generate summary');
+      expect(schedule.modelId).toBe('model-1');
+
+      (scheduledConversationsService as any).saveRun({
+        scheduleId: `  ${schedule.id}  `,
+        executedAt: Date.now(),
+        result: { success: true, messageId: '  message-1  ', error: '   ' },
+      });
+      (scheduledConversationsService as any).saveRun({
+        scheduleId: '   ',
+        executedAt: Date.now(),
+        result: { success: false, error: 'ignored' },
+      });
+      const runHistory = scheduledConversationsService.getRunHistory(`  ${schedule.id}  `, 2.4 as any);
+      expect(runHistory).toHaveLength(1);
+      expect(runHistory[0]).toMatchObject({
+        scheduleId: schedule.id,
+        result: { success: true, messageId: 'message-1' },
+      });
+      expect(scheduledConversationsService.getRunHistory(schedule.id, 0 as any)).toHaveLength(1);
+
+      const server = mcpClient.addServer({
+        name: '  MCP Guard  ',
+        description: '  Guard server  ',
+        command: '  npx  ',
+        args: [' -y ', '-y'] as any,
+        env: { TOKEN: '  abc  ' },
+      });
+      (mcpClient as any).servers.set('invalid-entry', {
+        id: '   ',
+        name: 'Bad',
+        command: '',
+        args: [],
+        status: 'connected',
+      });
+      (mcpClient as any).servers.set('duplicate-entry', {
+        ...server,
+        id: server.id,
+        name: '  Duplicate  ',
+      });
+      (mcpClient as any).saveServers();
+      const persistedServers = JSON.parse(localStorage.getItem('mcp_servers') ?? '[]');
+      expect(persistedServers).toHaveLength(1);
+      expect(persistedServers[0]).toMatchObject({
+        id: server.id,
+        name: 'MCP Guard',
+        description: 'Guard server',
+        command: 'npx',
+        args: ['-y'],
+      });
+
+      const collaborationConfig = realTimeCollaborationService.saveConfig({
+        enabled: 'yes' as any,
+        baseUrl: '  https://collab.example.com///  ',
+        displayName: '   ',
+        pollTimeoutMs: 2 as any,
+        autoJoin: 'true' as any,
+      } as any);
+      expect(collaborationConfig.enabled).toBe(true);
+      expect(collaborationConfig.baseUrl).toBe('https://collab.example.com');
+      expect(collaborationConfig.displayName).toBe('User');
+      expect(collaborationConfig.pollTimeoutMs).toBe(5000);
+      expect(collaborationConfig.autoJoin).toBe(false);
+      expect(JSON.parse(localStorage.getItem('collaboration_config') ?? '{}')).toEqual(collaborationConfig);
+
+      const workflow = workflowsService.createWorkflow({
+        name: '  Workflow One  ',
+        description: '  Guard workflow  ',
+        enabled: true,
+        conditions: [{ type: 'keyword', operator: 'contains', value: '  deploy  ' }],
+        actions: [{ type: 'send-notification', value: '  notify  ' }],
+        priority: 1,
+      });
+      expect(workflow.name).toBe('Workflow One');
+      expect(workflow.conditions[0]?.value).toBe('deploy');
+      expect(workflow.actions[0]?.value).toBe('notify');
+      expect(workflowsService.updateWorkflow(workflow.id, {
+        id: 'other-workflow-id',
+        name: '  Workflow Two  ',
+      } as any)).toBe(true);
+      expect(workflowsService.getWorkflow(workflow.id)?.name).toBe('Workflow Two');
+      (workflowsService as any).workflows.set('invalid-workflow', {
+        id: '   ',
+        name: '',
+        enabled: true,
+        conditions: [],
+        actions: [],
+        priority: 1,
+      });
+      (workflowsService as any).workflows.set('duplicate-workflow', {
+        ...workflow,
+        id: workflow.id,
+      });
+      (workflowsService as any).saveWorkflows();
+      const persistedWorkflows = JSON.parse(localStorage.getItem('workflows') ?? '[]');
+      expect(persistedWorkflows).toHaveLength(1);
+      expect(persistedWorkflows[0]?.id).toBe(workflow.id);
+
+      const test = abTestingService.createTest(
+        '  Test One  ',
+        [{ id: ' v1 ', name: ' Variant One ', prompt: '  Prompt A  ' }] as any,
+        '  Input A  ',
+        [{ role: 'user', content: '  context  ' }],
+      );
+      expect(test.name).toBe('Test One');
+      expect(test.variants[0]?.id).toBe('v1');
+      expect(test.input).toBe('Input A');
+
+      expect(abTestingService.updateTest(test.id, {
+        id: 'other-test-id',
+        name: '  Test Two  ',
+        variants: [{ id: ' v1 ', name: ' Variant 1 ', prompt: '  Prompt B  ' }] as any,
+        input: '  Input B  ',
+        completedAt: 0,
+      } as any)).toBe(true);
+      const updatedTest = abTestingService.getTest(test.id);
+      expect(updatedTest).toBeDefined();
+      expect(updatedTest?.id).toBe(test.id);
+      expect(updatedTest?.name).toBe('Test Two');
+      expect(updatedTest?.input).toBe('Input B');
+      expect(updatedTest?.completedAt).toBeGreaterThanOrEqual(updatedTest?.createdAt ?? 0);
+      (abTestingService as any).tests.set('invalid-test', {
+        id: '',
+        name: '',
+        variants: [],
+        input: '',
+        createdAt: -1,
+        status: 'draft',
+      });
+      (abTestingService as any).tests.set('duplicate-test', {
+        ...updatedTest,
+        id: test.id,
+      });
+      (abTestingService as any).saveTests();
+      const persistedTests = JSON.parse(localStorage.getItem('ab_tests') ?? '[]');
+      expect(persistedTests).toHaveLength(1);
+      expect(persistedTests[0]?.id).toBe(test.id);
+
+      scheduledConversationsService.stopScheduler();
+    });
+  });
+
   test('guards refactoring/codegen/sentiment/category/tag/review storage payloads', () => {
     localStorage.setItem('refactoring_results', JSON.stringify([
       {

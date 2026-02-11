@@ -175,6 +175,27 @@ const sanitizeWorkflow = (value: unknown): WorkflowRule | null => {
     };
 };
 
+const parseStoredWorkflows = (raw: string): WorkflowRule[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    const seenIds = new Set<string>();
+    return parsed
+        .map((entry) => sanitizeWorkflow(entry))
+        .filter((entry): entry is WorkflowRule => {
+            if (!entry) {
+                return false;
+            }
+            if (seenIds.has(entry.id)) {
+                return false;
+            }
+            seenIds.add(entry.id);
+            return true;
+        });
+};
+
 export class WorkflowsService {
     private static instance: WorkflowsService;
     private workflows: Map<string, WorkflowRule> = new Map();
@@ -199,21 +220,9 @@ export class WorkflowsService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                const parsed = parseJson(stored);
-                if (!Array.isArray(parsed)) {
-                    return;
-                }
-                const seenIds = new Set<string>();
+                const parsed = parseStoredWorkflows(stored);
                 parsed.forEach((entry) => {
-                    const workflow = sanitizeWorkflow(entry);
-                    if (!workflow) {
-                        return;
-                    }
-                    if (seenIds.has(workflow.id)) {
-                        return;
-                    }
-                    seenIds.add(workflow.id);
-                    this.workflows.set(workflow.id, workflow);
+                    this.workflows.set(entry.id, entry);
                 });
             }
         } catch (error) {
@@ -226,7 +235,19 @@ export class WorkflowsService {
      */
     private saveWorkflows(): void {
         try {
-            const workflows = Array.from(this.workflows.values());
+            const seenIds = new Set<string>();
+            const workflows = Array.from(this.workflows.values())
+                .map((entry) => sanitizeWorkflow(entry))
+                .filter((entry): entry is WorkflowRule => {
+                    if (!entry) {
+                        return false;
+                    }
+                    if (seenIds.has(entry.id)) {
+                        return false;
+                    }
+                    seenIds.add(entry.id);
+                    return true;
+                });
             localStorage.setItem(this.STORAGE_KEY, JSON.stringify(workflows));
         } catch (error) {
             console.error('Failed to save workflows:', error);

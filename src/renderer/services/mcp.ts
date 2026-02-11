@@ -318,7 +318,19 @@ class MCPClient {
      */
     private saveServers(): void {
         try {
-            const servers = Array.from(this.servers.values());
+            const seenIds = new Set<string>();
+            const servers = Array.from(this.servers.values())
+                .map((entry) => this.sanitizeServer(entry, { fallbackStatus: 'disconnected' }))
+                .filter((entry): entry is MCPServer => {
+                    if (!entry) {
+                        return false;
+                    }
+                    if (seenIds.has(entry.id)) {
+                        return false;
+                    }
+                    seenIds.add(entry.id);
+                    return true;
+                });
             localStorage.setItem(MCP_SERVERS_KEY, JSON.stringify(servers));
         } catch (e) {
             console.error('Failed to save MCP servers:', e);

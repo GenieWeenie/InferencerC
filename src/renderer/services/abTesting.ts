@@ -104,6 +104,13 @@ const sanitizeNonEmptyString = (value: unknown): string | null => {
     return normalized && normalized.length > 0 ? normalized : null;
 };
 
+const sanitizeFiniteNonNegativeInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return null;
+    }
+    return Math.floor(value);
+};
+
 const sanitizeVariant = (value: unknown): ABTestVariant | null => {
     if (!isRecord(value)) {
         return null;
@@ -147,27 +154,24 @@ const sanitizeVariantResult = (value: unknown): ABTestVariantResult | null => {
     if (!isRecord(value)) {
         return null;
     }
-    if (
-        typeof value.variantId !== 'string'
-        || typeof value.variantName !== 'string'
-        || typeof value.response !== 'string'
-        || typeof value.responseTime !== 'number'
-        || !Number.isFinite(value.responseTime)
-    ) {
+    const variantId = sanitizeNonEmptyString(value.variantId);
+    const variantName = sanitizeNonEmptyString(value.variantName);
+    const response = typeof value.response === 'string' ? value.response : null;
+    if (!variantId || !variantName || response === null || typeof value.responseTime !== 'number' || !Number.isFinite(value.responseTime)) {
         return null;
     }
 
     return {
-        variantId: value.variantId,
-        variantName: value.variantName,
-        response: value.response,
+        variantId,
+        variantName,
+        response,
         responseTime: value.responseTime,
         tokensUsed: typeof value.tokensUsed === 'number' && Number.isFinite(value.tokensUsed) ? value.tokensUsed : undefined,
-        error: typeof value.error === 'string' ? value.error : undefined,
+        error: sanitizeNonEmptyString(value.error) || undefined,
         metadata: isRecord(value.metadata)
             ? {
-                modelId: typeof value.metadata.modelId === 'string' ? value.metadata.modelId : undefined,
-                finishReason: typeof value.metadata.finishReason === 'string' ? value.metadata.finishReason : undefined,
+                modelId: sanitizeNonEmptyString(value.metadata.modelId) || undefined,
+                finishReason: sanitizeNonEmptyString(value.metadata.finishReason) || undefined,
             }
             : undefined,
     };
@@ -205,19 +209,30 @@ const sanitizeABTest = (value: unknown): ABTest | null => {
     if (!isRecord(value)) {
         return null;
     }
+    const id = sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    const input = sanitizeNonEmptyString(value.input);
+    const createdAt = sanitizeFiniteNonNegativeInteger(value.createdAt);
     if (
-        !sanitizeNonEmptyString(value.id)
-        || !sanitizeNonEmptyString(value.name)
-        || !sanitizeNonEmptyString(value.input)
-        || typeof value.createdAt !== 'number'
-        || !Number.isFinite(value.createdAt)
+        !id
+        || !name
+        || !input
+        || createdAt === null
         || !TEST_STATUSES.has(value.status as ABTest['status'])
     ) {
         return null;
     }
 
+    const seenVariantIds = new Set<string>();
     const variants = Array.isArray(value.variants)
         ? value.variants.map(sanitizeVariant).filter((variant): variant is ABTestVariant => variant !== null)
+            .filter((variant) => {
+                if (seenVariantIds.has(variant.id)) {
+                    return false;
+                }
+                seenVariantIds.add(variant.id);
+                return true;
+            })
         : [];
     if (variants.length === 0) {
         return null;
@@ -226,23 +241,56 @@ const sanitizeABTest = (value: unknown): ABTest | null => {
     const context = Array.isArray(value.context)
         ? value.context.map(sanitizeChatMessage).filter((message): message is ChatMessage => message !== null)
         : undefined;
+    const seenResultVariantIds = new Set<string>();
     const results = Array.isArray(value.results)
         ? value.results.map(sanitizeVariantResult).filter((result): result is ABTestVariantResult => result !== null)
+            .filter((result) => {
+                if (seenResultVariantIds.has(result.variantId)) {
+                    return false;
+                }
+                seenResultVariantIds.add(result.variantId);
+                return true;
+            })
         : undefined;
+    const completedAtCandidate = sanitizeFiniteNonNegativeInteger(value.completedAt);
+    const completedAt = completedAtCandidate === null
+        ? undefined
+        : Math.max(createdAt, completedAtCandidate);
 
     return {
-        id: sanitizeNonEmptyString(value.id) as string,
-        name: sanitizeNonEmptyString(value.name) as string,
+        id,
+        name,
         description: sanitizeNonEmptyString(value.description) || undefined,
         variants,
-        input: sanitizeNonEmptyString(value.input) as string,
+        input,
         context,
-        createdAt: value.createdAt,
-        completedAt: typeof value.completedAt === 'number' && Number.isFinite(value.completedAt) ? value.completedAt : undefined,
+        createdAt,
+        completedAt,
         results,
         status: value.status as ABTest['status'],
         metrics: sanitizeMetrics(value.metrics),
     };
+};
+
+const parseStoredTests = (raw: string): ABTest[] => {
+    const parsed = parseJson(raw);
+    if (!parsed.ok || !Array.isArray(parsed.value)) {
+        return [];
+    }
+
+    const seenIds = new Set<string>();
+    return parsed.value
+        .map((entry) => sanitizeABTest(entry))
+        .filter((entry): entry is ABTest => {
+            if (!entry) {
+                return false;
+            }
+            if (seenIds.has(entry.id)) {
+                return false;
+            }
+            seenIds.add(entry.id);
+            return true;
+        });
 };
 
 export class ABTestingService {
@@ -268,16 +316,9 @@ export class ABTestingService {
         try {
             const stored = localStorage.getItem(ABTestingService.STORAGE_KEY);
             if (stored) {
-                const parsed = parseJson(stored);
-                if (!parsed.ok || !Array.isArray(parsed.value)) {
-                    return;
-                }
-                parsed.value.forEach((entry) => {
-                    const test = sanitizeABTest(entry);
-                    if (!test) {
-                        return;
-                    }
-                    this.tests.set(test.id, test);
+                const tests = parseStoredTests(stored);
+                tests.forEach((entry) => {
+                    this.tests.set(entry.id, entry);
                 });
             }
         } catch (error) {
@@ -290,7 +331,19 @@ export class ABTestingService {
      */
     private saveTests(): void {
         try {
-            const tests = Array.from(this.tests.values());
+            const seenIds = new Set<string>();
+            const tests = Array.from(this.tests.values())
+                .map((entry) => sanitizeABTest(entry))
+                .filter((entry): entry is ABTest => {
+                    if (!entry) {
+                        return false;
+                    }
+                    if (seenIds.has(entry.id)) {
+                        return false;
+                    }
+                    seenIds.add(entry.id);
+                    return true;
+                });
             localStorage.setItem(ABTestingService.STORAGE_KEY, JSON.stringify(tests));
         } catch (error) {
             console.error('Failed to save A/B tests:', error);
@@ -338,7 +391,11 @@ export class ABTestingService {
      * Update a test
      */
     updateTest(id: string, updates: Partial<ABTest>): boolean {
-        const test = this.tests.get(id);
+        const normalizedId = sanitizeNonEmptyString(id);
+        if (!normalizedId) {
+            return false;
+        }
+        const test = this.tests.get(normalizedId);
         if (!test) return false;
 
         const updated = sanitizeABTest({
@@ -350,7 +407,7 @@ export class ABTestingService {
         if (!updated) {
             return false;
         }
-        this.tests.set(id, updated);
+        this.tests.set(updated.id, updated);
         this.saveTests();
         return true;
     }

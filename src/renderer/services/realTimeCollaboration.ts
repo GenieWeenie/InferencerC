@@ -105,6 +105,10 @@ const VALID_EVENT_TYPES = new Set<CollaborationEventType>([
     'message-edited',
     'message-conflict',
 ]);
+const DEFAULT_COLLABORATION_BASE_URL = 'http://localhost:3000';
+const DEFAULT_COLLABORATION_POLL_TIMEOUT_MS = 20000;
+const MIN_COLLABORATION_POLL_TIMEOUT_MS = 5000;
+const MAX_COLLABORATION_POLL_TIMEOUT_MS = 30000;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -124,6 +128,41 @@ const parseJson = (raw: string): unknown | null => {
     } catch {
         return null;
     }
+};
+
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeCollaborationConfig = (
+    value: unknown,
+    fallbackDisplayName: string
+): CollaborationConfig => {
+    const source = isRecord(value) ? value : {};
+    const normalizedBaseUrl = sanitizeNonEmptyString(source.baseUrl);
+    const baseUrl = normalizedBaseUrl
+        ? normalizedBaseUrl.replace(/\/+$/, '')
+        : DEFAULT_COLLABORATION_BASE_URL;
+    const displayName = sanitizeNonEmptyString(source.displayName)
+        || fallbackDisplayName;
+    const pollTimeoutMs = isFiniteNumber(source.pollTimeoutMs)
+        ? Math.max(
+            MIN_COLLABORATION_POLL_TIMEOUT_MS,
+            Math.min(MAX_COLLABORATION_POLL_TIMEOUT_MS, Math.floor(source.pollTimeoutMs))
+        )
+        : DEFAULT_COLLABORATION_POLL_TIMEOUT_MS;
+
+    return {
+        enabled: typeof source.enabled === 'boolean' ? source.enabled : true,
+        baseUrl: baseUrl || DEFAULT_COLLABORATION_BASE_URL,
+        displayName,
+        pollTimeoutMs,
+        autoJoin: typeof source.autoJoin === 'boolean' ? source.autoJoin : false,
+    };
 };
 
 const sanitizeCursorPosition = (value: unknown): CollaborationCursorPosition | undefined => {
@@ -334,49 +373,27 @@ class RealTimeCollaborationService {
     }
 
     private loadConfig(): CollaborationConfig {
+        const fallbackDisplayName = sanitizeNonEmptyString(localStorage.getItem('user_name')) || 'User';
         try {
             const raw = localStorage.getItem(this.STORAGE_KEY);
             if (raw) {
                 const parsed = parseJson(raw);
-                const data = isRecord(parsed) ? parsed : {};
-                const baseUrl = typeof data.baseUrl === 'string'
-                    ? data.baseUrl.trim().replace(/\/$/, '')
-                    : 'http://localhost:3000';
-                return {
-                    enabled: typeof data.enabled === 'boolean' ? data.enabled : true,
-                    baseUrl: baseUrl || 'http://localhost:3000',
-                    displayName: typeof data.displayName === 'string' && data.displayName.trim().length > 0
-                        ? data.displayName.trim()
-                        : (localStorage.getItem('user_name') || 'User'),
-                    pollTimeoutMs: isFiniteNumber(data.pollTimeoutMs)
-                        ? Math.max(5000, Math.min(30000, Math.floor(data.pollTimeoutMs)))
-                        : 20000,
-                    autoJoin: typeof data.autoJoin === 'boolean' ? data.autoJoin : false,
-                };
+                return sanitizeCollaborationConfig(parsed, fallbackDisplayName);
             }
         } catch (error) {
             console.error('Failed to load collaboration config:', error);
         }
 
-        return {
-            enabled: true,
-            baseUrl: 'http://localhost:3000',
-            displayName: localStorage.getItem('user_name') || 'User',
-            pollTimeoutMs: 20000,
-            autoJoin: false,
-        };
+        return sanitizeCollaborationConfig(null, fallbackDisplayName);
     }
 
     saveConfig(partial: Partial<CollaborationConfig>): CollaborationConfig {
-        const next: CollaborationConfig = {
+        const partialRecord = isRecord(partial) ? partial : {};
+        const fallbackDisplayName = sanitizeNonEmptyString(localStorage.getItem('user_name')) || 'User';
+        const next = sanitizeCollaborationConfig({
             ...this.config,
-            ...partial,
-        };
-
-        next.baseUrl = next.baseUrl.trim().replace(/\/$/, '') || 'http://localhost:3000';
-        next.displayName = next.displayName.trim() || 'User';
-        next.pollTimeoutMs = Math.max(5000, Math.min(30000, Number(next.pollTimeoutMs) || 20000));
-        next.autoJoin = Boolean(next.autoJoin);
+            ...partialRecord,
+        }, fallbackDisplayName);
 
         this.config = next;
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(next));

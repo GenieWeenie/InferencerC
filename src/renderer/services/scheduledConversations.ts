@@ -196,9 +196,20 @@ const parseStoredRuns = (raw: string): ScheduledRun[] => {
         return [];
     }
 
+    const seenRunKeys = new Set<string>();
     return parsed
         .map((entry) => sanitizeRun(entry))
-        .filter((entry): entry is ScheduledRun => entry !== null);
+        .filter((entry): entry is ScheduledRun => {
+            if (!entry) {
+                return false;
+            }
+            const runKey = `${entry.scheduleId}:${entry.executedAt}`;
+            if (seenRunKeys.has(runKey)) {
+                return false;
+            }
+            seenRunKeys.add(runKey);
+            return true;
+        });
 };
 
 export class ScheduledConversationsService {
@@ -427,12 +438,16 @@ export class ScheduledConversationsService {
      */
     private saveRun(run: ScheduledRun): void {
         try {
+            const sanitizedRun = sanitizeRun(run);
+            if (!sanitizedRun) {
+                return;
+            }
             const stored = localStorage.getItem(this.RUNS_KEY);
             const runs = stored ? parseStoredRuns(stored) : [];
-            runs.push(run);
+            runs.push(sanitizedRun);
             // Keep only last 100 runs
             if (runs.length > 100) {
-                runs.shift();
+                runs.splice(0, runs.length - 100);
             }
             localStorage.setItem(this.RUNS_KEY, JSON.stringify(runs));
         } catch (error) {
@@ -445,12 +460,16 @@ export class ScheduledConversationsService {
      */
     getRunHistory(scheduleId: string, limit: number = 20): ScheduledRun[] {
         try {
+            const normalizedScheduleId = sanitizeNonEmptyString(scheduleId);
+            if (!normalizedScheduleId) {
+                return [];
+            }
             const stored = localStorage.getItem(this.RUNS_KEY);
             if (!stored) return [];
             const sanitizedLimit = sanitizePositiveInteger(limit) || 20;
             const runs = parseStoredRuns(stored);
             return runs
-                .filter(r => r.scheduleId === scheduleId)
+                .filter(r => r.scheduleId === normalizedScheduleId)
                 .sort((a, b) => b.executedAt - a.executedAt)
                 .slice(0, sanitizedLimit);
         } catch (error) {
