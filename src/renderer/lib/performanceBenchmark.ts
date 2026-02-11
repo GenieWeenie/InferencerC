@@ -16,6 +16,7 @@ import { generateChatSession } from './testDataGenerator';
 import { ChatSession } from '../../shared/types';
 import { performanceService } from '../services/performance';
 import { SearchIndexService } from '../services/searchIndex';
+import { getBrowserPerformanceMemory } from './performanceMemory';
 
 export interface BenchmarkResult {
     testName: string;
@@ -187,12 +188,12 @@ export function saveSearchIndexBenchmarkReport(
  * Measure memory usage in MB
  */
 export function measureMemory(): number {
-    // @ts-ignore - Chrome/Electron specific API
-    if (performance.memory) {
-        // @ts-ignore
-        return Math.round(performance.memory.usedJSHeapSize / 1024 / 1024);
+    const memory = getBrowserPerformanceMemory();
+    if (!memory) {
+        return 0;
     }
-    return 0;
+
+    return Math.round(memory.usedJSHeapSize / 1024 / 1024);
 }
 
 /**
@@ -443,9 +444,22 @@ export async function runAutomatedBenchmarks(): Promise<BenchmarkSuite> {
 }
 
 // Export for use in DevTools console
+type PerformanceBenchmarkApi = {
+    generateBenchmarkSession: typeof generateBenchmarkSession;
+    measureFPS: typeof measureFPS;
+    measureMemory: typeof measureMemory;
+    measureExecutionTime: typeof measureExecutionTime;
+    runAutomatedBenchmarks: typeof runAutomatedBenchmarks;
+    manualBenchmarkInstructions: typeof manualBenchmarkInstructions;
+};
+
+interface BenchmarkWindow extends Window {
+    performanceBenchmark?: PerformanceBenchmarkApi;
+}
+
 if (typeof window !== 'undefined') {
-    // @ts-ignore
-    window.performanceBenchmark = {
+    const benchmarkWindow = window as BenchmarkWindow;
+    benchmarkWindow.performanceBenchmark = {
         generateBenchmarkSession,
         measureFPS,
         measureMemory,

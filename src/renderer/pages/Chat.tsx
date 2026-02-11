@@ -2,20 +2,13 @@ import React from 'react';
 import { Plus, Globe, Settings, Activity, AlertTriangle, ChevronRight, Check, AlertCircle, Brain, Users, Wrench, Eraser, Download, Search, ChevronUp, ChevronDown, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, Network, HelpCircle, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
 import { ChatComposerArea } from '../components/chat/ChatComposerArea';
-import { ChatControlsTabPanel } from '../components/chat/ChatControlsTabPanel';
 import { ChatContextWindowPanel, ChatSummaryPanel } from '../components/chat/ChatContextPanels';
 import { ChatHeaderBar } from '../components/chat/ChatHeaderBar';
 import { ChatHistorySidebar } from '../components/chat/ChatHistorySidebar';
-import {
-    ChatInspectorTabPanel,
-} from '../components/chat/ChatInspectorComposerPanels';
-import {
-    SidebarTabsHeader,
-} from '../components/chat/ChatInlinePanels';
 import { ChatMessagesViewport } from '../components/chat/ChatMessagesViewport';
 import { ChatOverlaySlots } from '../components/chat/ChatOverlaySlots';
 import { ChatSearchPanel } from '../components/chat/ChatSearchPanel';
-import { ChatSidebar, type ChatSidebarPanels } from '../components/chat/ChatSidebar';
+import { ChatSidebar } from '../components/chat/ChatSidebar';
 import { ChatWorkspaceShell } from '../components/chat/ChatWorkspaceShell';
 import type { LogEntry } from '../components/RequestResponseLog';
 import { useChat } from '../hooks/useChat';
@@ -45,6 +38,8 @@ import { useChatSendPipeline } from '../hooks/useChatSendPipeline';
 import { useChatSessionIntegrations } from '../hooks/useChatSessionIntegrations';
 import { useChatSlashPrompts } from '../hooks/useChatSlashPrompts';
 import { useChatStartupRecovery } from '../hooks/useChatStartupRecovery';
+import { useChatOverlaySlotsProps } from '../hooks/useChatOverlaySlotsProps';
+import { useChatSidebarPanels } from '../hooks/useChatSidebarPanels';
 import { useChatUiActionBundle } from '../hooks/useChatUiActionBundle';
 import { useComposerOverlayLayout } from '../hooks/useComposerOverlayLayout';
 import { useChatDerivedViewModels } from '../hooks/useChatDerivedViewModels';
@@ -71,8 +66,6 @@ import {
 import { useMCP } from '../hooks/useMCP';
 import {
     ChatDiagnosticsPopover,
-    DocumentChatPanel,
-    PromptManager,
 } from '../components/chat/chatLazyPanels';
 
 const CHAT_PERF_HISTORY_KEY = 'chat_message_perf_benchmarks_v1';
@@ -1088,6 +1081,199 @@ const Chat: React.FC = () => {
         onToggleSuggestions: handleToggleSuggestions,
         onSendComposerMessage: handleSendComposerMessage,
     });
+    const controlsTabPanelProps = React.useMemo(
+        () => ({
+            systemPrompt,
+            isEditingSystemPrompt,
+            onStartEditingSystemPrompt: handleStartEditingSystemPrompt,
+            onStopEditingSystemPrompt: handleStopEditingSystemPrompt,
+            onSystemPromptChange: handleSystemPromptChange,
+            battleMode,
+            onToggleBattleMode: handleToggleBattleModeWithSecondaryFallback,
+            secondaryModel,
+            secondaryModelDisplayName,
+            nonCurrentModelOptionElements,
+            onSecondaryModelChange: handleSecondaryModelChange,
+            thinkingEnabled,
+            onToggleThinkingEnabled: handleToggleThinking,
+            autoRouting,
+            onToggleAutoRouting: handleToggleAutoRouting,
+            enabledTools,
+            onToggleTool: handleToggleToolByName,
+            jsonModeEnabled: responseFormat === 'json_object',
+            onToggleJsonMode: handleToggleResponseFormat,
+            contextUsage,
+            autoSummarizeContext,
+            onToggleAutoSummarizeContext: handleToggleAutoSummarizeContext,
+            onApplySuggestedTrim: handleApplySuggestedTrim,
+            onIncludeAllContext: handleIncludeAllContext,
+            trimSuggestionRows,
+            onExcludeTrimSuggestion: handleExcludeTrimSuggestion,
+            recentContextRows,
+            onToggleContextMessage: toggleMessageContextInclusion,
+            batchSize,
+            onBatchSizeChange: handleBatchSizeChange,
+            temperature,
+            onTemperatureChange: handleTemperatureChange,
+            topP,
+            onTopPChange: handleTopPChange,
+            maxTokens,
+            onMaxTokensChange: handleMaxTokensChange,
+            maxTokenSliderMax: maxTokensSliderConfig.sliderMax,
+            maxTokenSliderStep: maxTokensSliderConfig.sliderStep,
+            modelContextLength: currentModelObj?.contextLength,
+        }),
+        [
+            systemPrompt,
+            isEditingSystemPrompt,
+            handleStartEditingSystemPrompt,
+            handleStopEditingSystemPrompt,
+            handleSystemPromptChange,
+            battleMode,
+            handleToggleBattleModeWithSecondaryFallback,
+            secondaryModel,
+            secondaryModelDisplayName,
+            nonCurrentModelOptionElements,
+            handleSecondaryModelChange,
+            thinkingEnabled,
+            handleToggleThinking,
+            autoRouting,
+            handleToggleAutoRouting,
+            enabledTools,
+            handleToggleToolByName,
+            responseFormat,
+            handleToggleResponseFormat,
+            contextUsage,
+            autoSummarizeContext,
+            handleToggleAutoSummarizeContext,
+            handleApplySuggestedTrim,
+            handleIncludeAllContext,
+            trimSuggestionRows,
+            handleExcludeTrimSuggestion,
+            recentContextRows,
+            toggleMessageContextInclusion,
+            batchSize,
+            handleBatchSizeChange,
+            temperature,
+            handleTemperatureChange,
+            topP,
+            handleTopPChange,
+            maxTokens,
+            handleMaxTokensChange,
+            maxTokensSliderConfig.sliderMax,
+            maxTokensSliderConfig.sliderStep,
+            currentModelObj?.contextLength,
+        ]
+    );
+    const { sidebarTabsHeader, sidebarPanels } = useChatSidebarPanels({
+        activeTab,
+        onSelectInspectorTab: handleSelectInspectorTab,
+        onSelectControlsTab: handleSelectControlsTab,
+        onSelectPromptsTab: handleSelectPromptsTab,
+        onSelectDocumentsTab: handleSelectDocumentsTab,
+        onCloseSidebar: handleCloseSidebar,
+        controlsTabPanelProps,
+        selectedToken,
+        onUpdateToken: updateMessageToken,
+    });
+    const overlaySlotsProps = useChatOverlaySlotsProps({
+        showShortcutsModal,
+        setShowShortcutsModal,
+        showRequestLog,
+        setShowRequestLog,
+        apiLogs,
+        clearApiLogs,
+        showAnalytics,
+        setShowAnalytics,
+        usageStats,
+        branchingEnabled,
+        showTreeView,
+        setShowTreeView,
+        treeState: {
+            treeManager: treeHook.treeManager,
+            currentPath: treeHook.currentPath,
+        },
+        showExportDialog,
+        setShowExportDialog,
+        history,
+        savedSessions,
+        sessionId,
+        showGlobalSearch,
+        setShowGlobalSearch,
+        handleLoadSession,
+        onJumpToSearchMessage: handleJumpToSearchMessage,
+        showTemplateLibrary,
+        setShowTemplateLibrary,
+        createNewSession,
+        setSystemPrompt,
+        setTemperature,
+        setTopP,
+        setMaxTokens,
+        setExpertMode,
+        setThinkingEnabled,
+        replaceHistory,
+        systemPrompt,
+        temperature,
+        topP,
+        maxTokens,
+        expertMode,
+        thinkingEnabled,
+        showABTesting,
+        setShowABTesting,
+        executeChatCompletion,
+        input,
+        showPromptOptimization,
+        setShowPromptOptimization,
+        showCalendarSchedule,
+        setShowCalendarSchedule,
+        showRecommendations,
+        setShowRecommendations,
+        showWorkflows,
+        setShowWorkflows,
+        showAPIPlayground,
+        setShowAPIPlayground,
+        showDeveloperDocs,
+        setShowDeveloperDocs,
+        showPluginManager,
+        setShowPluginManager,
+        showCodeIntegration,
+        setShowCodeIntegration,
+        selectedCode,
+        setSelectedCode,
+        showWorkspaceViews,
+        setShowWorkspaceViews,
+        showTutorial,
+        currentTutorial,
+        handleCompleteTutorial,
+        handleSkipTutorial,
+        showBCI,
+        setShowBCI,
+        showMultiModal,
+        setShowMultiModal,
+        onSendMultiModal: handleSendMultiModal,
+        showCollaboration,
+        setShowCollaboration,
+        showCloudSync,
+        setShowCloudSync,
+        showTeamWorkspaces,
+        setShowTeamWorkspaces,
+        availableModels,
+        showEnterpriseCompliance,
+        setShowEnterpriseCompliance,
+        showBlockchain,
+        setShowBlockchain,
+        showAIAgents,
+        setShowAIAgents,
+        showFederatedLearning,
+        setShowFederatedLearning,
+        devMonitorsEnabled,
+        showRecoveryDialog,
+        setShowRecoveryDialog,
+        handleRestoreSession,
+        handleDismissRecovery,
+        recoveryState,
+        onApplyOptimizedPrompt: handleApplyOptimizedPrompt,
+    });
 
     return (
         <ChatWorkspaceShell
@@ -1270,176 +1456,12 @@ const Chat: React.FC = () => {
                     isCompactViewport={isCompactViewport}
                     activeTab={activeTab}
                     onCloseSidebar={handleCloseSidebar}
-                    tabsHeader={(
-                        <SidebarTabsHeader
-                            activeTab={activeTab}
-                            onSelectInspectorTab={handleSelectInspectorTab}
-                            onSelectControlsTab={handleSelectControlsTab}
-                            onSelectPromptsTab={handleSelectPromptsTab}
-                            onSelectDocumentsTab={handleSelectDocumentsTab}
-                            onCloseSidebar={handleCloseSidebar}
-                        />
-                    )}
-                    panels={{
-                        controls: (
-                            <ChatControlsTabPanel
-                                systemPrompt={systemPrompt}
-                                isEditingSystemPrompt={isEditingSystemPrompt}
-                                onStartEditingSystemPrompt={handleStartEditingSystemPrompt}
-                                onStopEditingSystemPrompt={handleStopEditingSystemPrompt}
-                                onSystemPromptChange={handleSystemPromptChange}
-                                battleMode={battleMode}
-                                onToggleBattleMode={handleToggleBattleModeWithSecondaryFallback}
-                                secondaryModel={secondaryModel}
-                                secondaryModelDisplayName={secondaryModelDisplayName}
-                                nonCurrentModelOptionElements={nonCurrentModelOptionElements}
-                                onSecondaryModelChange={handleSecondaryModelChange}
-                                thinkingEnabled={thinkingEnabled}
-                                onToggleThinkingEnabled={handleToggleThinking}
-                                autoRouting={autoRouting}
-                                onToggleAutoRouting={handleToggleAutoRouting}
-                                enabledTools={enabledTools}
-                                onToggleTool={handleToggleToolByName}
-                                jsonModeEnabled={responseFormat === 'json_object'}
-                                onToggleJsonMode={handleToggleResponseFormat}
-                                contextUsage={contextUsage}
-                                autoSummarizeContext={autoSummarizeContext}
-                                onToggleAutoSummarizeContext={handleToggleAutoSummarizeContext}
-                                onApplySuggestedTrim={handleApplySuggestedTrim}
-                                onIncludeAllContext={handleIncludeAllContext}
-                                trimSuggestionRows={trimSuggestionRows}
-                                onExcludeTrimSuggestion={handleExcludeTrimSuggestion}
-                                recentContextRows={recentContextRows}
-                                onToggleContextMessage={toggleMessageContextInclusion}
-                                batchSize={batchSize}
-                                onBatchSizeChange={handleBatchSizeChange}
-                                temperature={temperature}
-                                onTemperatureChange={handleTemperatureChange}
-                                topP={topP}
-                                onTopPChange={handleTopPChange}
-                                maxTokens={maxTokens}
-                                onMaxTokensChange={handleMaxTokensChange}
-                                maxTokenSliderMax={maxTokensSliderConfig.sliderMax}
-                                maxTokenSliderStep={maxTokensSliderConfig.sliderStep}
-                                modelContextLength={currentModelObj?.contextLength}
-                            />
-                        ),
-                        prompts: (
-                            <React.Suspense fallback={<div className="p-6 text-slate-500 animate-pulse">Loading Library...</div>}>
-                                <PromptManager />
-                            </React.Suspense>
-                        ),
-                        documents: (
-                            <React.Suspense fallback={<div className="p-6 text-slate-500 animate-pulse">Loading Documents...</div>}>
-                                <DocumentChatPanel />
-                            </React.Suspense>
-                        ),
-                        inspector: (
-                            <ChatInspectorTabPanel
-                                selectedToken={selectedToken}
-                                onUpdateToken={updateMessageToken}
-                            />
-                        ),
-                    } satisfies ChatSidebarPanels}
+                    tabsHeader={sidebarTabsHeader}
+                    panels={sidebarPanels}
                 />
             )}
             overlays={(
-                <ChatOverlaySlots
-                    showShortcutsModal={showShortcutsModal}
-                    setShowShortcutsModal={setShowShortcutsModal}
-                    showRequestLog={showRequestLog}
-                    setShowRequestLog={setShowRequestLog}
-                    apiLogs={apiLogs}
-                    clearApiLogs={clearApiLogs}
-                    showAnalytics={showAnalytics}
-                    setShowAnalytics={setShowAnalytics}
-                    usageStats={usageStats}
-                    branchingEnabled={branchingEnabled}
-                    showTreeView={showTreeView}
-                    setShowTreeView={setShowTreeView}
-                    treeManager={treeHook.treeManager}
-                    currentPath={treeHook.currentPath}
-                    showExportDialog={showExportDialog}
-                    setShowExportDialog={setShowExportDialog}
-                    history={history}
-                    savedSessions={savedSessions}
-                    sessionId={sessionId}
-                    showGlobalSearch={showGlobalSearch}
-                    setShowGlobalSearch={setShowGlobalSearch}
-                    handleLoadSession={handleLoadSession}
-                    onJumpToSearchMessage={handleJumpToSearchMessage}
-                    showTemplateLibrary={showTemplateLibrary}
-                    setShowTemplateLibrary={setShowTemplateLibrary}
-                    createNewSession={createNewSession}
-                    setSystemPrompt={setSystemPrompt}
-                    setTemperature={setTemperature}
-                    setTopP={setTopP}
-                    setMaxTokens={setMaxTokens}
-                    setExpertMode={setExpertMode}
-                    setThinkingEnabled={setThinkingEnabled}
-                    replaceHistory={replaceHistory}
-                    systemPrompt={systemPrompt}
-                    temperature={temperature}
-                    topP={topP}
-                    maxTokens={maxTokens}
-                    expertMode={expertMode}
-                    thinkingEnabled={thinkingEnabled}
-                    showABTesting={showABTesting}
-                    setShowABTesting={setShowABTesting}
-                    executeChatCompletion={executeChatCompletion}
-                    input={input}
-                    showPromptOptimization={showPromptOptimization}
-                    setShowPromptOptimization={setShowPromptOptimization}
-                    showCalendarSchedule={showCalendarSchedule}
-                    setShowCalendarSchedule={setShowCalendarSchedule}
-                    showRecommendations={showRecommendations}
-                    setShowRecommendations={setShowRecommendations}
-                    showWorkflows={showWorkflows}
-                    setShowWorkflows={setShowWorkflows}
-                    showAPIPlayground={showAPIPlayground}
-                    setShowAPIPlayground={setShowAPIPlayground}
-                    showDeveloperDocs={showDeveloperDocs}
-                    setShowDeveloperDocs={setShowDeveloperDocs}
-                    showPluginManager={showPluginManager}
-                    setShowPluginManager={setShowPluginManager}
-                    showCodeIntegration={showCodeIntegration}
-                    setShowCodeIntegration={setShowCodeIntegration}
-                    selectedCode={selectedCode}
-                    setSelectedCode={setSelectedCode}
-                    showWorkspaceViews={showWorkspaceViews}
-                    setShowWorkspaceViews={setShowWorkspaceViews}
-                    showTutorial={showTutorial}
-                    currentTutorial={currentTutorial}
-                    handleCompleteTutorial={handleCompleteTutorial}
-                    handleSkipTutorial={handleSkipTutorial}
-                    showBCI={showBCI}
-                    setShowBCI={setShowBCI}
-                    showMultiModal={showMultiModal}
-                    setShowMultiModal={setShowMultiModal}
-                    onSendMultiModal={handleSendMultiModal}
-                    showCollaboration={showCollaboration}
-                    setShowCollaboration={setShowCollaboration}
-                    showCloudSync={showCloudSync}
-                    setShowCloudSync={setShowCloudSync}
-                    showTeamWorkspaces={showTeamWorkspaces}
-                    setShowTeamWorkspaces={setShowTeamWorkspaces}
-                    availableModels={availableModels}
-                    showEnterpriseCompliance={showEnterpriseCompliance}
-                    setShowEnterpriseCompliance={setShowEnterpriseCompliance}
-                    showBlockchain={showBlockchain}
-                    setShowBlockchain={setShowBlockchain}
-                    showAIAgents={showAIAgents}
-                    setShowAIAgents={setShowAIAgents}
-                    showFederatedLearning={showFederatedLearning}
-                    setShowFederatedLearning={setShowFederatedLearning}
-                    devMonitorsEnabled={devMonitorsEnabled}
-                    showRecoveryDialog={showRecoveryDialog}
-                    setShowRecoveryDialog={setShowRecoveryDialog}
-                    handleRestoreSession={handleRestoreSession}
-                    handleDismissRecovery={handleDismissRecovery}
-                    recoveryState={recoveryState}
-                    onApplyOptimizedPrompt={handleApplyOptimizedPrompt}
-                />
+                <ChatOverlaySlots {...overlaySlotsProps} />
             )}
         />
     );

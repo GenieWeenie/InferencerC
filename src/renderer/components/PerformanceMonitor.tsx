@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Activity, Cpu, Database, Zap } from 'lucide-react';
 import { performanceService } from '../services/performance';
+import { getBrowserPerformanceMemory } from '../lib/performanceMemory';
 
 export const PerformanceMonitor: React.FC = () => {
     const [stats, setStats] = useState({
@@ -33,9 +34,10 @@ export const PerformanceMonitor: React.FC = () => {
             if (now - lastTime >= 1000) {
                 const fps = Math.round((frameCount * 1000) / (now - lastTime));
 
-                // Memory (Chrome/Electron only)
-                // @ts-ignore
-                const memory = performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1024 / 1024) : 0;
+                const memorySnapshot = getBrowserPerformanceMemory();
+                const memory = memorySnapshot
+                    ? Math.round(memorySnapshot.usedJSHeapSize / 1024 / 1024)
+                    : 0;
 
                 const domNodes = document.getElementsByTagName('*').length;
 

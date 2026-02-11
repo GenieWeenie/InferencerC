@@ -19,6 +19,32 @@ interface UseChatModelDiscoveryParams {
     didApplyInitialModelSelectionRef: MutableRefObject<boolean>;
 }
 
+interface OpenRouterModelRecord {
+    id: string;
+    name?: string;
+    context_length?: number;
+    contextLength?: number;
+}
+
+interface OpenRouterModelsResponse {
+    data?: OpenRouterModelRecord[];
+}
+
+const parseOpenRouterModelsResponse = (payload: unknown): OpenRouterModelRecord[] => {
+    if (!payload || typeof payload !== 'object') {
+        return [];
+    }
+
+    const data = (payload as OpenRouterModelsResponse).data;
+    if (!Array.isArray(data)) {
+        return [];
+    }
+
+    return data.filter((model): model is OpenRouterModelRecord =>
+        Boolean(model && typeof model.id === 'string')
+    );
+};
+
 export const useChatModelDiscovery = ({
     openRouterApiKey,
     setAvailableModels,
@@ -58,15 +84,16 @@ export const useChatModelDiscovery = ({
                         headers: { Authorization: `Bearer ${openRouterApiKey}` },
                         signal: AbortSignal.timeout(5000),
                     });
-                    const data = await res.json();
-                    if (data && Array.isArray(data.data)) {
-                        const orModels = data.data.map((model: any) => ({
+                    const data = await res.json() as unknown;
+                    const openRouterModels = parseOpenRouterModelsResponse(data);
+                    if (openRouterModels.length > 0) {
+                        const orModels: Model[] = openRouterModels.map((model) => ({
                             id: `openrouter/${model.id}`,
                             name: `[OR] ${model.name || model.id}`,
                             pathOrUrl: 'https://openrouter.ai',
                             type: 'remote-endpoint',
-                            status: 'loaded',
-                            adapter: 'openrouter',
+                            status: 'loaded' as const,
+                            adapter: 'mock',
                             contextLength: model.context_length || model.contextLength || undefined,
                         }));
                         models = [...models, ...orModels];

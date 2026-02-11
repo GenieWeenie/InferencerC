@@ -1,4 +1,4 @@
-import { Message } from '../../shared/types';
+import type { ChatRequestMessage } from './chatRequestMessageTypes';
 
 export interface ToolDefinition {
     name: string;
@@ -9,7 +9,7 @@ export interface ToolDefinition {
 interface BuildChatCompletionRequestParams {
     modelId: string;
     openRouterApiKey: string | null;
-    messages: Message[];
+    messages: ChatRequestMessage[];
     temperature: number;
     topP: number;
     maxTokens: number;
@@ -45,7 +45,7 @@ export const buildChatCompletionRequest = ({
         headers['X-Title'] = 'WinInferencer';
     }
 
-    const requestMessages: Message[] = messages.map((message) => ({ ...message }));
+    const requestMessages: ChatRequestMessage[] = messages.map((message) => ({ ...message }));
 
     const requestBody: Record<string, unknown> = {
         model: actualModelId,

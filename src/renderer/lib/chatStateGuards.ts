@@ -1,4 +1,8 @@
 import { ChatMessage, ChatSession, Message, TokenLogprob, ToolCall } from '../../shared/types';
+import type {
+    ChatRequestMessage,
+    ChatRequestMessageContent,
+} from './chatRequestMessageTypes';
 
 export interface ChatHistoryStatePatch {
     nextHistory: ChatMessage[];
@@ -473,7 +477,7 @@ interface BuildContextMessagesPatchInput {
     excludedIndices: Set<number>;
     finalSystemPrompt: string;
     contextSummary?: string;
-    userMessageContent: any;
+    userMessageContent: ChatRequestMessageContent;
 }
 
 export const buildContextMessagesPatch = ({
@@ -482,8 +486,8 @@ export const buildContextMessagesPatch = ({
     finalSystemPrompt,
     contextSummary,
     userMessageContent,
-}: BuildContextMessagesPatchInput): Message[] => {
-    const messages: Message[] = [{ role: 'system', content: finalSystemPrompt }];
+}: BuildContextMessagesPatchInput): ChatRequestMessage[] => {
+    const messages: ChatRequestMessage[] = [{ role: 'system', content: finalSystemPrompt }];
     if (contextSummary) {
         messages.push({ role: 'system', content: contextSummary });
     }

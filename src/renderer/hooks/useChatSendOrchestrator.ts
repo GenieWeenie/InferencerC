@@ -1,8 +1,13 @@
 import { Dispatch, MutableRefObject, SetStateAction, useCallback } from 'react';
 import { toast } from 'sonner';
-import { ChatMessage, Message, Model } from '../../shared/types';
+import { ChatMessage, Model } from '../../shared/types';
 import { crashRecoveryService } from '../services/crashRecovery';
 import { detectIntent, findBestModelForIntent } from '../lib/chatUtils';
+import type {
+    ChatRequestContentPart,
+    ChatRequestMessage,
+    ChatRequestMessageContent,
+} from '../lib/chatRequestMessageTypes';
 import {
     buildContextMessagesPatch,
     buildOutgoingMessagePatch,
@@ -17,7 +22,7 @@ export interface TextAttachment {
 export interface ImageAttachment {
     id: string;
     name: string;
-    mimeType: string;
+    mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
     base64: string;
     thumbnailUrl: string;
 }
@@ -47,7 +52,7 @@ interface UseChatSendOrchestratorParams {
     applyOutgoingPatch: (patch: ReturnType<typeof buildOutgoingMessagePatch>) => void;
     streamResponse: (
         modelId: string,
-        messages: Message[],
+        messages: ChatRequestMessage[],
         targetIndex: number,
         signal: AbortSignal,
         labelPrefix?: string,
@@ -165,9 +170,9 @@ export const useChatSendOrchestrator = ({
             finalSystemPrompt += '\n\nIMPORTANT: You must engage in a deep thought process before answering. Enclose your thought process inside <thinking>...</thinking> XML tags. In the thinking block, break down the problem step-by-step, consider multiple angles, and critique your own reasoning. Then provide your final answer outside the tags.';
         }
 
-        let userMessageContent: any = finalInput;
+        let userMessageContent: ChatRequestMessageContent = finalInput;
         if (imageAttachments.length > 0) {
-            const contentParts: any[] = [];
+            const contentParts: ChatRequestContentPart[] = [];
             if (finalInput.trim()) {
                 contentParts.push({ type: 'text', text: finalInput });
             }
@@ -205,7 +210,7 @@ export const useChatSendOrchestrator = ({
             images: imageAttachments.map((image) => ({
                 id: image.id,
                 name: image.name,
-                mimeType: image.mimeType as any,
+                mimeType: image.mimeType,
                 base64: image.base64,
                 thumbnailUrl: image.thumbnailUrl,
             })),

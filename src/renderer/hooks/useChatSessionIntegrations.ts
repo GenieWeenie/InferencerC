@@ -18,6 +18,13 @@ const mapSessionMessagesForExternalShare = (sessionMessages: Array<{ role: strin
     }));
 };
 
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+    return fallback;
+};
+
 export const useChatSessionIntegrations = ({
     sessionId,
     history,
@@ -64,8 +71,8 @@ export const useChatSessionIntegrations = ({
         try {
             HistoryService.exportSessionToObsidian(sessionId);
             toast.success('Chat exported as Obsidian markdown');
-        } catch (error: any) {
-            toast.error(error.message || 'Failed to export');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to export'));
         }
     }, [sessionId]);
 
@@ -95,8 +102,8 @@ export const useChatSessionIntegrations = ({
             }
 
             toast.error(result.error || 'Failed to save to Notion');
-        } catch (error: any) {
-            toast.error(error.message || 'Failed to save to Notion');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to save to Notion'));
         }
     }, [getCurrentSessionForIntegration]);
 
@@ -116,8 +123,8 @@ export const useChatSessionIntegrations = ({
             } else {
                 toast.error(result.error || 'Failed to send to Slack');
             }
-        } catch (error: any) {
-            toast.error(error.message || 'Failed to send to Slack');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to send to Slack'));
         }
     }, [getCurrentSessionForIntegration]);
 
@@ -137,8 +144,8 @@ export const useChatSessionIntegrations = ({
             } else {
                 toast.error(result.error || 'Failed to send to Discord');
             }
-        } catch (error: any) {
-            toast.error(error.message || 'Failed to send to Discord');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to send to Discord'));
         }
     }, [getCurrentSessionForIntegration]);
 
@@ -158,8 +165,8 @@ export const useChatSessionIntegrations = ({
             } else {
                 toast.error(result.error || 'Failed to open email');
             }
-        } catch (error: any) {
-            toast.error(error.message || 'Failed to send email');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to send email'));
         }
     }, [getCurrentSessionForIntegration]);
 

@@ -1,10 +1,11 @@
 import { MutableRefObject, useCallback } from 'react';
 import { toast } from 'sonner';
-import { ChatMessage, Message, ToolCall } from '../../shared/types';
+import { ChatMessage, ToolCall } from '../../shared/types';
 import { HistoryService } from '../services/history';
 import { AVAILABLE_TOOLS } from '../lib/tools';
 import { simulateLogprobs } from '../lib/chatUtils';
 import type { ChatApiLogCallback } from '../lib/chatApiLogTypes';
+import type { ChatRequestMessage } from '../lib/chatRequestMessageTypes';
 import {
     applyChatStreamChunk,
     consumeChatStreamContent,
@@ -96,7 +97,7 @@ export const useChatStreaming = ({
 }: UseChatStreamingParams) => {
     const streamResponse = useCallback(async (
         modelId: string,
-        messages: Message[],
+        messages: ChatRequestMessage[],
         targetIndex: number,
         signal: AbortSignal,
         labelPrefix: string = '',
