@@ -14,8 +14,11 @@ import { useChatMessageMutations } from './useChatMessageMutations';
 import { useChatSendOrchestrator } from './useChatSendOrchestrator';
 import { useChatSessionManager } from './useChatSessionManager';
 import { useChatStreaming } from './useChatStreaming';
+import { useChatAttachmentState } from './useChatAttachmentState';
 import { crashRecoveryService } from '../services/crashRecovery';
 import { performanceService } from '../services/performance';
+import { useChatExpertMode } from './useChatExpertMode';
+import { useChatWebFetch } from './useChatWebFetch';
 import {
     hasLikelyOpenRouterCredential,
     loadAnalyticsService,
@@ -80,9 +83,6 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
     // UI State
     const [savedSessions, setSavedSessions] = useState<ChatSession[]>([]);
-    const [isFetchingWeb, setIsFetchingWeb] = useState(false);
-    const [showUrlInput, setShowUrlInput] = useState(false);
-    const [urlInput, setUrlInput] = useState('');
     const [showExpertMenu, setShowExpertMenu] = useState(false);
     const [showAdvanced, setShowAdvanced] = useState(true);
     const [showHistory, setShowHistory] = useState(false);
@@ -229,35 +229,13 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         };
     }, []);
 
-    const handleExpertSelect = (mode: string | null) => {
-        setExpertMode(mode);
-        setShowExpertMenu(false);
-        if (mode === 'coding') {
-            setSystemPrompt("You are an expert software engineer. You write clean, efficient, and well-documented code. Always invoke standard libraries where possible.");
-            setTemperature(0.2);
-            setTopP(0.1);
-        }
-        else if (mode === 'creative') {
-            setSystemPrompt("You are a creative writer. Use vivid imagery, engaging hooks, and varied sentence structures.");
-            setTemperature(0.9);
-            setTopP(0.95);
-        }
-        else if (mode === 'math') {
-            setSystemPrompt("You are a mathematician. Solve problems step-by-step, showing all work. Use LaTeX for math notation.");
-            setTemperature(0.1);
-            setTopP(0.1);
-        }
-        else if (mode === 'reasoning') {
-            setSystemPrompt("You are a logic expert. Analyze every problem deeply. Break it down into first principles.");
-            setTemperature(0.2);
-            setTopP(0.2);
-        }
-        else {
-            setSystemPrompt("You are a helpful assistant.");
-            setTemperature(0.7);
-            setTopP(0.9);
-        }
-    };
+    const { handleExpertSelect } = useChatExpertMode({
+        setExpertMode,
+        setShowExpertMenu,
+        setSystemPrompt,
+        setTemperature,
+        setTopP,
+    });
 
     useChatModelDiscovery({
         openRouterApiKey,
@@ -389,45 +367,17 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         setMaxTokens,
     });
 
-    const executeWebFetch = useCallback(async () => {
-        if (!urlInput) { setShowUrlInput(false); return; }
-        const url = urlInput;
-        setShowUrlInput(false);
-        setUrlInput('');
-        setIsFetchingWeb(true);
-
-
-        try {
-            const res = await fetch('http://localhost:3000/v1/tools/web-fetch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url })
-            });
-            const data = await res.json();
-            if (data.error) throw new Error(data.error);
-            const content = `[CONTEXT FROM WEB: ${url}]\n\n${data.content}`;
-            appendMessage({ role: 'user', content });
-            toast.success("Web content added to conversation context.");
-            logComplianceEvent({
-                category: 'chat.tools',
-                action: 'web_fetch.completed',
-                result: 'success',
-                details: { url },
-                piiFields: ['url'],
-            });
-        } catch (err: any) {
-            toast.error(err.message);
-            logComplianceEvent({
-                category: 'chat.tools',
-                action: 'web_fetch.failed',
-                result: 'failure',
-                details: { url, error: err?.message || 'Unknown error' },
-                piiFields: ['url'],
-            });
-        } finally {
-            setIsFetchingWeb(false);
-        }
-    }, [appendMessage, logComplianceEvent, urlInput]);
+    const {
+        isFetchingWeb,
+        showUrlInput,
+        setShowUrlInput,
+        urlInput,
+        setUrlInput,
+        executeWebFetch,
+    } = useChatWebFetch({
+        appendMessage,
+        logComplianceEvent,
+    });
 
     const { streamResponse } = useChatStreaming({
         onApiLog,
@@ -484,24 +434,16 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         });
     }, [abortControllers, applyStopGenerationPatch, logComplianceEvent, sessionId]);
 
-    const [attachments, setAttachments] = useState<{ id: string, name: string, content: string }[]>([]);
-    const [imageAttachments, setImageAttachments] = useState<{ id: string, name: string, mimeType: string, base64: string, thumbnailUrl: string }[]>([]);
-
-    const addAttachment = useCallback((file: { name: string, content: string }) => {
-        setAttachments(prev => [...prev, { id: crypto.randomUUID(), ...file }]);
-    }, []);
-
-    const removeAttachment = useCallback((id: string) => {
-        setAttachments(prev => prev.filter(a => a.id !== id));
-    }, []);
-
-    const addImageAttachment = useCallback((file: { name: string, mimeType: string, base64: string, thumbnailUrl: string }) => {
-        setImageAttachments(prev => [...prev, { id: crypto.randomUUID(), ...file }]);
-    }, []);
-
-    const removeImageAttachment = useCallback((id: string) => {
-        setImageAttachments(prev => prev.filter(a => a.id !== id));
-    }, []);
+    const {
+        attachments,
+        setAttachments,
+        imageAttachments,
+        setImageAttachments,
+        addAttachment,
+        removeAttachment,
+        addImageAttachment,
+        removeImageAttachment,
+    } = useChatAttachmentState();
 
     const applyOutgoingPatch = useCallback((outgoingPatch: ReturnType<typeof buildOutgoingMessagePatch>) => {
         applyHistoryStatePatch(outgoingPatch);

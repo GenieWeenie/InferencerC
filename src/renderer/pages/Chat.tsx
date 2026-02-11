@@ -21,7 +21,6 @@ import {
     ComposerControlPills,
     LongPressActionMenu,
     SidebarTabsHeader,
-    type SidebarTab,
 } from '../components/chat/ChatInlinePanels';
 import { ChatOverlaySlots } from '../components/chat/ChatOverlaySlots';
 import { ChatSearchPanel } from '../components/chat/ChatSearchPanel';
@@ -50,10 +49,12 @@ import { useChatPanelsState } from '../hooks/useChatPanelsState';
 import { formatPerfMs, useChatPerfBenchmarks } from '../hooks/useChatPerfBenchmarks';
 import { useChatRuntimeServices } from '../hooks/useChatRuntimeServices';
 import { useChatSearchState } from '../hooks/useChatSearchState';
+import { useChatViewState } from '../hooks/useChatViewState';
 import { useChatSendPipeline } from '../hooks/useChatSendPipeline';
 import { useChatSessionIntegrations } from '../hooks/useChatSessionIntegrations';
 import { useChatSlashPrompts } from '../hooks/useChatSlashPrompts';
 import { useChatStartupRecovery } from '../hooks/useChatStartupRecovery';
+import { useComposerOverlayLayout } from '../hooks/useComposerOverlayLayout';
 import { getDiagnosticsStatus } from '../lib/chatDiagnosticsModels';
 import {
     loadActivityLogService,
@@ -74,8 +75,6 @@ import {
     getMessageActionCapabilities,
 } from '../lib/chatMessageActions';
 import { useMCP } from '../hooks/useMCP';
-import type { UsageStatsRecord } from '../services/analyticsStore';
-import type { ProjectContext } from '../services/projectContext';
 import {
     ChatDiagnosticsPopover,
     ChatEmptyState,
@@ -86,32 +85,8 @@ import {
 } from '../components/chat/chatLazyPanels';
 
 const CHAT_PERF_HISTORY_KEY = 'chat_message_perf_benchmarks_v1';
-const CHAT_DEV_MONITORS_ENABLED_KEY = 'chat_dev_monitors_enabled_v1';
 const ACTIVITY_LOG_COUNT_KEY = 'api_activity_log_count';
-const PROJECT_CONTEXT_FEATURE_ENABLED_KEY = 'project_context_feature_enabled_v1';
 const MAX_ACTIVITY_LOG_ENTRIES = 200;
-
-type ContextManagementServiceType = typeof import('../services/contextManagement')['ContextManagementService'];
-
-const readPersistedProjectContextFeatureEnabled = (): boolean => {
-    try {
-        return localStorage.getItem(PROJECT_CONTEXT_FEATURE_ENABLED_KEY) === '1';
-    } catch {
-        return false;
-    }
-};
-
-const persistProjectContextFeatureEnabled = (enabled: boolean): void => {
-    try {
-        if (enabled) {
-            localStorage.setItem(PROJECT_CONTEXT_FEATURE_ENABLED_KEY, '1');
-        } else {
-            localStorage.removeItem(PROJECT_CONTEXT_FEATURE_ENABLED_KEY);
-        }
-    } catch {
-        // Ignore local persistence errors for this optional UI flag.
-    }
-};
 
 const readPersistedApiLogCount = (): number => {
     try {
@@ -322,36 +297,58 @@ const Chat: React.FC = () => {
         isAvailable: mcpAvailable,
         executeTool: executeMcpTool,
     } = useMCP({ enabled: hasConfiguredMcpServers, deferUntilIdle: true });
-    const [isDragging, setIsDragging] = React.useState(false);
-    const [activeTab, setActiveTab] = React.useState<SidebarTab>('controls');
-    const [isEditingSystemPrompt, setIsEditingSystemPrompt] = React.useState(false);
-    const [editingMessageIndex, setEditingMessageIndex] = React.useState<number | null>(null);
-    const [editedMessageContent, setEditedMessageContent] = React.useState<string>('');
+    const {
+        isDragging,
+        setIsDragging,
+        activeTab,
+        setActiveTab,
+        isEditingSystemPrompt,
+        setIsEditingSystemPrompt,
+        editingMessageIndex,
+        setEditingMessageIndex,
+        editedMessageContent,
+        setEditedMessageContent,
+        devMonitorsEnabled,
+        setDevMonitorsEnabled,
+        messageRatings,
+        jsonMode,
+        setJsonMode,
+        usageStats,
+        setUsageStats,
+        comparisonIndex,
+        setComparisonIndex,
+        projectContext,
+        setProjectContext,
+        projectContextFeatureEnabled,
+        includeContextInMessages,
+        setIncludeContextInMessages,
+        githubUrl,
+        setGithubUrl,
+        contextManagementService,
+        setContextManagementService,
+        handleRateMessage,
+        enableProjectContextFeature,
+    } = useChatViewState();
     const virtuosoRef = React.useRef<any>(null);
     const searchResultPreviewCacheRef = React.useRef<Map<number, SearchResultPreviewCacheEntry>>(new Map());
     const rowMetadataCacheRef = React.useRef(createChatRowMetadataCacheState());
-
-    const [showBottomControls, setShowBottomControls] = React.useState<boolean>(() => {
-        const stored = localStorage.getItem('chat_show_bottom_controls');
-        return stored !== '0';
-    });
-    const [devMonitorsEnabled, setDevMonitorsEnabled] = React.useState<boolean>(() => {
-        return localStorage.getItem(CHAT_DEV_MONITORS_ENABLED_KEY) === '1';
-    });
-    const [messageRatings, setMessageRatings] = React.useState<Record<number, 'up' | 'down'>>({});
-    const [jsonMode, setJsonMode] = React.useState(false);
-    const [usageStats, setUsageStats] = React.useState<UsageStatsRecord[]>([]);
-    const [comparisonIndex, setComparisonIndex] = React.useState<number | null>(null);
-    const [projectContext, setProjectContext] = React.useState<ProjectContext | null>(null);
-    const [projectContextFeatureEnabled, setProjectContextFeatureEnabled] = React.useState(readPersistedProjectContextFeatureEnabled);
-    const [includeContextInMessages, setIncludeContextInMessages] = React.useState(true);
-    const [githubUrl, setGithubUrl] = React.useState('');
-    const [contextManagementService, setContextManagementService] = React.useState<ContextManagementServiceType | null>(null);
     const messageListRef = React.useRef<HTMLDivElement | null>(null);
     const composerContainerRef = React.useRef<HTMLDivElement | null>(null);
     const longPressMenuRef = React.useRef<HTMLDivElement | null>(null);
 
-    const [composerOverlayHeight, setComposerOverlayHeight] = React.useState<number>(showBottomControls ? 300 : 196);
+    const handleBottomControlsHidden = React.useCallback(() => {
+        setShowExpertMenu(false);
+        setShowVariableMenu(false);
+    }, [setShowExpertMenu, setShowVariableMenu]);
+    const {
+        showBottomControls,
+        setShowBottomControls,
+        composerOverlayHeight,
+    } = useComposerOverlayLayout({
+        composerContainerRef,
+        isCompactViewport,
+        onBottomControlsHidden: handleBottomControlsHidden,
+    });
 
     // Initialize conversation tree only when branching is enabled.
     const treeHook = useConversationTree(history, { enabled: branchingEnabled });
@@ -407,47 +404,10 @@ const Chat: React.FC = () => {
         setHasHydratedApiLogs,
         showAnalytics,
         setUsageStats,
-        showBottomControls,
-        setShowExpertMenu,
-        setShowVariableMenu,
         shouldLoadCloudSyncService,
         isCloudSyncAuthenticated,
         setIsCloudSyncAuthenticated,
     });
-
-    React.useEffect(() => {
-        const composerElement = composerContainerRef.current;
-        if (!composerElement) return;
-
-        const measureComposerHeight = () => {
-            const nextHeight = Math.ceil(composerElement.getBoundingClientRect().height);
-            if (!Number.isFinite(nextHeight) || nextHeight <= 0) return;
-            setComposerOverlayHeight((previousHeight) => (previousHeight === nextHeight ? previousHeight : nextHeight));
-        };
-
-        measureComposerHeight();
-
-        if (typeof ResizeObserver === 'undefined') {
-            return;
-        }
-
-        const resizeObserver = new ResizeObserver(() => {
-            measureComposerHeight();
-        });
-        resizeObserver.observe(composerElement);
-
-        return () => {
-            resizeObserver.disconnect();
-        };
-    }, [showBottomControls, isCompactViewport]);
-
-    React.useEffect(() => {
-        try {
-            localStorage.setItem(CHAT_DEV_MONITORS_ENABLED_KEY, devMonitorsEnabled ? '1' : '0');
-        } catch {
-            // Ignore storage failures for dev monitor preferences.
-        }
-    }, [devMonitorsEnabled]);
 
     useChatDevMonitors({
         enabled: devMonitorsEnabled,
@@ -646,11 +606,6 @@ const Chat: React.FC = () => {
         contextManagementService,
     });
 
-    const enableProjectContextFeature = React.useCallback(() => {
-        setProjectContextFeatureEnabled(true);
-        persistProjectContextFeatureEnabled(true);
-    }, []);
-
     const { sendMessageWithContext } = useChatSendPipeline({
         input,
         setInput,
@@ -793,19 +748,6 @@ const Chat: React.FC = () => {
         setEditedMessageContent,
         handleLoadSession,
     });
-
-    const handleRateMessage = (index: number, rating: 'up' | 'down') => {
-        setMessageRatings(prev => {
-            const newRatings = { ...prev };
-            if (newRatings[index] === rating) {
-                // Remove rating if clicking the same button
-                delete newRatings[index];
-            } else {
-                newRatings[index] = rating;
-            }
-            return newRatings;
-        });
-    };
 
     const handleToggleHistoryPanel = React.useCallback(() => {
         setShowHistory((prev) => !prev);

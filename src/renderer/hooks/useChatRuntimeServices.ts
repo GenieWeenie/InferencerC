@@ -22,9 +22,6 @@ interface UseChatRuntimeServicesParams {
     setHasHydratedApiLogs: React.Dispatch<React.SetStateAction<boolean>>;
     showAnalytics: boolean;
     setUsageStats: React.Dispatch<React.SetStateAction<UsageStatsRecord[]>>;
-    showBottomControls: boolean;
-    setShowExpertMenu: React.Dispatch<React.SetStateAction<boolean>>;
-    setShowVariableMenu: React.Dispatch<React.SetStateAction<boolean>>;
     shouldLoadCloudSyncService: boolean;
     isCloudSyncAuthenticated: boolean;
     setIsCloudSyncAuthenticated: React.Dispatch<React.SetStateAction<boolean>>;
@@ -38,9 +35,6 @@ export const useChatRuntimeServices = ({
     setHasHydratedApiLogs,
     showAnalytics,
     setUsageStats,
-    showBottomControls,
-    setShowExpertMenu,
-    setShowVariableMenu,
     shouldLoadCloudSyncService,
     isCloudSyncAuthenticated,
     setIsCloudSyncAuthenticated,
@@ -149,14 +143,6 @@ export const useChatRuntimeServices = ({
                 setUsageStats([]);
             });
     }, [setUsageStats, showAnalytics]);
-
-    React.useEffect(() => {
-        localStorage.setItem('chat_show_bottom_controls', showBottomControls ? '1' : '0');
-        if (!showBottomControls) {
-            setShowExpertMenu(false);
-            setShowVariableMenu(false);
-        }
-    }, [setShowExpertMenu, setShowVariableMenu, showBottomControls]);
 
     const clearApiLogs = React.useCallback(() => {
         void loadActivityLogService()
