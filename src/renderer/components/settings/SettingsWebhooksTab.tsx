@@ -2,19 +2,13 @@ import React from 'react';
 import { Activity, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { webhookService } from '../../services/webhooks';
-
-interface WebhookDraft {
-    name: string;
-    url: string;
-    enabled: boolean;
-    events: string[];
-}
+import type { SettingsWebhook, SettingsWebhookDraft } from './settingsModels';
 
 interface SettingsWebhooksTabProps {
-    webhooks: any[];
-    setWebhooks: React.Dispatch<React.SetStateAction<any[]>>;
-    newWebhook: WebhookDraft;
-    setNewWebhook: React.Dispatch<React.SetStateAction<WebhookDraft>>;
+    webhooks: SettingsWebhook[];
+    setWebhooks: React.Dispatch<React.SetStateAction<SettingsWebhook[]>>;
+    newWebhook: SettingsWebhookDraft;
+    setNewWebhook: React.Dispatch<React.SetStateAction<SettingsWebhookDraft>>;
     showAddWebhook: boolean;
     setShowAddWebhook: React.Dispatch<React.SetStateAction<boolean>>;
 }

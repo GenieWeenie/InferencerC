@@ -11,6 +11,63 @@ export interface NotionPage {
   title: string;
 }
 
+interface NotionTextAnnotations {
+  bold?: boolean;
+}
+
+interface NotionTextNode {
+  type: 'text';
+  text: { content: string };
+  annotations?: NotionTextAnnotations;
+}
+
+interface NotionHeadingBlock {
+  object: 'block';
+  type: 'heading_1' | 'heading_2' | 'heading_3';
+  heading_1?: { rich_text: NotionTextNode[] };
+  heading_2?: { rich_text: NotionTextNode[] };
+  heading_3?: { rich_text: NotionTextNode[] };
+}
+
+interface NotionParagraphBlock {
+  object: 'block';
+  type: 'paragraph';
+  paragraph: { rich_text: NotionTextNode[] };
+}
+
+interface NotionCodeBlock {
+  object: 'block';
+  type: 'code';
+  code: {
+    rich_text: NotionTextNode[];
+    language: string;
+  };
+}
+
+interface NotionDividerBlock {
+  object: 'block';
+  type: 'divider';
+  divider: Record<string, never>;
+}
+
+type NotionBlock = NotionHeadingBlock | NotionParagraphBlock | NotionCodeBlock | NotionDividerBlock;
+
+interface NotionPageResponse {
+  id: string;
+  url: string;
+}
+
+interface NotionErrorResponse {
+  message?: string;
+}
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+};
+
 class NotionService {
   private apiKey: string | null = null;
   private databaseId: string | null = null;
@@ -87,8 +144,8 @@ class NotionService {
   /**
    * Convert markdown to Notion blocks
    */
-  private markdownToNotionBlocks(content: string): any[] {
-    const blocks: any[] = [];
+  private markdownToNotionBlocks(content: string): NotionBlock[] {
+    const blocks: NotionBlock[] = [];
     const lines = content.split('\n');
 
     for (const line of lines) {
@@ -171,7 +228,7 @@ class NotionService {
       }
 
       // Build page content
-      const contentBlocks: any[] = [];
+      const contentBlocks: NotionBlock[] = [];
 
       // Add metadata if provided
       if (metadata) {
@@ -253,11 +310,11 @@ class NotionService {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+        const errorData = await response.json().catch(() => ({} as NotionErrorResponse));
         return { success: false, error: errorData.message || `HTTP ${response.status}` };
       }
 
-      const page: any = await response.json();
+      const page = await response.json() as NotionPageResponse;
 
       // If there are more blocks, append them
       if (contentBlocks.length > 100) {
@@ -281,8 +338,8 @@ class NotionService {
           title: title,
         },
       };
-    } catch (error: any) {
-      return { success: false, error: error.message || 'Failed to save to Notion' };
+    } catch (error: unknown) {
+      return { success: false, error: getErrorMessage(error, 'Failed to save to Notion') };
     }
   }
 }

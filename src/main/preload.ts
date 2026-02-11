@@ -1,6 +1,34 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { RecoveryState } from '../shared/types';
 
+interface FolderChangedEventPayload {
+  path: string;
+  type: string;
+  file: string;
+}
+
+interface PreloadMcpServer {
+  id: string;
+  name: string;
+  description?: string;
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+  status: 'disconnected' | 'connecting' | 'connected' | 'error';
+  errorMessage?: string;
+}
+
+interface UpdateDownloadedInfo {
+  version: string;
+  [key: string]: unknown;
+}
+
+interface McpExecuteToolParams {
+  serverId: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+}
+
 // Secure API exposed to renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window-minimize'),
@@ -17,21 +45,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   executeCode: (code: string, language: string) => ipcRenderer.invoke('execute-code', code, language),
 
   // File watcher events
-  onFolderChanged: (callback: (event: any, data: { path: string; type: string; file: string }) => void) => {
+  onFolderChanged: (callback: (event: unknown, data: FolderChangedEventPayload) => void) => {
     ipcRenderer.on('folder-changed', callback);
     return () => ipcRenderer.removeAllListeners('folder-changed');
   },
 
   // MCP APIs
-  mcpConnect: (server: any) => ipcRenderer.invoke('mcp-connect', server),
+  mcpConnect: (server: PreloadMcpServer) => ipcRenderer.invoke('mcp-connect', server),
   mcpDisconnect: (serverId: string) => ipcRenderer.invoke('mcp-disconnect', serverId),
-  mcpExecuteTool: (params: any) => ipcRenderer.invoke('mcp-execute-tool', params),
+  mcpExecuteTool: (params: McpExecuteToolParams) => ipcRenderer.invoke('mcp-execute-tool', params),
 
   // Auto-updater
   getAppVersion: () => ipcRenderer.invoke('app-version'),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   quitAndInstall: () => ipcRenderer.invoke('quit-and-install'),
-  onUpdateDownloaded: (callback: (event: any, info: any) => void) => {
+  onUpdateDownloaded: (callback: (event: unknown, info: UpdateDownloadedInfo) => void) => {
     ipcRenderer.on('update-downloaded', callback);
     return () => ipcRenderer.removeAllListeners('update-downloaded');
   },

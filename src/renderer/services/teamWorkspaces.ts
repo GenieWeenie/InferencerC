@@ -3,6 +3,7 @@ import { readAnalyticsUsageStats } from './analyticsStore';
 import { TemplateService, ConversationTemplate } from './templates';
 
 type EnterpriseComplianceService = typeof import('./enterpriseCompliance')['enterpriseComplianceService'];
+type ComplianceEventInput = Parameters<EnterpriseComplianceService['logEvent']>[0];
 
 let enterpriseComplianceServicePromise: Promise<EnterpriseComplianceService> | null = null;
 
@@ -75,7 +76,7 @@ const DEFAULT_IDENTITY_NAME = 'Workspace User';
 class TeamWorkspacesService {
     private listeners = new Set<() => void>();
 
-    private logComplianceEvent(event: any): void {
+    private logComplianceEvent(event: ComplianceEventInput): void {
         void loadEnterpriseComplianceService()
             .then((service) => service.logEvent(event))
             .catch(() => {

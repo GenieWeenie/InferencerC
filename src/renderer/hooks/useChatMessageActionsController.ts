@@ -11,7 +11,7 @@ interface UseChatMessageActionsControllerParams {
     thinkingEnabled: boolean;
     editedMessageContent: string;
     sendMessageWithContext: () => void | Promise<void>;
-    replaceHistory: (nextHistory: MessageLike[]) => void;
+    replaceHistory: (nextHistory: ChatMessage[]) => void;
     truncateHistory: (index: number) => void;
     setEditingMessageIndex: React.Dispatch<React.SetStateAction<number | null>>;
     setEditedMessageContent: React.Dispatch<React.SetStateAction<string>>;

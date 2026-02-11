@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { PluggableList } from 'unified';
 import { Copy, Check, Play, X, FileText, Save, PlayCircle, Github } from 'lucide-react';
 import ArtifactPreview from './ArtifactPreview';
 import { toast } from 'sonner';
@@ -14,6 +15,12 @@ interface MessageContentRichProps {
 }
 
 const PREVIEWABLE_LANGUAGES = ['html', 'htm', 'css', 'javascript', 'js'];
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+    return fallback;
+};
 
 const COMMON_LANGUAGES = [
     'text', 'javascript', 'typescript', 'jsx', 'tsx', 'python', 'java', 'c', 'cpp', 'csharp',
@@ -47,7 +54,11 @@ const SYNTAX_LANGUAGE_ALIASES: Record<string, string> = {
     json5: 'json',
 };
 
-const PRISM_LANGUAGE_LOADERS: Record<string, () => Promise<{ default: any }>> = {
+interface PrismLanguageModule {
+    default: unknown;
+}
+
+const PRISM_LANGUAGE_LOADERS: Record<string, () => Promise<PrismLanguageModule>> = {
     javascript: () => import('react-syntax-highlighter/dist/esm/languages/prism/javascript'),
     typescript: () => import('react-syntax-highlighter/dist/esm/languages/prism/typescript'),
     jsx: () => import('react-syntax-highlighter/dist/esm/languages/prism/jsx'),
@@ -98,15 +109,13 @@ const normalizeSyntaxLanguage = (language: string): string | null => {
 };
 
 interface MathPluginBundle {
-    remarkMath: any;
-    rehypeKatex: any;
+    remarkMath: PluggableList[number];
+    rehypeKatex: PluggableList[number];
 }
 
 interface SyntaxHighlighterBundle {
-    component: React.ComponentType<any> & {
-        registerLanguage: (name: string, language: any) => void;
-    };
-    style: any;
+    component: unknown;
+    style: Record<string, React.CSSProperties>;
 }
 
 type CodeExecutionResult = {
@@ -114,11 +123,18 @@ type CodeExecutionResult = {
     success: boolean;
 };
 
+interface MarkdownCodeComponentProps extends React.HTMLAttributes<HTMLElement> {
+    inline?: boolean;
+    className?: string;
+    children?: React.ReactNode;
+    node?: unknown;
+}
+
 interface MarkdownCodeRendererProps {
     inline?: boolean;
     className?: string;
     children?: React.ReactNode;
-    codeProps: Record<string, any>;
+    codeProps: Omit<MarkdownCodeComponentProps, 'inline' | 'className' | 'children'>;
     syntaxHighlighterBundle: SyntaxHighlighterBundle | null;
     loadedSyntaxLanguages: Set<string>;
     codeBlockLanguages: Record<string, string>;
@@ -171,12 +187,14 @@ const MarkdownCodeRenderer: React.FC<MarkdownCodeRendererProps> = React.memo(({
     onInsertToFile,
     onCancelInsertToFile,
 }) => {
+    const { node: _node, ...safeCodeProps } = codeProps;
+
     const match = /language-([\w-]+)/.exec(className || '');
     const codeString = String(children).replace(/\n$/, '');
     const isBlock = !inline && (Boolean(match) || codeString.includes('\n'));
     if (!isBlock) {
         return (
-            <code className={`${className} bg-slate-800/80 px-1.5 py-0.5 rounded text-amber-200 font-mono text-[0.85em] border border-slate-700/50 box-decoration-clone break-all`} {...codeProps}>
+            <code className={`${className} bg-slate-800/80 px-1.5 py-0.5 rounded text-amber-200 font-mono text-[0.85em] border border-slate-700/50 box-decoration-clone break-all`} {...safeCodeProps}>
                 {children}
             </code>
         );
@@ -186,7 +204,7 @@ const MarkdownCodeRenderer: React.FC<MarkdownCodeRendererProps> = React.memo(({
     const detectedLanguage = match ? match[1] : 'text';
     const selectedLanguage = codeBlockLanguages[codeHash] || detectedLanguage;
     const normalizedSyntaxLanguage = normalizeSyntaxLanguage(selectedLanguage);
-    const SyntaxHighlighterComponent = syntaxHighlighterBundle?.component;
+    const SyntaxHighlighterComponent = syntaxHighlighterBundle?.component as React.ComponentType<Record<string, unknown>> | undefined;
     const canSyntaxHighlight = Boolean(
         SyntaxHighlighterComponent &&
         normalizedSyntaxLanguage &&
@@ -279,9 +297,9 @@ const MarkdownCodeRenderer: React.FC<MarkdownCodeRendererProps> = React.memo(({
                 </div>
             </div>
             <div className="relative">
-                {canSyntaxHighlight ? (
+                {canSyntaxHighlight && SyntaxHighlighterComponent ? (
                     <SyntaxHighlighterComponent
-                        {...codeProps}
+                        {...safeCodeProps}
                         style={syntaxHighlighterBundle!.style}
                         language={normalizedSyntaxLanguage || undefined}
                         PreTag="div"
@@ -463,7 +481,13 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
         syntaxLanguageLoadInFlightRef.current.add(normalized);
         try {
             const module = await loader();
-            syntaxHighlighterBundle.component.registerLanguage(normalized, module.default);
+            const syntaxComponent = syntaxHighlighterBundle.component as {
+                registerLanguage?: (name: string, language: unknown) => void;
+            };
+            if (typeof syntaxComponent.registerLanguage !== 'function') {
+                return;
+            }
+            syntaxComponent.registerLanguage(normalized, module.default);
             setLoadedSyntaxLanguages((prev) => {
                 if (prev.has(normalized)) return prev;
                 const next = new Set(prev);
@@ -485,13 +509,13 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
         });
     }, [hasCodeBlocks, syntaxHighlighterBundle, detectedCodeLanguages, ensureSyntaxLanguageLoaded]);
 
-    const remarkPlugins = React.useMemo(() => {
-        const plugins: any[] = [remarkGfm];
+    const remarkPlugins = React.useMemo<PluggableList>(() => {
+        const plugins: PluggableList = [remarkGfm];
         if (mathPlugins) plugins.push(mathPlugins.remarkMath);
         return plugins;
     }, [mathPlugins]);
 
-    const rehypePlugins = React.useMemo(() => {
+    const rehypePlugins = React.useMemo<PluggableList>(() => {
         return mathPlugins ? [mathPlugins.rehypeKatex] : [];
     }, [mathPlugins]);
 
@@ -583,11 +607,11 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
             } else {
                 toast.error('Code execution failed');
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             setExecutionResults((prev) => ({
                 ...prev,
                 [codeHash]: {
-                    output: `Error: ${error.message}`,
+                    output: `Error: ${getErrorMessage(error, 'Unknown error')}`,
                     success: false,
                 },
             }));
@@ -684,7 +708,7 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
         hr: () => <hr className="my-8 border-slate-800" />,
     }), []);
 
-    const renderMarkdownCode = React.useCallback(({ inline, className, children, ...codeProps }: any) => (
+    const renderMarkdownCode = React.useCallback(({ inline, className, children, ...codeProps }: MarkdownCodeComponentProps) => (
         <MarkdownCodeRenderer
             inline={inline}
             className={className}

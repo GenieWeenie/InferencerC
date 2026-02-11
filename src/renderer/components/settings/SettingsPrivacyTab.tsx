@@ -3,6 +3,7 @@ import { Activity, Lock, RefreshCw, Shield, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { encryptionService } from '../../services/encryption';
 import { privacyService } from '../../services/privacy';
+import type { SettingsUpdateInfo } from './settingsModels';
 
 interface SettingsPrivacyTabProps {
     privacyMode: boolean;
@@ -12,7 +13,7 @@ interface SettingsPrivacyTabProps {
     appVersion: string;
     updateAvailable: boolean;
     setUpdateAvailable: React.Dispatch<React.SetStateAction<boolean>>;
-    updateInfo: any;
+    updateInfo: SettingsUpdateInfo | null;
 }
 
 export const SettingsPrivacyTab: React.FC<SettingsPrivacyTabProps> = ({

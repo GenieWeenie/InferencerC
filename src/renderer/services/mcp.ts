@@ -5,41 +5,63 @@
  * MCP servers can provide tools for filesystem access, git, databases, etc.
  */
 
-// Extend Window interface for Electron API
-declare global {
-    interface Window {
-        electronAPI?: {
-            minimize: () => void;
-            maximize: () => void;
-            close: () => void;
-            selectFolder: () => Promise<{ success: boolean; path?: string }>;
-            watchFolder: (folderPath: string) => Promise<{ success: boolean; error?: string }>;
-            stopWatchingFolder: (folderPath: string) => Promise<{ success: boolean }>;
-            readFolderFiles: (folderPath: string, extensions?: string[]) => Promise<{ success: boolean; files?: Array<{ path: string; content: string; relativePath: string }>; error?: string }>;
-            executeCode: (code: string, language: string) => Promise<{ success: boolean; output: string; exitCode: number }>;
-            onFolderChanged: (callback: (event: any, data: { path: string; type: string; file: string }) => void) => (() => void) | undefined;
-            // Auto-updater
-            getAppVersion: () => Promise<string>;
-            checkForUpdates: () => Promise<{ available: boolean; version?: string; error?: string; message?: string }>;
-            quitAndInstall: () => Promise<void>;
-            onUpdateDownloaded: (callback: (event: any, info: any) => void) => (() => void) | undefined;
-            secureStorageIsAvailable?: () => Promise<boolean>;
-            secureStorageSetItem?: (key: string, value: string) => Promise<{ success: boolean; error?: string }>;
-            secureStorageGetItem?: (key: string) => Promise<{ success: boolean; value?: string | null; error?: string }>;
-            secureStorageRemoveItem?: (key: string) => Promise<{ success: boolean; error?: string }>;
-            checkBackendHealth?: () => Promise<{ online: boolean }>;
-            mcpConnect?: (server: any) => Promise<any>;
-            mcpDisconnect?: (id: string) => Promise<void>;
-            mcpExecuteTool?: (toolCall: any) => Promise<{
-                success?: boolean;
-                error?: string;
-                result?: any;
-                content?: string;
-                isError?: boolean;
-            }>;
-            downloadModel?: (options: any) => Promise<any>;
-        };
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message) {
+        return error.message;
     }
+    return fallback;
+};
+
+export interface FolderChangedEventPayload {
+    path: string;
+    type: string;
+    file: string;
+}
+
+export interface AppUpdateInfo {
+    version: string;
+    [key: string]: unknown;
+}
+
+export interface AppUpdateCheckResult {
+    available: boolean;
+    version?: string;
+    error?: string;
+    message?: string;
+}
+
+export interface McpExecuteToolRequest {
+    serverId: string;
+    toolName: string;
+    arguments: Record<string, unknown>;
+}
+
+interface McpExecuteToolContentEntry {
+    type?: string;
+    text?: string;
+    [key: string]: unknown;
+}
+
+interface McpExecuteToolPayload {
+    content?: string | McpExecuteToolContentEntry[];
+    isError?: boolean;
+    [key: string]: unknown;
+}
+
+interface McpExecuteToolResponse {
+    success?: boolean;
+    error?: string;
+    result?: McpExecuteToolPayload;
+    content?: string;
+    isError?: boolean;
+    [key: string]: unknown;
+}
+
+interface ModelDownloadRequest {
+    modelId: string;
+    fileName: string;
+    url: string;
+    size: number;
 }
 
 export interface MCPServer {
@@ -58,7 +80,7 @@ export interface MCPTool {
     description?: string;
     inputSchema?: {
         type: string;
-        properties?: Record<string, any>;
+        properties?: Record<string, unknown>;
         required?: string[];
     };
     serverId: string; // Which server provides this tool
@@ -67,7 +89,7 @@ export interface MCPTool {
 export interface MCPToolCall {
     id: string;
     name: string;
-    arguments: Record<string, any>;
+    arguments: Record<string, unknown>;
     serverId: string;
 }
 
@@ -75,6 +97,68 @@ export interface MCPToolResult {
     toolCallId: string;
     content: string;
     isError?: boolean;
+}
+
+interface MCPConnectResponse {
+    success: boolean;
+    error?: string;
+    tools?: MCPTool[];
+}
+
+interface MCPToolDefinition {
+    type: 'function';
+    function: {
+        name: string;
+        description: string;
+        parameters: {
+            type: string;
+            properties?: Record<string, unknown>;
+            required?: string[];
+        };
+    };
+}
+
+export interface ElectronAPIBridge {
+    minimize: () => void;
+    maximize: () => void;
+    close: () => void;
+    selectFolder: () => Promise<{ success: boolean; path?: string }>;
+    watchFolder: (folderPath: string) => Promise<{ success: boolean; error?: string }>;
+    stopWatchingFolder: (folderPath: string) => Promise<{ success: boolean }>;
+    readFolderFiles: (
+        folderPath: string,
+        extensions?: string[]
+    ) => Promise<{ success: boolean; files?: Array<{ path: string; content: string; relativePath: string }>; error?: string }>;
+    executeCode: (code: string, language: string) => Promise<{ success: boolean; output: string; exitCode: number }>;
+    onFolderChanged: (
+        callback: (event: unknown, data: FolderChangedEventPayload) => void
+    ) => (() => void) | undefined;
+    getAppVersion: () => Promise<string>;
+    checkForUpdates: () => Promise<AppUpdateCheckResult>;
+    quitAndInstall: () => Promise<void>;
+    onUpdateDownloaded: (
+        callback: (event: unknown, info: AppUpdateInfo) => void
+    ) => (() => void) | undefined;
+    gitCommit?: (options: { filePath: string; content: string; message: string }) => Promise<{
+        success?: boolean;
+        commitHash?: string;
+        error?: string;
+    }>;
+    secureStorageIsAvailable?: () => Promise<boolean>;
+    secureStorageSetItem?: (key: string, value: string) => Promise<{ success: boolean; error?: string }>;
+    secureStorageGetItem?: (key: string) => Promise<{ success: boolean; value?: string | null; error?: string }>;
+    secureStorageRemoveItem?: (key: string) => Promise<{ success: boolean; error?: string }>;
+    checkBackendHealth?: () => Promise<{ online: boolean }>;
+    mcpConnect?: (server: MCPServer) => Promise<MCPConnectResponse>;
+    mcpDisconnect?: (id: string) => Promise<void>;
+    mcpExecuteTool?: (toolCall: McpExecuteToolRequest) => Promise<McpExecuteToolResponse>;
+    downloadModel?: (options: ModelDownloadRequest) => Promise<void>;
+}
+
+declare global {
+    interface Window {
+        electronAPI?: ElectronAPIBridge;
+    }
 }
 
 // Storage key for MCP servers configuration
@@ -86,7 +170,6 @@ const MCP_SERVERS_KEY = 'mcp_servers';
 class MCPClient {
     private servers: Map<string, MCPServer> = new Map();
     private tools: Map<string, MCPTool> = new Map(); // tool name -> tool
-    private processes: Map<string, any> = new Map(); // Server processes (in Electron main)
     private listeners: Set<() => void> = new Set();
 
     constructor() {
@@ -264,11 +347,11 @@ class MCPClient {
             }
 
             this.notifyListeners();
-        } catch (e: any) {
+        } catch (error: unknown) {
             server.status = 'error';
-            server.errorMessage = e.message;
+            server.errorMessage = getErrorMessage(error, 'Connection failed');
             this.notifyListeners();
-            throw e;
+            throw error;
         }
     }
 
@@ -333,9 +416,18 @@ class MCPClient {
                     content = payload.content;
                 } else if (Array.isArray(payload?.content)) {
                     content = payload.content
-                        .map((entry: any) => {
+                        .map((entry: unknown) => {
                             if (!entry) return '';
-                            if (entry.type === 'text' && typeof entry.text === 'string') return entry.text;
+                            if (
+                                typeof entry === 'object'
+                                && entry !== null
+                                && 'type' in entry
+                                && 'text' in entry
+                                && (entry as McpExecuteToolContentEntry).type === 'text'
+                                && typeof (entry as McpExecuteToolContentEntry).text === 'string'
+                            ) {
+                                return (entry as McpExecuteToolContentEntry).text;
+                            }
                             return JSON.stringify(entry);
                         })
                         .filter(Boolean)
@@ -377,10 +469,10 @@ class MCPClient {
                     content: `[Mock] Executed ${toolCall.name} with args: ${JSON.stringify(toolCall.arguments)}`
                 };
             }
-        } catch (e: any) {
+        } catch (error: unknown) {
             return {
                 toolCallId: toolCall.id,
-                content: `Error executing tool: ${e.message}`,
+                content: `Error executing tool: ${getErrorMessage(error, 'Unknown error')}`,
                 isError: true
             };
         }
@@ -389,7 +481,7 @@ class MCPClient {
     /**
      * Format tools for OpenAI-compatible API
      */
-    getToolsForAPI(): any[] {
+    getToolsForAPI(): MCPToolDefinition[] {
         return Array.from(this.tools.values()).map(tool => ({
             type: 'function',
             function: {
@@ -417,32 +509,3 @@ class MCPClient {
 
 // Singleton instance
 export const mcpClient = new MCPClient();
-
-// Extend window type for TypeScript
-declare global {
-    interface Window {
-        electronAPI?: {
-            minimize: () => void;
-            maximize: () => void;
-            close: () => void;
-            // Project Context APIs
-            selectFolder: () => Promise<{ success: boolean; path?: string }>;
-            watchFolder: (folderPath: string) => Promise<{ success: boolean; error?: string }>;
-            stopWatchingFolder: (folderPath: string) => Promise<{ success: boolean }>;
-            readFolderFiles: (folderPath: string, extensions?: string[]) => Promise<{ success: boolean; files?: Array<{ path: string; content: string; relativePath: string }>; error?: string }>;
-            executeCode: (code: string, language: string) => Promise<{ success: boolean; output: string; exitCode: number }>;
-            onFolderChanged: (callback: (event: any, data: { path: string; type: string; file: string }) => void) => (() => void) | undefined;
-            // MCP APIs
-            mcpConnect?: (server: MCPServer) => Promise<{ success: boolean; error?: string; tools?: MCPTool[] }>;
-            mcpDisconnect?: (serverId: string) => Promise<void>;
-            mcpExecuteTool?: (params: { serverId: string; toolName: string; arguments: Record<string, any> }) =>
-                Promise<{ success?: boolean; error?: string; result?: any; content?: string; isError?: boolean }>;
-            secureStorageIsAvailable?: () => Promise<boolean>;
-            secureStorageSetItem?: (key: string, value: string) => Promise<{ success: boolean; error?: string }>;
-            secureStorageGetItem?: (key: string) => Promise<{ success: boolean; value?: string | null; error?: string }>;
-            secureStorageRemoveItem?: (key: string) => Promise<{ success: boolean; error?: string }>;
-            checkBackendHealth?: () => Promise<{ online: boolean }>;
-            downloadModel?: (params: { modelId: string; fileName: string; url: string; size: number }) => Promise<void>;
-        };
-    }
-}

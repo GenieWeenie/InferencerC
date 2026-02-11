@@ -3,6 +3,7 @@ import { HistoryService } from './history';
 import { TemplateService } from './templates';
 
 type EnterpriseComplianceService = typeof import('./enterpriseCompliance')['enterpriseComplianceService'];
+type ComplianceEventInput = Parameters<EnterpriseComplianceService['logEvent']>[0];
 
 let enterpriseComplianceServicePromise: Promise<EnterpriseComplianceService> | null = null;
 
@@ -13,7 +14,14 @@ const loadEnterpriseComplianceService = async (): Promise<EnterpriseComplianceSe
     return enterpriseComplianceServicePromise;
 };
 
-const logComplianceEvent = (event: any): void => {
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+    return fallback;
+};
+
+const logComplianceEvent = (event: ComplianceEventInput): void => {
     void loadEnterpriseComplianceService()
         .then((service) => service.logEvent(event))
         .catch(() => {
@@ -265,12 +273,12 @@ class CloudSyncService {
             });
 
             return result;
-        } catch (error: any) {
+        } catch (error: unknown) {
             logComplianceEvent({
                 category: 'cloudsync.auth',
                 action: 'register',
                 result: 'failure',
-                details: { email, error: error?.message || 'Unknown error' },
+                details: { email, error: getErrorMessage(error, 'Unknown error') },
                 piiFields: ['email'],
             });
             throw error;
@@ -301,12 +309,12 @@ class CloudSyncService {
             });
 
             return result;
-        } catch (error: any) {
+        } catch (error: unknown) {
             logComplianceEvent({
                 category: 'cloudsync.auth',
                 action: 'login',
                 result: 'failure',
-                details: { email, error: error?.message || 'Unknown error' },
+                details: { email, error: getErrorMessage(error, 'Unknown error') },
                 piiFields: ['email'],
             });
             throw error;
@@ -347,12 +355,12 @@ class CloudSyncService {
                 details: { conversationCount: profile.conversationCount, revision: profile.revision },
             });
             return profile;
-        } catch (error: any) {
+        } catch (error: unknown) {
             logComplianceEvent({
                 category: 'cloudsync.profile',
                 action: 'read',
                 result: 'failure',
-                details: { error: error?.message || 'Unknown error' },
+                details: { error: getErrorMessage(error, 'Unknown error') },
             });
             throw error;
         }

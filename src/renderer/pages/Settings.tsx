@@ -2,18 +2,24 @@ import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
     Key, Server, Palette, Database, DollarSign, Activity, Settings as SettingsIcon, Sparkles, Plug, Download,
-    Shield, BarChart3, Eye, GraduationCap
+    Shield, BarChart3, Eye, GraduationCap, type LucideIcon
 } from 'lucide-react';
 import MCPSettings from '../components/MCPSettings';
 import ModelDownloader from '../components/ModelDownloader';
 import { SettingsApiTab } from '../components/settings/SettingsApiTab';
 import { SettingsAppearanceTab, type SettingsPreferences } from '../components/settings/SettingsAppearanceTab';
-import { SettingsEndpointsTab } from '../components/settings/SettingsEndpointsTab';
+import { SettingsEndpointsTab, type SettingsModelEndpoint } from '../components/settings/SettingsEndpointsTab';
 import { SettingsIntegrationsTab } from '../components/settings/SettingsIntegrationsTab';
-import { SettingsPresetsTab } from '../components/settings/SettingsPresetsTab';
+import { SettingsPresetsTab, type SettingsSystemPreset } from '../components/settings/SettingsPresetsTab';
 import { SettingsPrivacyTab } from '../components/settings/SettingsPrivacyTab';
 import { SettingsWebhooksTab } from '../components/settings/SettingsWebhooksTab';
-import { ThemeService, ThemeConfig } from '../services/theme';
+import type {
+    SettingsTabId,
+    SettingsUpdateInfo,
+    SettingsWebhook,
+    SettingsWebhookDraft,
+} from '../components/settings/settingsModels';
+import { ThemeService, ThemeConfig, type ThemeType } from '../services/theme';
 import { githubService } from '../services/github';
 import { notionService } from '../services/notion';
 import { webhookService } from '../services/webhooks';
@@ -25,19 +31,6 @@ import { PluginManager } from '../components/PluginManager';
 import { onboardingService } from '../services/onboarding';
 import { credentialService } from '../services/credentials';
 
-interface ModelEndpoint {
-    id: string;
-    name: string;
-    url: string;
-    type: 'lm-studio' | 'openai-compatible' | 'ollama';
-}
-
-interface SystemPreset {
-    id: string;
-    name: string;
-    prompt: string;
-}
-
 const Settings: React.FC = () => {
     // API Keys
     const [openRouterKey, setOpenRouterKey] = useState('');
@@ -46,14 +39,14 @@ const Settings: React.FC = () => {
     const [notionDatabaseId, setNotionDatabaseId] = useState('');
 
     // Model Endpoints
-    const [endpoints, setEndpoints] = useState<ModelEndpoint[]>([]);
-    const [newEndpoint, setNewEndpoint] = useState<Partial<ModelEndpoint>>({ type: 'lm-studio', name: '', url: '' });
+    const [endpoints, setEndpoints] = useState<SettingsModelEndpoint[]>([]);
+    const [newEndpoint, setNewEndpoint] = useState<Partial<SettingsModelEndpoint>>({ type: 'lm-studio', name: '', url: '' });
     const [showAddEndpoint, setShowAddEndpoint] = useState(false);
 
     // System Presets
-    const [presets, setPresets] = useState<SystemPreset[]>([]);
+    const [presets, setPresets] = useState<SettingsSystemPreset[]>([]);
     const [editingPreset, setEditingPreset] = useState<string | null>(null);
-    const [newPreset, setNewPreset] = useState<Partial<SystemPreset>>({ name: '', prompt: '' });
+    const [newPreset, setNewPreset] = useState<Partial<SettingsSystemPreset>>({ name: '', prompt: '' });
     const [showAddPreset, setShowAddPreset] = useState(false);
 
     // Usage Tracking (mock data for now)
@@ -64,7 +57,7 @@ const Settings: React.FC = () => {
     });
 
     // Active Tab
-    const [activeTab, setActiveTab] = useState<'api' | 'endpoints' | 'presets' | 'usage' | 'mcp' | 'downloader' | 'appearance' | 'webhooks' | 'privacy' | 'analytics' | 'integrations' | 'accessibility' | 'onboarding' | 'plugins'>('api');
+    const [activeTab, setActiveTab] = useState<SettingsTabId>('api');
     
     // Conversation Analytics
     const [showAnalytics, setShowAnalytics] = useState(false);
@@ -75,11 +68,11 @@ const Settings: React.FC = () => {
     const [analyticsEnabled, setAnalyticsEnabled] = useState(true);
     const [appVersion, setAppVersion] = useState('');
     const [updateAvailable, setUpdateAvailable] = useState(false);
-    const [updateInfo, setUpdateInfo] = useState<any>(null);
+    const [updateInfo, setUpdateInfo] = useState<SettingsUpdateInfo | null>(null);
     
     // Webhooks
-    const [webhooks, setWebhooks] = useState<any[]>([]);
-    const [newWebhook, setNewWebhook] = useState({ name: '', url: '', enabled: true, events: ['conversation_complete'] });
+    const [webhooks, setWebhooks] = useState<SettingsWebhook[]>([]);
+    const [newWebhook, setNewWebhook] = useState<SettingsWebhookDraft>({ name: '', url: '', enabled: true, events: ['conversation_complete'] });
     const [showAddWebhook, setShowAddWebhook] = useState(false);
     
     // Theme
@@ -100,6 +93,7 @@ const Settings: React.FC = () => {
     });
 
     useEffect(() => {
+        let removeUpdateDownloadedListener: (() => void) | undefined;
         // Load saved data
         let isMounted = true;
         const loadCredentials = async () => {
@@ -142,7 +136,7 @@ const Settings: React.FC = () => {
         
         // Listen for update notifications
         if (window.electronAPI?.onUpdateDownloaded) {
-            window.electronAPI.onUpdateDownloaded((event: any, info: any) => {
+            removeUpdateDownloadedListener = window.electronAPI.onUpdateDownloaded((_event: unknown, info: SettingsUpdateInfo) => {
                 setUpdateAvailable(true);
                 setUpdateInfo(info);
                 toast.success(`Update ${info.version} downloaded! Restart to install.`);
@@ -174,6 +168,7 @@ const Settings: React.FC = () => {
         return () => {
             isMounted = false;
             themeService.unsubscribe(handleThemeChange);
+            removeUpdateDownloadedListener?.();
         };
     }, []);
 
@@ -202,7 +197,7 @@ const Settings: React.FC = () => {
         toast.success('Notion configuration saved securely');
     };
 
-    const handleSelectTheme = (themeId: string) => {
+    const handleSelectTheme = (themeId: ThemeType) => {
         themeService.setTheme(themeId);
         setCurrentTheme(themeService.getCurrentTheme());
     };
@@ -213,11 +208,11 @@ const Settings: React.FC = () => {
             toast.error('Name and URL are required');
             return;
         }
-        const endpoint: ModelEndpoint = {
+        const endpoint: SettingsModelEndpoint = {
             id: crypto.randomUUID(),
             name: newEndpoint.name,
             url: newEndpoint.url,
-            type: newEndpoint.type as ModelEndpoint['type']
+            type: newEndpoint.type as SettingsModelEndpoint['type']
         };
         const updated = [...endpoints, endpoint];
         setEndpoints(updated);
@@ -240,7 +235,7 @@ const Settings: React.FC = () => {
             toast.error('Name and prompt are required');
             return;
         }
-        const preset: SystemPreset = {
+        const preset: SettingsSystemPreset = {
             id: crypto.randomUUID(),
             name: newPreset.name,
             prompt: newPreset.prompt
@@ -268,7 +263,7 @@ const Settings: React.FC = () => {
         toast.success('Preset deleted');
     };
 
-    const TabButton = ({ id, label, icon: Icon }: { id: typeof activeTab, label: string, icon: any }) => (
+    const TabButton = ({ id, label, icon: Icon }: { id: SettingsTabId; label: string; icon: LucideIcon }) => (
         <button
             onClick={() => setActiveTab(id)}
             className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-all border-b-2 ${activeTab === id
