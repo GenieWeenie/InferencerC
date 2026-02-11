@@ -61,11 +61,36 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeFiniteNonNegativeNumber = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return null;
+    }
+    return value;
+};
+
 const sanitizeStringArray = (value: unknown): string[] => {
     if (!Array.isArray(value)) {
         return [];
     }
-    return value.filter((entry): entry is string => typeof entry === 'string');
+    const seen = new Set<string>();
+    const result: string[] = [];
+    value.forEach((entry) => {
+        const normalized = sanitizeNonEmptyString(entry);
+        if (!normalized || seen.has(normalized)) {
+            return;
+        }
+        seen.add(normalized);
+        result.push(normalized);
+    });
+    return result;
 };
 
 const sanitizeTemplateSettings = (value: unknown): ConversationTemplate['settings'] | undefined => {
@@ -85,12 +110,13 @@ const sanitizeTemplateMessage = (value: unknown): ConversationTemplate['initialM
     if (!isRecord(value)) {
         return null;
     }
-    if (!MESSAGE_ROLES.has(value.role as ChatMessage['role']) || typeof value.content !== 'string') {
+    const content = sanitizeNonEmptyString(value.content);
+    if (!MESSAGE_ROLES.has(value.role as ChatMessage['role']) || !content) {
         return null;
     }
     return {
         role: value.role as ChatMessage['role'],
-        content: value.content,
+        content,
         images: Array.isArray(value.images) ? value.images.filter((image): image is ImageAttachment => {
             if (!isRecord(image)) {
                 return false;
@@ -113,17 +139,20 @@ const sanitizeTemplate = (value: unknown): ConversationTemplate | null => {
     if (!isRecord(value)) {
         return null;
     }
+    const id = sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    const description = typeof value.description === 'string' ? value.description.trim() : '';
+    const category = sanitizeNonEmptyString(value.category);
+    const createdAt = sanitizeFiniteNonNegativeNumber(value.createdAt);
+    const updatedAt = sanitizeFiniteNonNegativeNumber(value.updatedAt);
+    const usageCount = sanitizeFiniteNonNegativeNumber(value.usageCount);
     if (
-        typeof value.id !== 'string'
-        || typeof value.name !== 'string'
-        || typeof value.description !== 'string'
-        || typeof value.category !== 'string'
-        || typeof value.createdAt !== 'number'
-        || !Number.isFinite(value.createdAt)
-        || typeof value.updatedAt !== 'number'
-        || !Number.isFinite(value.updatedAt)
-        || typeof value.usageCount !== 'number'
-        || !Number.isFinite(value.usageCount)
+        !id
+        || !name
+        || !category
+        || createdAt === null
+        || updatedAt === null
+        || usageCount === null
     ) {
         return null;
     }
@@ -135,17 +164,17 @@ const sanitizeTemplate = (value: unknown): ConversationTemplate | null => {
     }
 
     return {
-        id: value.id,
-        name: value.name,
-        description: value.description,
-        category: value.category,
+        id,
+        name,
+        description,
+        category,
         tags: sanitizeStringArray(value.tags),
-        systemPrompt: typeof value.systemPrompt === 'string' ? value.systemPrompt : undefined,
+        systemPrompt: sanitizeNonEmptyString(value.systemPrompt) || undefined,
         initialMessages,
         settings: sanitizeTemplateSettings(value.settings),
-        createdAt: value.createdAt,
-        updatedAt: value.updatedAt,
-        usageCount: value.usageCount,
+        createdAt: Math.floor(createdAt),
+        updatedAt: Math.max(Math.floor(createdAt), Math.floor(updatedAt)),
+        usageCount: Math.floor(usageCount),
     };
 };
 
@@ -153,19 +182,18 @@ const sanitizeCategory = (value: unknown): TemplateCategory | null => {
     if (!isRecord(value)) {
         return null;
     }
-    if (
-        typeof value.id !== 'string'
-        || typeof value.name !== 'string'
-        || typeof value.icon !== 'string'
-        || typeof value.color !== 'string'
-    ) {
+    const id = sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    const icon = sanitizeNonEmptyString(value.icon);
+    const color = sanitizeNonEmptyString(value.color);
+    if (!id || !name || !icon || !color) {
         return null;
     }
     return {
-        id: value.id,
-        name: value.name,
-        icon: value.icon,
-        color: value.color,
+        id,
+        name,
+        icon,
+        color,
     };
 };
 
@@ -383,7 +411,7 @@ export class TemplateService {
     ): ConversationTemplate {
         this.init();
 
-        const template: ConversationTemplate = {
+        const candidate: ConversationTemplate = {
             id: `template-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             name,
             description,
@@ -400,6 +428,10 @@ export class TemplateService {
             updatedAt: Date.now(),
             usageCount: 0
         };
+        const template = sanitizeTemplate(candidate);
+        if (!template) {
+            throw new Error('Invalid template configuration');
+        }
 
         this.templates.set(template.id, template);
         this.persist();
@@ -416,11 +448,28 @@ export class TemplateService {
         const template = this.templates.get(id);
         if (!template) return null;
 
-        const updated = {
+        const updated = sanitizeTemplate({
             ...template,
             ...updates,
+            id: template.id,
+            createdAt: template.createdAt,
+            usageCount: template.usageCount,
+            initialMessages: typeof updates.initialMessages !== 'undefined'
+                ? updates.initialMessages
+                    .map((message) => sanitizeTemplateMessage(message))
+                    .filter((message): message is ConversationTemplate['initialMessages'][number] => message !== null)
+                : template.initialMessages,
+            tags: typeof updates.tags !== 'undefined'
+                ? sanitizeStringArray(updates.tags)
+                : template.tags,
+            settings: typeof updates.settings !== 'undefined'
+                ? sanitizeTemplateSettings(updates.settings)
+                : template.settings,
             updatedAt: Date.now()
-        };
+        });
+        if (!updated) {
+            return null;
+        }
 
         this.templates.set(id, updated);
         this.persist();
@@ -559,8 +608,20 @@ export class TemplateService {
     private static persist(): void {
         try {
             // Only persist non-default templates
+            const seenIds = new Set<string>();
             const userTemplates = Array.from(this.templates.values())
-                .filter(t => !DEFAULT_TEMPLATES.find(d => d.id === t.id));
+                .filter(t => !DEFAULT_TEMPLATES.find(d => d.id === t.id))
+                .map((entry) => sanitizeTemplate(entry))
+                .filter((entry): entry is ConversationTemplate => {
+                    if (!entry) {
+                        return false;
+                    }
+                    if (seenIds.has(entry.id)) {
+                        return false;
+                    }
+                    seenIds.add(entry.id);
+                    return true;
+                });
 
             localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(userTemplates));
         } catch (error) {

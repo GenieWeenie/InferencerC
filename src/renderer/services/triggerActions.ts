@@ -69,7 +69,7 @@ const ACTION_TYPES = new Set<TriggerAction['type']>([
 ]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -80,18 +80,43 @@ const parseJson = (raw: string): unknown => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeFiniteNonNegativeInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return null;
+    }
+    return Math.floor(value);
+};
+
 const sanitizeCondition = (value: unknown): TriggerCondition | null => {
     if (!isRecord(value)
         || !CONDITION_TYPES.has(value.type as TriggerCondition['type'])
-        || !CONDITION_OPERATORS.has(value.operator as TriggerCondition['operator'])
-        || (typeof value.value !== 'string' && typeof value.value !== 'number')) {
+        || !CONDITION_OPERATORS.has(value.operator as TriggerCondition['operator'])) {
+        return null;
+    }
+    const numericValue = typeof value.value === 'number' && Number.isFinite(value.value)
+        ? value.value
+        : null;
+    const stringValue = sanitizeNonEmptyString(value.value);
+    const normalizedValue = numericValue ?? stringValue;
+    if (normalizedValue === null) {
+        return null;
+    }
+    if (value.type === 'message-count' && numericValue === null) {
         return null;
     }
 
     return {
         type: value.type as TriggerCondition['type'],
         operator: value.operator as TriggerCondition['operator'],
-        value: value.value,
+        value: normalizedValue,
     };
 };
 
@@ -109,32 +134,43 @@ const sanitizeAction = (value: unknown): TriggerAction | null => {
 
 const sanitizeRule = (value: unknown): TriggerRule | null => {
     if (!isRecord(value)
-        || typeof value.id !== 'string'
-        || typeof value.name !== 'string'
         || !Array.isArray(value.conditions)
         || !Array.isArray(value.actions)
-        || typeof value.enabled !== 'boolean'
-        || typeof value.priority !== 'number'
-        || typeof value.triggerCount !== 'number'
-        || typeof value.createdAt !== 'number') {
+        || typeof value.enabled !== 'boolean') {
         return null;
     }
+    const id = sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    const createdAt = sanitizeFiniteNonNegativeInteger(value.createdAt);
+    const triggerCount = sanitizeFiniteNonNegativeInteger(value.triggerCount);
+    const priority = typeof value.priority === 'number' && Number.isFinite(value.priority)
+        ? Math.max(0, Math.round(value.priority))
+        : null;
+    if (!id || !name || createdAt === null || triggerCount === null || priority === null) {
+        return null;
+    }
+    const conditions = value.conditions
+        .map((entry) => sanitizeCondition(entry))
+        .filter((entry): entry is TriggerCondition => entry !== null);
+    const actions = value.actions
+        .map((entry) => sanitizeAction(entry))
+        .filter((entry): entry is TriggerAction => entry !== null);
+    if (conditions.length === 0 || actions.length === 0) {
+        return null;
+    }
+    const lastTriggered = sanitizeFiniteNonNegativeInteger(value.lastTriggered);
 
     return {
-        id: value.id,
-        name: value.name,
-        description: typeof value.description === 'string' ? value.description : undefined,
-        conditions: value.conditions
-            .map((entry) => sanitizeCondition(entry))
-            .filter((entry): entry is TriggerCondition => entry !== null),
-        actions: value.actions
-            .map((entry) => sanitizeAction(entry))
-            .filter((entry): entry is TriggerAction => entry !== null),
+        id,
+        name,
+        description: sanitizeNonEmptyString(value.description) || undefined,
+        conditions,
+        actions,
         enabled: value.enabled,
-        priority: value.priority,
-        triggerCount: value.triggerCount,
-        lastTriggered: typeof value.lastTriggered === 'number' ? value.lastTriggered : undefined,
-        createdAt: value.createdAt,
+        priority,
+        triggerCount,
+        lastTriggered: lastTriggered === null ? undefined : Math.max(createdAt, lastTriggered),
+        createdAt,
     };
 };
 
@@ -144,24 +180,37 @@ const parseStoredRules = (raw: string): TriggerRule[] => {
         return [];
     }
 
+    const seenIds = new Set<string>();
     return parsed
         .map((entry) => sanitizeRule(entry))
-        .filter((entry): entry is TriggerRule => entry !== null);
+        .filter((entry): entry is TriggerRule => {
+            if (!entry) {
+                return false;
+            }
+            if (seenIds.has(entry.id)) {
+                return false;
+            }
+            seenIds.add(entry.id);
+            return true;
+        });
 };
 
 const sanitizeExecution = (value: unknown): TriggerExecution | null => {
     if (!isRecord(value)
-        || typeof value.ruleId !== 'string'
-        || typeof value.triggeredAt !== 'number'
         || typeof value.success !== 'boolean'
         || !Array.isArray(value.conditionsMatched)
         || !Array.isArray(value.actionsExecuted)) {
         return null;
     }
+    const ruleId = sanitizeNonEmptyString(value.ruleId);
+    const triggeredAt = sanitizeFiniteNonNegativeInteger(value.triggeredAt);
+    if (!ruleId || triggeredAt === null) {
+        return null;
+    }
 
     return {
-        ruleId: value.ruleId,
-        triggeredAt: value.triggeredAt,
+        ruleId,
+        triggeredAt,
         conditionsMatched: value.conditionsMatched
             .map((entry) => sanitizeCondition(entry))
             .filter((entry): entry is TriggerCondition => entry !== null),
@@ -169,7 +218,7 @@ const sanitizeExecution = (value: unknown): TriggerExecution | null => {
             .map((entry) => sanitizeAction(entry))
             .filter((entry): entry is TriggerAction => entry !== null),
         success: value.success,
-        error: typeof value.error === 'string' ? value.error : undefined,
+        error: sanitizeNonEmptyString(value.error) || undefined,
     };
 };
 
@@ -405,12 +454,16 @@ export class TriggerActionsService {
      * Create a trigger rule
      */
     createRule(rule: Omit<TriggerRule, 'id' | 'createdAt' | 'triggerCount'>): TriggerRule {
-        const newRule: TriggerRule = {
+        const candidate: TriggerRule = {
             ...rule,
             id: crypto.randomUUID(),
             createdAt: Date.now(),
             triggerCount: 0,
         };
+        const newRule = sanitizeRule(candidate);
+        if (!newRule) {
+            throw new Error('Invalid trigger rule configuration');
+        }
 
         this.saveRule(newRule);
         return newRule;
@@ -445,7 +498,12 @@ export class TriggerActionsService {
         const rule = this.getRule(id);
         if (!rule) return false;
 
-        const updated = { ...rule, ...updates };
+        const updated = {
+            ...rule,
+            ...updates,
+            id: rule.id,
+            createdAt: rule.createdAt,
+        };
         const sanitized = sanitizeRule(updated);
         if (!sanitized) {
             return false;
@@ -470,12 +528,16 @@ export class TriggerActionsService {
      * Save a rule
      */
     private saveRule(rule: TriggerRule): void {
+        const sanitized = sanitizeRule(rule);
+        if (!sanitized) {
+            return;
+        }
         const rules = this.getAllRules();
-        const index = rules.findIndex(r => r.id === rule.id);
+        const index = rules.findIndex(r => r.id === sanitized.id);
         if (index >= 0) {
-            rules[index] = rule;
+            rules[index] = sanitized;
         } else {
-            rules.push(rule);
+            rules.push(sanitized);
         }
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(rules));
     }
@@ -485,9 +547,13 @@ export class TriggerActionsService {
      */
     private saveExecution(execution: TriggerExecution): void {
         try {
+            const sanitizedExecution = sanitizeExecution(execution);
+            if (!sanitizedExecution) {
+                return;
+            }
             const stored = localStorage.getItem(this.EXECUTIONS_KEY);
             const executions = stored ? parseStoredExecutions(stored) : [];
-            executions.push(execution);
+            executions.push(sanitizedExecution);
             // Keep only last 100 executions
             if (executions.length > 100) {
                 executions.shift();
@@ -506,9 +572,10 @@ export class TriggerActionsService {
             const stored = localStorage.getItem(this.EXECUTIONS_KEY);
             if (!stored) return [];
             const executions = parseStoredExecutions(stored);
+            const sanitizedLimit = sanitizeFiniteNonNegativeInteger(limit) ?? 20;
             return executions
                 .sort((a, b) => b.triggeredAt - a.triggeredAt)
-                .slice(0, limit);
+                .slice(0, sanitizedLimit);
         } catch (error) {
             console.error('Failed to load execution history:', error);
             return [];

@@ -76,7 +76,7 @@ export interface DiffLine {
 const STORAGE_KEY = 'versioned_prompts';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -87,58 +87,105 @@ const parseJson = (raw: string): unknown => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeFiniteNonNegativeNumber = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return null;
+    }
+    return value;
+};
+
 const sanitizeStringArray = (value: unknown): string[] => {
     if (!Array.isArray(value)) {
         return [];
     }
-    return value.filter((entry): entry is string => typeof entry === 'string');
+    const seen = new Set<string>();
+    const result: string[] = [];
+    value.forEach((entry) => {
+        const normalized = sanitizeNonEmptyString(entry);
+        if (!normalized || seen.has(normalized)) {
+            return;
+        }
+        seen.add(normalized);
+        result.push(normalized);
+    });
+    return result;
 };
 
 const sanitizeMetrics = (value: unknown): VersionMetrics | undefined => {
-    if (!isRecord(value)
-        || typeof value.useCount !== 'number'
-        || typeof value.avgResponseTime !== 'number'
-        || typeof value.avgTokensUsed !== 'number'
-        || typeof value.successRate !== 'number'
-        || typeof value.avgRating !== 'number') {
+    if (!isRecord(value)) {
         return undefined;
     }
+    const useCount = sanitizeFiniteNonNegativeNumber(value.useCount);
+    const avgResponseTime = sanitizeFiniteNonNegativeNumber(value.avgResponseTime);
+    const avgTokensUsed = sanitizeFiniteNonNegativeNumber(value.avgTokensUsed);
+    const successRate = sanitizeFiniteNonNegativeNumber(value.successRate);
+    const avgRating = sanitizeFiniteNonNegativeNumber(value.avgRating);
+    if (
+        useCount === null
+        || avgResponseTime === null
+        || avgTokensUsed === null
+        || successRate === null
+        || avgRating === null
+    ) {
+        return undefined;
+    }
+    const ratings = Array.isArray(value.userRatings)
+        ? value.userRatings.filter((entry): entry is number => (
+            typeof entry === 'number' && Number.isFinite(entry) && entry >= 1 && entry <= 5
+        ))
+        : [];
 
     return {
-        useCount: value.useCount,
-        avgResponseTime: value.avgResponseTime,
-        avgTokensUsed: value.avgTokensUsed,
-        successRate: value.successRate,
-        userRatings: Array.isArray(value.userRatings)
-            ? value.userRatings.filter((entry): entry is number => typeof entry === 'number')
-            : [],
-        avgRating: value.avgRating,
-        lastUsed: typeof value.lastUsed === 'number' ? value.lastUsed : undefined,
+        useCount: Math.floor(useCount),
+        avgResponseTime,
+        avgTokensUsed,
+        successRate: Math.min(1, successRate),
+        userRatings: ratings,
+        avgRating: Math.min(5, avgRating),
+        lastUsed: sanitizeFiniteNonNegativeNumber(value.lastUsed) || undefined,
     };
 };
 
 const sanitizeVersion = (value: unknown): PromptVersion | null => {
-    if (!isRecord(value)
-        || typeof value.id !== 'string'
-        || typeof value.promptId !== 'string'
-        || typeof value.version !== 'number'
-        || typeof value.content !== 'string'
-        || typeof value.createdAt !== 'number'
-        || typeof value.isActive !== 'boolean') {
+    if (!isRecord(value)) {
+        return null;
+    }
+    const id = sanitizeNonEmptyString(value.id);
+    const promptId = sanitizeNonEmptyString(value.promptId);
+    const version = sanitizeFiniteNonNegativeNumber(value.version);
+    const content = sanitizeNonEmptyString(value.content);
+    const createdAt = sanitizeFiniteNonNegativeNumber(value.createdAt);
+    if (
+        !id
+        || !promptId
+        || version === null
+        || version < 1
+        || !content
+        || createdAt === null
+        || typeof value.isActive !== 'boolean'
+    ) {
         return null;
     }
 
     const metrics = sanitizeMetrics(value.metrics);
 
     return {
-        id: value.id,
-        promptId: value.promptId,
-        version: value.version,
-        content: value.content,
-        systemPrompt: typeof value.systemPrompt === 'string' ? value.systemPrompt : undefined,
-        description: typeof value.description === 'string' ? value.description : undefined,
-        createdAt: value.createdAt,
-        createdBy: typeof value.createdBy === 'string' ? value.createdBy : undefined,
+        id,
+        promptId,
+        version: Math.floor(version),
+        content,
+        systemPrompt: sanitizeNonEmptyString(value.systemPrompt) || undefined,
+        description: sanitizeNonEmptyString(value.description) || undefined,
+        createdAt: Math.floor(createdAt),
+        createdBy: sanitizeNonEmptyString(value.createdBy) || undefined,
         metrics,
         tags: sanitizeStringArray(value.tags),
         isActive: value.isActive,
@@ -146,15 +193,15 @@ const sanitizeVersion = (value: unknown): PromptVersion | null => {
 };
 
 const sanitizePrompt = (value: unknown): VersionedPrompt | null => {
-    if (!isRecord(value)
-        || typeof value.id !== 'string'
-        || typeof value.name !== 'string'
-        || typeof value.description !== 'string'
-        || typeof value.category !== 'string'
-        || !Array.isArray(value.versions)
-        || typeof value.activeVersionId !== 'string'
-        || typeof value.createdAt !== 'number'
-        || typeof value.updatedAt !== 'number') {
+    if (!isRecord(value) || !Array.isArray(value.versions)) {
+        return null;
+    }
+    const id = sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    const category = sanitizeNonEmptyString(value.category);
+    const createdAt = sanitizeFiniteNonNegativeNumber(value.createdAt);
+    const updatedAt = sanitizeFiniteNonNegativeNumber(value.updatedAt);
+    if (!id || !name || !category || createdAt === null || updatedAt === null) {
         return null;
     }
 
@@ -164,24 +211,38 @@ const sanitizePrompt = (value: unknown): VersionedPrompt | null => {
     if (versions.length === 0) {
         return null;
     }
+    const seenVersionIds = new Set<string>();
+    const uniqueVersions = versions
+        .filter((entry) => {
+            if (seenVersionIds.has(entry.id)) {
+                return false;
+            }
+            seenVersionIds.add(entry.id);
+            return true;
+        })
+        .map((entry) => ({
+            ...entry,
+            promptId: id,
+        }));
 
-    const activeVersionId = versions.some((version) => version.id === value.activeVersionId)
-        ? value.activeVersionId
-        : versions[0].id;
+    const requestedActiveVersionId = sanitizeNonEmptyString(value.activeVersionId);
+    const activeVersionId = requestedActiveVersionId && uniqueVersions.some((version) => version.id === requestedActiveVersionId)
+        ? requestedActiveVersionId
+        : uniqueVersions[0].id;
 
-    versions.forEach((version) => {
+    uniqueVersions.forEach((version) => {
         version.isActive = version.id === activeVersionId;
     });
 
     return {
-        id: value.id,
-        name: value.name,
-        description: value.description,
-        category: value.category,
-        versions,
+        id,
+        name,
+        description: typeof value.description === 'string' ? value.description.trim() : '',
+        category,
+        versions: uniqueVersions,
         activeVersionId,
-        createdAt: value.createdAt,
-        updatedAt: value.updatedAt,
+        createdAt: Math.floor(createdAt),
+        updatedAt: Math.max(Math.floor(createdAt), Math.floor(updatedAt)),
         tags: sanitizeStringArray(value.tags),
     };
 };
@@ -192,9 +253,19 @@ const parseStoredPrompts = (raw: string): VersionedPrompt[] => {
         return [];
     }
 
+    const seenIds = new Set<string>();
     return parsed
         .map((entry) => sanitizePrompt(entry))
-        .filter((entry): entry is VersionedPrompt => entry !== null);
+        .filter((entry): entry is VersionedPrompt => {
+            if (!entry) {
+                return false;
+            }
+            if (seenIds.has(entry.id)) {
+                return false;
+            }
+            seenIds.add(entry.id);
+            return true;
+        });
 };
 
 export class PromptVersioningService {
@@ -250,18 +321,24 @@ export class PromptVersioningService {
         } = {}
     ): VersionedPrompt {
         this.init();
+        const normalizedName = sanitizeNonEmptyString(name);
+        const normalizedContent = sanitizeNonEmptyString(content);
+        if (!normalizedName || !normalizedContent) {
+            throw new Error('Prompt name and content are required');
+        }
+        const now = Date.now();
 
         const id = `vp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         const versionId = `v-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-        const firstVersion: PromptVersion = {
+        const firstVersion = sanitizeVersion({
             id: versionId,
             promptId: id,
             version: 1,
-            content,
-            systemPrompt: options.systemPrompt,
+            content: normalizedContent,
+            systemPrompt: sanitizeNonEmptyString(options.systemPrompt) || undefined,
             description: 'Initial version',
-            createdAt: Date.now(),
+            createdAt: now,
             tags: sanitizeStringArray(options.tags),
             isActive: true,
             metrics: {
@@ -272,19 +349,25 @@ export class PromptVersioningService {
                 userRatings: [],
                 avgRating: 0,
             },
-        };
+        });
+        if (!firstVersion) {
+            throw new Error('Invalid prompt version configuration');
+        }
 
-        const prompt: VersionedPrompt = {
+        const prompt = sanitizePrompt({
             id,
-            name,
-            description: options.description || '',
-            category: options.category || 'general',
+            name: normalizedName,
+            description: (typeof options.description === 'string' ? options.description.trim() : ''),
+            category: sanitizeNonEmptyString(options.category) || 'general',
             versions: [firstVersion],
             activeVersionId: versionId,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
+            createdAt: now,
+            updatedAt: now,
             tags: sanitizeStringArray(options.tags),
-        };
+        });
+        if (!prompt) {
+            throw new Error('Invalid prompt configuration');
+        }
 
         this.prompts.set(id, prompt);
         this.persist();
@@ -306,20 +389,25 @@ export class PromptVersioningService {
         } = {}
     ): PromptVersion | null {
         this.init();
+        const normalizedPromptId = sanitizeNonEmptyString(promptId);
+        const normalizedContent = sanitizeNonEmptyString(content);
+        if (!normalizedPromptId || !normalizedContent) {
+            return null;
+        }
 
-        const prompt = this.prompts.get(promptId);
+        const prompt = this.prompts.get(normalizedPromptId);
         if (!prompt) return null;
 
         const latestVersion = Math.max(...prompt.versions.map(v => v.version));
         const versionId = `v-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-        const newVersion: PromptVersion = {
+        const newVersion = sanitizeVersion({
             id: versionId,
-            promptId,
+            promptId: normalizedPromptId,
             version: latestVersion + 1,
-            content,
-            systemPrompt: options.systemPrompt,
-            description: options.description || `Version ${latestVersion + 1}`,
+            content: normalizedContent,
+            systemPrompt: sanitizeNonEmptyString(options.systemPrompt) || undefined,
+            description: sanitizeNonEmptyString(options.description) || `Version ${latestVersion + 1}`,
             createdAt: Date.now(),
             tags: sanitizeStringArray(options.tags),
             isActive: options.setActive !== false,
@@ -331,21 +419,28 @@ export class PromptVersioningService {
                 userRatings: [],
                 avgRating: 0,
             },
-        };
-
-        // Deactivate other versions if this one is active
-        if (newVersion.isActive) {
-            prompt.versions.forEach(v => (v.isActive = false));
-            prompt.activeVersionId = versionId;
+        });
+        if (!newVersion) {
+            return null;
+        }
+        const mergedPrompt = sanitizePrompt({
+            ...prompt,
+            versions: newVersion.isActive
+                ? [...prompt.versions.map((entry) => ({ ...entry, isActive: false })), newVersion]
+                : [...prompt.versions, newVersion],
+            activeVersionId: newVersion.isActive ? versionId : prompt.activeVersionId,
+            updatedAt: Date.now(),
+            id: prompt.id,
+            createdAt: prompt.createdAt,
+        });
+        if (!mergedPrompt) {
+            return null;
         }
 
-        prompt.versions.push(newVersion);
-        prompt.updatedAt = Date.now();
-
-        this.prompts.set(promptId, prompt);
+        this.prompts.set(mergedPrompt.id, mergedPrompt);
         this.persist();
 
-        return newVersion;
+        return mergedPrompt.versions.find((entry) => entry.id === newVersion.id) || null;
     }
 
     /**
@@ -655,26 +750,38 @@ export class PromptVersioningService {
         updates: Partial<Pick<VersionedPrompt, 'name' | 'description' | 'category' | 'tags'>>
     ): VersionedPrompt | null {
         this.init();
-        const prompt = this.prompts.get(promptId);
+        const normalizedPromptId = sanitizeNonEmptyString(promptId);
+        if (!normalizedPromptId) {
+            return null;
+        }
+        const prompt = this.prompts.get(normalizedPromptId);
         if (!prompt) return null;
 
-        if (typeof updates.name === 'string') {
-            prompt.name = updates.name;
+        const updatedPrompt = sanitizePrompt({
+            ...prompt,
+            name: typeof updates.name === 'string'
+                ? (sanitizeNonEmptyString(updates.name) || prompt.name)
+                : prompt.name,
+            description: typeof updates.description === 'string'
+                ? updates.description.trim()
+                : prompt.description,
+            category: typeof updates.category === 'string'
+                ? (sanitizeNonEmptyString(updates.category) || prompt.category)
+                : prompt.category,
+            tags: typeof updates.tags !== 'undefined'
+                ? sanitizeStringArray(updates.tags)
+                : prompt.tags,
+            updatedAt: Date.now(),
+            id: prompt.id,
+            createdAt: prompt.createdAt,
+        });
+        if (!updatedPrompt) {
+            return null;
         }
-        if (typeof updates.description === 'string') {
-            prompt.description = updates.description;
-        }
-        if (typeof updates.category === 'string') {
-            prompt.category = updates.category;
-        }
-        if (typeof updates.tags !== 'undefined') {
-            prompt.tags = sanitizeStringArray(updates.tags);
-        }
-        prompt.updatedAt = Date.now();
-        this.prompts.set(promptId, prompt);
+        this.prompts.set(updatedPrompt.id, updatedPrompt);
         this.persist();
 
-        return prompt;
+        return updatedPrompt;
     }
 
     /**
@@ -686,24 +793,54 @@ export class PromptVersioningService {
         updates: Partial<Pick<PromptVersion, 'description' | 'tags'>>
     ): PromptVersion | null {
         this.init();
-        const prompt = this.prompts.get(promptId);
+        const normalizedPromptId = sanitizeNonEmptyString(promptId);
+        const normalizedVersionId = sanitizeNonEmptyString(versionId);
+        if (!normalizedPromptId || !normalizedVersionId) {
+            return null;
+        }
+        const prompt = this.prompts.get(normalizedPromptId);
         if (!prompt) return null;
 
-        const version = prompt.versions.find(v => v.id === versionId);
+        const version = prompt.versions.find(v => v.id === normalizedVersionId);
         if (!version) return null;
 
-        if (typeof updates.description === 'string') {
-            version.description = updates.description;
+        const updatedVersion = sanitizeVersion({
+            ...version,
+            description: typeof updates.description === 'string'
+                ? (sanitizeNonEmptyString(updates.description) || undefined)
+                : version.description,
+            tags: typeof updates.tags !== 'undefined'
+                ? sanitizeStringArray(updates.tags)
+                : version.tags,
+            id: version.id,
+            promptId: version.promptId,
+            version: version.version,
+            content: version.content,
+            createdAt: version.createdAt,
+            isActive: version.isActive,
+        });
+        if (!updatedVersion) {
+            return null;
         }
-        if (typeof updates.tags !== 'undefined') {
-            version.tags = sanitizeStringArray(updates.tags);
-        }
-        prompt.updatedAt = Date.now();
 
-        this.prompts.set(promptId, prompt);
+        const updatedPrompt = sanitizePrompt({
+            ...prompt,
+            versions: prompt.versions.map((entry) => (
+                entry.id === normalizedVersionId ? updatedVersion : entry
+            )),
+            updatedAt: Date.now(),
+            id: prompt.id,
+            createdAt: prompt.createdAt,
+            activeVersionId: prompt.activeVersionId,
+        });
+        if (!updatedPrompt) {
+            return null;
+        }
+
+        this.prompts.set(updatedPrompt.id, updatedPrompt);
         this.persist();
 
-        return version;
+        return updatedPrompt.versions.find((entry) => entry.id === normalizedVersionId) || null;
     }
 
     /**
@@ -869,9 +1006,19 @@ export class PromptVersioningService {
      */
     private static persist(): void {
         try {
+            const seenIds = new Set<string>();
             const prompts = Array.from(this.prompts.values())
                 .map((entry) => sanitizePrompt(entry))
-                .filter((entry): entry is VersionedPrompt => entry !== null);
+                .filter((entry): entry is VersionedPrompt => {
+                    if (!entry) {
+                        return false;
+                    }
+                    if (seenIds.has(entry.id)) {
+                        return false;
+                    }
+                    seenIds.add(entry.id);
+                    return true;
+                });
             localStorage.setItem(STORAGE_KEY, JSON.stringify(prompts));
         } catch (error) {
             console.error('Failed to persist versioned prompts:', error);

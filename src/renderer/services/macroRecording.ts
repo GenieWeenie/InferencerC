@@ -40,7 +40,7 @@ const ACTION_TYPES = new Set<MacroAction['type']>([
 ]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const isFiniteNumber = (value: unknown): value is number => (
@@ -53,6 +53,14 @@ const parseJson = (raw: string): unknown => {
     } catch {
         return null;
     }
+};
+
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
 };
 
 const sanitizeAction = (value: unknown): MacroAction | null => {
@@ -92,14 +100,18 @@ const sanitizeMacro = (value: unknown): Macro | null => {
     if (!id || !name) {
         return null;
     }
+    const actions = value.actions
+        .map((entry) => sanitizeAction(entry))
+        .filter((entry): entry is MacroAction => entry !== null);
+    if (actions.length === 0) {
+        return null;
+    }
 
     return {
         id,
         name,
-        description: typeof value.description === 'string' ? value.description : undefined,
-        actions: value.actions
-            .map((entry) => sanitizeAction(entry))
-            .filter((entry): entry is MacroAction => entry !== null),
+        description: sanitizeNonEmptyString(value.description) || undefined,
+        actions,
         createdAt,
         lastPlayed: isFiniteNumber(value.lastPlayed) ? Math.max(0, Math.floor(value.lastPlayed)) : undefined,
         playCount,
@@ -112,9 +124,19 @@ const parseStoredMacros = (raw: string): Macro[] => {
         return [];
     }
 
+    const seenIds = new Set<string>();
     return parsed
         .map((entry) => sanitizeMacro(entry))
-        .filter((entry): entry is Macro => entry !== null);
+        .filter((entry): entry is Macro => {
+            if (!entry) {
+                return false;
+            }
+            if (seenIds.has(entry.id)) {
+                return false;
+            }
+            seenIds.add(entry.id);
+            return true;
+        });
 };
 
 const sanitizePlayback = (value: unknown): MacroPlayback | null => {
@@ -208,13 +230,16 @@ export class MacroRecordingService {
             return null;
         }
 
-        const macro: Macro = {
+        const macro = sanitizeMacro({
             id: crypto.randomUUID(),
             name: `Macro ${new Date().toLocaleString()}`,
             actions: this.recordedActions,
             createdAt: Date.now(),
             playCount: 0,
-        };
+        });
+        if (!macro) {
+            return null;
+        }
 
         this.saveMacro(macro);
         return macro;
@@ -242,10 +267,13 @@ export class MacroRecordingService {
     recordAction(action: Omit<MacroAction, 'timestamp'>): void {
         if (!this.isRecording) return;
 
-        const macroAction: MacroAction = {
+        const macroAction = sanitizeAction({
             ...action,
             timestamp: Date.now() - this.recordingStartTime,
-        };
+        });
+        if (!macroAction) {
+            return;
+        }
 
         this.recordedActions.push(macroAction);
     }
@@ -360,23 +388,23 @@ export class MacroRecordingService {
      * Wait for a duration
      */
     private wait(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
+        const duration = isFiniteNumber(ms) ? Math.max(0, Math.floor(ms)) : 0;
+        return new Promise(resolve => setTimeout(resolve, duration));
     }
 
     /**
      * Create a macro
      */
     createMacro(macro: Omit<Macro, 'id' | 'createdAt' | 'playCount'>): Macro {
-        const sanitizedActions = macro.actions
-            .map((entry) => sanitizeAction(entry))
-            .filter((entry): entry is MacroAction => entry !== null);
-        const newMacro: Macro = {
+        const newMacro = sanitizeMacro({
             ...macro,
-            actions: sanitizedActions,
             id: crypto.randomUUID(),
             createdAt: Date.now(),
             playCount: 0,
-        };
+        });
+        if (!newMacro) {
+            throw new Error('Invalid macro configuration');
+        }
 
         this.saveMacro(newMacro);
         return newMacro;
@@ -414,6 +442,9 @@ export class MacroRecordingService {
         const updated = sanitizeMacro({
             ...macro,
             ...updates,
+            id: macro.id,
+            createdAt: macro.createdAt,
+            playCount: macro.playCount,
             actions: typeof updates.actions !== 'undefined'
                 ? updates.actions
                     .map((entry) => sanitizeAction(entry))
@@ -443,12 +474,16 @@ export class MacroRecordingService {
      * Save a macro
      */
     private saveMacro(macro: Macro): void {
+        const sanitized = sanitizeMacro(macro);
+        if (!sanitized) {
+            return;
+        }
         const macros = this.getAllMacros();
-        const index = macros.findIndex(m => m.id === macro.id);
+        const index = macros.findIndex(m => m.id === sanitized.id);
         if (index >= 0) {
-            macros[index] = macro;
+            macros[index] = sanitized;
         } else {
-            macros.push(macro);
+            macros.push(sanitized);
         }
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(macros));
     }

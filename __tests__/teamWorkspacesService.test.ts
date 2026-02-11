@@ -149,4 +149,77 @@ describe('TeamWorkspacesService', () => {
     expect(summary.totalSessions).toBe(2);
     expect(summary.topModels[0].modelId).toBe('model-b');
   });
+
+  test('sanitizes workspace mutation payloads before persistence', () => {
+    const identity = teamWorkspacesService.setIdentity({
+      userId: '  admin-user  ',
+      displayName: '  Admin User  ',
+    });
+    expect(identity).toEqual({ userId: 'admin-user', displayName: 'Admin User' });
+
+    const workspace = teamWorkspacesService.createWorkspace('  Team Ops  ', '  Shared workspace  ');
+    expect(workspace.name).toBe('Team Ops');
+
+    const invite = teamWorkspacesService.generateInvite(workspace.id, 'viewer', Number.NaN as unknown as number);
+    expect(invite.expiresAt - invite.createdAt).toBe(72 * 60 * 60 * 1000);
+
+    teamWorkspacesService.setIdentity({ userId: '  viewer-user  ', displayName: '  Viewer User  ' });
+    teamWorkspacesService.acceptInvite(`  ${invite.token}  `);
+
+    teamWorkspacesService.setIdentity({ userId: 'admin-user', displayName: 'Admin User' });
+    const roleUpdated = teamWorkspacesService.updateMemberRole(workspace.id, '  viewer-user  ', 'member');
+    expect(roleUpdated.members.find((member) => member.id === 'viewer-user')?.role).toBe('member');
+
+    const template = TemplateService.createTemplate(
+      'Mutation Template',
+      'Template for workspace test',
+      'general',
+      [{ role: 'user', content: 'Template seed message' }],
+      undefined,
+      undefined,
+      ['workspace']
+    );
+    const sharedTemplatesUpdated = teamWorkspacesService.setSharedTemplates(workspace.id, [
+      `  ${template.id}  `,
+      template.id,
+      'missing-template',
+      '   ',
+    ] as unknown as string[]);
+    expect(sharedTemplatesUpdated.sharedTemplateIds).toEqual([template.id]);
+
+    const collectionUpdated = teamWorkspacesService.setConversationCollection(workspace.id, [
+      '  session-a  ',
+      'session-a',
+      '  ',
+      'session-b',
+    ] as unknown as string[]);
+    expect(collectionUpdated.conversationIds).toEqual(['session-a', 'session-b']);
+
+    const policyUpdated = teamWorkspacesService.updateModelPolicy(workspace.id, {
+      allowedProviders: ['  openrouter  ', 'openrouter', '  '] as unknown as string[],
+      allowedModelIds: ['  model-a  ', 'model-a', ''] as unknown as string[],
+    });
+    expect(policyUpdated.modelPolicy.allowedProviders).toEqual(['openrouter']);
+    expect(policyUpdated.modelPolicy.allowedModelIds).toEqual(['model-a']);
+
+    const secondInvite = teamWorkspacesService.generateInvite(workspace.id, 'viewer', 2);
+    const removedInviteWorkspace = teamWorkspacesService.removeInvite(workspace.id, `  ${secondInvite.token}  `);
+    expect(removedInviteWorkspace.invites.some((entry) => entry.token === secondInvite.token)).toBe(false);
+    expect(() => teamWorkspacesService.removeInvite(workspace.id, '   ')).toThrow('Invite token is required');
+
+    teamWorkspacesService.setActiveWorkspace(`  ${workspace.id}  `);
+    expect(teamWorkspacesService.getActiveWorkspaceId()).toBe(workspace.id);
+
+    const persisted = JSON.parse(localStorage.getItem('team_workspaces_v1') ?? '[]');
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]).toMatchObject({
+      id: workspace.id,
+      sharedTemplateIds: [template.id],
+      conversationIds: ['session-a', 'session-b'],
+      modelPolicy: {
+        allowedProviders: ['openrouter'],
+        allowedModelIds: ['model-a'],
+      },
+    });
+  });
 });

@@ -29,9 +29,11 @@ export interface LayoutConfig {
 
 const PANEL_TYPES = new Set<PanelConfig['type']>(['sidebar', 'inspector', 'history', 'prompts', 'controls']);
 const PANEL_POSITIONS = new Set<PanelConfig['position']>(['left', 'right', 'top', 'bottom']);
+const MIN_PANEL_SIZE = 1;
+const MAX_PANEL_SIZE = 1000;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -42,47 +44,69 @@ const parseJson = (raw: string): unknown => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 const clonePanel = (panel: PanelConfig): PanelConfig => ({ ...panel });
 
 const sanitizePanel = (value: unknown): PanelConfig | null => {
-    if (!isRecord(value)
-        || typeof value.id !== 'string'
+    if (!isRecord(value)) {
+        return null;
+    }
+    const id = sanitizeNonEmptyString(value.id);
+    if (!id
         || !PANEL_TYPES.has(value.type as PanelConfig['type'])
         || !PANEL_POSITIONS.has(value.position as PanelConfig['position'])
         || typeof value.size !== 'number'
+        || !Number.isFinite(value.size)
         || typeof value.visible !== 'boolean'
-        || typeof value.order !== 'number') {
+        || typeof value.order !== 'number'
+        || !Number.isFinite(value.order)) {
         return null;
     }
+    const size = Math.max(MIN_PANEL_SIZE, Math.min(MAX_PANEL_SIZE, Math.round(value.size)));
+    const order = Math.max(0, Math.floor(value.order));
 
     return {
-        id: value.id,
+        id,
         type: value.type as PanelConfig['type'],
         position: value.position as PanelConfig['position'],
-        size: value.size,
+        size,
         visible: value.visible,
-        order: value.order,
+        order,
     };
 };
 
 const sanitizePreset = (value: unknown): LayoutPreset | null => {
-    if (!isRecord(value)
-        || typeof value.id !== 'string'
-        || typeof value.name !== 'string'
-        || typeof value.description !== 'string'
-        || typeof value.createdAt !== 'number'
-        || !Array.isArray(value.panels)) {
+    if (!isRecord(value) || !Array.isArray(value.panels)) {
+        return null;
+    }
+    const id = sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    const createdAt = typeof value.createdAt === 'number' && Number.isFinite(value.createdAt)
+        ? Math.max(0, Math.floor(value.createdAt))
+        : null;
+    if (!id || !name || createdAt === null) {
+        return null;
+    }
+    const panels = value.panels
+        .map((entry) => sanitizePanel(entry))
+        .filter((entry): entry is PanelConfig => entry !== null);
+    if (panels.length === 0) {
         return null;
     }
 
     return {
-        id: value.id,
-        name: value.name,
-        description: value.description,
-        panels: value.panels
-            .map((entry) => sanitizePanel(entry))
-            .filter((entry): entry is PanelConfig => entry !== null),
-        createdAt: value.createdAt,
+        id,
+        name,
+        description: sanitizeNonEmptyString(value.description) || '',
+        panels,
+        createdAt,
     };
 };
 
@@ -98,21 +122,44 @@ const sanitizeLayout = (value: unknown, defaults: LayoutConfig): LayoutConfig =>
         };
     }
 
+    const seenPanelIds = new Set<string>();
     const panels = Array.isArray(value.panels)
         ? value.panels
             .map((entry) => sanitizePanel(entry))
-            .filter((entry): entry is PanelConfig => entry !== null)
+            .filter((entry): entry is PanelConfig => {
+                if (!entry) {
+                    return false;
+                }
+                if (seenPanelIds.has(entry.id)) {
+                    return false;
+                }
+                seenPanelIds.add(entry.id);
+                return true;
+            })
         : [];
+    const seenPresetIds = new Set<string>();
     const customPresets = Array.isArray(value.customPresets)
         ? value.customPresets
             .map((entry) => sanitizePreset(entry))
-            .filter((entry): entry is LayoutPreset => entry !== null)
+            .filter((entry): entry is LayoutPreset => {
+                if (!entry) {
+                    return false;
+                }
+                if (seenPresetIds.has(entry.id)) {
+                    return false;
+                }
+                seenPresetIds.add(entry.id);
+                return true;
+            })
         : [];
+    const currentPreset = sanitizeNonEmptyString(value.currentPreset);
 
     return {
         panels: panels.length > 0 ? panels : defaults.panels.map(clonePanel),
         customPresets,
-        currentPreset: typeof value.currentPreset === 'string' ? value.currentPreset : undefined,
+        currentPreset: currentPreset && customPresets.some((preset) => preset.id === currentPreset)
+            ? currentPreset
+            : undefined,
     };
 };
 
@@ -174,7 +221,15 @@ export class LayoutCustomizationService {
         const layout = this.getLayout();
         const panel = layout.panels.find(p => p.id === panelId);
         if (panel) {
-            Object.assign(panel, updates);
+            const updatedPanel = sanitizePanel({
+                ...panel,
+                ...updates,
+                id: panel.id,
+            });
+            if (!updatedPanel) {
+                return;
+            }
+            Object.assign(panel, updatedPanel);
             this.saveLayout(layout);
         }
     }
@@ -206,13 +261,16 @@ export class LayoutCustomizationService {
      */
     createPreset(name: string, description: string): LayoutPreset {
         const layout = this.getLayout();
-        const preset: LayoutPreset = {
+        const preset = sanitizePreset({
             id: crypto.randomUUID(),
             name,
             description,
             panels: layout.panels.map(clonePanel),
             createdAt: Date.now(),
-        };
+        });
+        if (!preset) {
+            throw new Error('Invalid layout preset configuration');
+        }
         layout.customPresets.push(preset);
         this.saveLayout(layout);
         return preset;

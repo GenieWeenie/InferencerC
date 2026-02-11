@@ -45,7 +45,7 @@ const TRIGGER_TYPES = new Set<ResponseTrigger['type']>([
 ]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -56,53 +56,83 @@ const parseJson = (raw: string): unknown => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeFiniteNonNegativeInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return null;
+    }
+    return Math.floor(value);
+};
+
 const sanitizeTrigger = (value: unknown): ResponseTrigger | null => {
-    if (!isRecord(value)
-        || !TRIGGER_TYPES.has(value.type as ResponseTrigger['type'])
-        || typeof value.value !== 'string') {
+    if (!isRecord(value) || !TRIGGER_TYPES.has(value.type as ResponseTrigger['type'])) {
+        return null;
+    }
+    const triggerValue = sanitizeNonEmptyString(value.value);
+    if (!triggerValue) {
         return null;
     }
 
     return {
         type: value.type as ResponseTrigger['type'],
-        value: value.value,
+        value: triggerValue,
         caseSensitive: typeof value.caseSensitive === 'boolean' ? value.caseSensitive : undefined,
     };
 };
 
 const sanitizeResponse = (value: unknown): AutoResponse | null => {
-    if (!isRecord(value)
-        || typeof value.id !== 'string'
-        || typeof value.name !== 'string'
-        || !Array.isArray(value.triggers)
-        || typeof value.response !== 'string'
-        || typeof value.enabled !== 'boolean'
-        || typeof value.priority !== 'number'
-        || typeof value.matchCount !== 'number'
-        || typeof value.createdAt !== 'number') {
+    if (!isRecord(value) || !Array.isArray(value.triggers) || typeof value.enabled !== 'boolean') {
+        return null;
+    }
+    const id = sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    const responseText = sanitizeNonEmptyString(value.response);
+    const priority = sanitizeFiniteNonNegativeInteger(value.priority);
+    const matchCount = sanitizeFiniteNonNegativeInteger(value.matchCount);
+    const createdAt = sanitizeFiniteNonNegativeInteger(value.createdAt);
+    if (!id || !name || !responseText || priority === null || matchCount === null || createdAt === null) {
         return null;
     }
 
+    const seenTriggerSignatures = new Set<string>();
     const triggers = value.triggers
         .map((entry) => sanitizeTrigger(entry))
-        .filter((entry): entry is ResponseTrigger => entry !== null);
+        .filter((entry): entry is ResponseTrigger => {
+            if (!entry) {
+                return false;
+            }
+            const signature = `${entry.type}:${entry.value}:${entry.caseSensitive ? '1' : '0'}`;
+            if (seenTriggerSignatures.has(signature)) {
+                return false;
+            }
+            seenTriggerSignatures.add(signature);
+            return true;
+        });
     if (triggers.length === 0) {
         return null;
     }
+    const lastMatched = sanitizeFiniteNonNegativeInteger(value.lastMatched);
 
     return {
-        id: value.id,
-        name: value.name,
-        description: typeof value.description === 'string' ? value.description : undefined,
+        id,
+        name,
+        description: sanitizeNonEmptyString(value.description) || undefined,
         triggers,
-        response: value.response,
-        systemPrompt: typeof value.systemPrompt === 'string' ? value.systemPrompt : undefined,
-        modelId: typeof value.modelId === 'string' ? value.modelId : undefined,
+        response: responseText,
+        systemPrompt: sanitizeNonEmptyString(value.systemPrompt) || undefined,
+        modelId: sanitizeNonEmptyString(value.modelId) || undefined,
         enabled: value.enabled,
-        priority: value.priority,
-        matchCount: value.matchCount,
-        lastMatched: typeof value.lastMatched === 'number' ? value.lastMatched : undefined,
-        createdAt: value.createdAt,
+        priority,
+        matchCount,
+        lastMatched: lastMatched === null ? undefined : Math.max(createdAt, lastMatched),
+        createdAt,
     };
 };
 
@@ -112,9 +142,19 @@ const parseStoredResponses = (raw: string): AutoResponse[] => {
         return [];
     }
 
+    const seenIds = new Set<string>();
     return parsed
         .map((entry) => sanitizeResponse(entry))
-        .filter((entry): entry is AutoResponse => entry !== null);
+        .filter((entry): entry is AutoResponse => {
+            if (!entry) {
+                return false;
+            }
+            if (seenIds.has(entry.id)) {
+                return false;
+            }
+            seenIds.add(entry.id);
+            return true;
+        });
 };
 
 export class AutoResponsesService {
@@ -208,16 +248,16 @@ export class AutoResponsesService {
      * Create an auto-response
      */
     createResponse(response: Omit<AutoResponse, 'id' | 'createdAt' | 'matchCount'>): AutoResponse {
-        const sanitizedTriggers = response.triggers
-            .map((trigger) => sanitizeTrigger(trigger))
-            .filter((trigger): trigger is ResponseTrigger => trigger !== null);
-        const newResponse: AutoResponse = {
+        const candidate: AutoResponse = {
             ...response,
-            triggers: sanitizedTriggers,
             id: crypto.randomUUID(),
             createdAt: Date.now(),
             matchCount: 0,
         };
+        const newResponse = sanitizeResponse(candidate);
+        if (!newResponse) {
+            throw new Error('Invalid auto-response configuration');
+        }
 
         this.saveResponse(newResponse);
         return newResponse;
@@ -255,6 +295,8 @@ export class AutoResponsesService {
         const updated = sanitizeResponse({
             ...response,
             ...updates,
+            id: response.id,
+            createdAt: response.createdAt,
             triggers: typeof updates.triggers !== 'undefined'
                 ? updates.triggers
                     .map((trigger) => sanitizeTrigger(trigger))
@@ -284,12 +326,16 @@ export class AutoResponsesService {
      * Save a response
      */
     private saveResponse(response: AutoResponse): void {
+        const sanitized = sanitizeResponse(response);
+        if (!sanitized) {
+            return;
+        }
         const responses = this.getAllResponses();
-        const index = responses.findIndex(r => r.id === response.id);
+        const index = responses.findIndex(r => r.id === sanitized.id);
         if (index >= 0) {
-            responses[index] = response;
+            responses[index] = sanitized;
         } else {
-            responses.push(response);
+            responses.push(sanitized);
         }
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(responses));
     }
@@ -298,9 +344,10 @@ export class AutoResponsesService {
      * Get most used responses
      */
     getMostUsedResponses(limit: number = 10): AutoResponse[] {
+        const sanitizedLimit = sanitizeFiniteNonNegativeInteger(limit) ?? 10;
         return this.getAllResponses()
             .sort((a, b) => b.matchCount - a.matchCount)
-            .slice(0, limit);
+            .slice(0, sanitizedLimit);
     }
 }
 

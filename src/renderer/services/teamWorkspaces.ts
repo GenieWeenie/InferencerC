@@ -94,6 +94,13 @@ const sanitizeNonEmptyString = (value: unknown): string | null => {
     return normalized.length > 0 ? normalized : null;
 };
 
+const sanitizeFiniteNonNegativeNumber = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return null;
+    }
+    return Math.floor(value);
+};
+
 const sanitizeStringArray = (value: unknown): string[] => {
     if (!Array.isArray(value)) {
         return [];
@@ -120,18 +127,15 @@ const sanitizeWorkspaceMember = (value: unknown): WorkspaceMember | null => {
     if (!id || !name) {
         return null;
     }
-    if (
-        !WORKSPACE_ROLES.has(value.role as WorkspaceRole)
-        || typeof value.joinedAt !== 'number'
-        || !Number.isFinite(value.joinedAt)
-    ) {
+    const joinedAt = sanitizeFiniteNonNegativeNumber(value.joinedAt);
+    if (!WORKSPACE_ROLES.has(value.role as WorkspaceRole) || joinedAt === null) {
         return null;
     }
     return {
         id,
         name,
         role: value.role as WorkspaceRole,
-        joinedAt: value.joinedAt,
+        joinedAt,
     };
 };
 
@@ -144,20 +148,16 @@ const sanitizeWorkspaceInvite = (value: unknown): WorkspaceInvite | null => {
     if (!token || !inviteLink) {
         return null;
     }
-    if (
-        !WORKSPACE_ROLES.has(value.role as WorkspaceRole)
-        || typeof value.createdAt !== 'number'
-        || !Number.isFinite(value.createdAt)
-        || typeof value.expiresAt !== 'number'
-        || !Number.isFinite(value.expiresAt)
-    ) {
+    const createdAt = sanitizeFiniteNonNegativeNumber(value.createdAt);
+    const expiresAt = sanitizeFiniteNonNegativeNumber(value.expiresAt);
+    if (!WORKSPACE_ROLES.has(value.role as WorkspaceRole) || createdAt === null || expiresAt === null) {
         return null;
     }
     return {
         token,
         role: value.role as WorkspaceRole,
-        createdAt: value.createdAt,
-        expiresAt: value.expiresAt,
+        createdAt,
+        expiresAt: Math.max(createdAt, expiresAt),
         inviteLink,
     };
 };
@@ -171,12 +171,9 @@ const sanitizeWorkspace = (value: unknown): TeamWorkspace | null => {
     if (!id || !name) {
         return null;
     }
-    if (
-        typeof value.createdAt !== 'number'
-        || !Number.isFinite(value.createdAt)
-        || typeof value.updatedAt !== 'number'
-        || !Number.isFinite(value.updatedAt)
-    ) {
+    const createdAt = sanitizeFiniteNonNegativeNumber(value.createdAt);
+    const updatedAt = sanitizeFiniteNonNegativeNumber(value.updatedAt);
+    if (createdAt === null || updatedAt === null) {
         return null;
     }
 
@@ -196,9 +193,9 @@ const sanitizeWorkspace = (value: unknown): TeamWorkspace | null => {
     return {
         id,
         name,
-        description: typeof value.description === 'string' ? value.description.trim() : '',
-        createdAt: value.createdAt,
-        updatedAt: value.updatedAt,
+        description: sanitizeNonEmptyString(value.description) || '',
+        createdAt,
+        updatedAt: Math.max(createdAt, updatedAt),
         members: dedupedMembers,
         invites: dedupedInvites,
         sharedTemplateIds: sanitizeStringArray(value.sharedTemplateIds),
@@ -241,19 +238,15 @@ class TeamWorkspacesService {
     }
 
     private normalizeWorkspace(workspace: TeamWorkspace): TeamWorkspace {
-        return {
+        return sanitizeWorkspace(workspace) || {
             ...workspace,
-            members: Array.isArray(workspace.members) ? workspace.members : [],
-            invites: Array.isArray(workspace.invites) ? workspace.invites : [],
-            sharedTemplateIds: Array.isArray(workspace.sharedTemplateIds) ? workspace.sharedTemplateIds : [],
-            conversationIds: Array.isArray(workspace.conversationIds) ? workspace.conversationIds : [],
+            members: [],
+            invites: [],
+            sharedTemplateIds: [],
+            conversationIds: [],
             modelPolicy: {
-                allowedProviders: Array.isArray(workspace.modelPolicy?.allowedProviders)
-                    ? workspace.modelPolicy.allowedProviders
-                    : [],
-                allowedModelIds: Array.isArray(workspace.modelPolicy?.allowedModelIds)
-                    ? workspace.modelPolicy.allowedModelIds
-                    : [],
+                allowedProviders: [],
+                allowedModelIds: [],
             },
         };
     }
@@ -281,7 +274,20 @@ class TeamWorkspacesService {
     }
 
     private saveWorkspaces(workspaces: TeamWorkspace[]): void {
-        localStorage.setItem(WORKSPACES_KEY, JSON.stringify(workspaces));
+        const seenIds = new Set<string>();
+        const sanitized = workspaces
+            .map((workspace) => sanitizeWorkspace(workspace))
+            .filter((workspace): workspace is TeamWorkspace => {
+                if (!workspace) {
+                    return false;
+                }
+                if (seenIds.has(workspace.id)) {
+                    return false;
+                }
+                seenIds.add(workspace.id);
+                return true;
+            });
+        localStorage.setItem(WORKSPACES_KEY, JSON.stringify(sanitized));
     }
 
     getIdentity(): WorkspaceIdentity {
@@ -289,8 +295,12 @@ class TeamWorkspacesService {
             const raw = localStorage.getItem(IDENTITY_KEY);
             if (raw) {
                 const parsed = parseJson(raw);
-                if (isRecord(parsed) && typeof parsed.userId === 'string' && typeof parsed.displayName === 'string') {
-                    return parsed;
+                if (isRecord(parsed)) {
+                    const userId = sanitizeNonEmptyString(parsed.userId);
+                    const displayName = sanitizeNonEmptyString(parsed.displayName);
+                    if (userId && displayName) {
+                        return { userId, displayName };
+                    }
                 }
             }
         } catch (error) {
@@ -308,8 +318,8 @@ class TeamWorkspacesService {
     setIdentity(partial: Partial<WorkspaceIdentity>): WorkspaceIdentity {
         const current = this.getIdentity();
         const updated: WorkspaceIdentity = {
-            userId: partial.userId?.trim() || current.userId,
-            displayName: partial.displayName?.trim() || current.displayName,
+            userId: sanitizeNonEmptyString(partial.userId) || current.userId,
+            displayName: sanitizeNonEmptyString(partial.displayName) || current.displayName,
         };
 
         localStorage.setItem(IDENTITY_KEY, JSON.stringify(updated));
@@ -327,7 +337,8 @@ class TeamWorkspacesService {
     }
 
     setActiveWorkspace(workspaceId: string | null): void {
-        if (!workspaceId) {
+        const normalizedWorkspaceId = sanitizeNonEmptyString(workspaceId);
+        if (!normalizedWorkspaceId) {
             localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
             this.logComplianceEvent({
                 category: 'workspace.selection',
@@ -339,13 +350,13 @@ class TeamWorkspacesService {
             return;
         }
 
-        localStorage.setItem(ACTIVE_WORKSPACE_KEY, workspaceId);
+        localStorage.setItem(ACTIVE_WORKSPACE_KEY, normalizedWorkspaceId);
         this.logComplianceEvent({
             category: 'workspace.selection',
             action: 'set_active',
             result: 'info',
             resourceType: 'workspace',
-            resourceId: workspaceId,
+            resourceId: normalizedWorkspaceId,
             details: {},
         });
         this.notify();
@@ -442,10 +453,14 @@ class TeamWorkspacesService {
             throw new Error('Workspace not found');
         }
 
-        workspaces[index] = {
+        const sanitized = sanitizeWorkspace({
             ...workspace,
             updatedAt: Date.now(),
-        };
+        });
+        if (!sanitized) {
+            throw new Error('Workspace payload is invalid');
+        }
+        workspaces[index] = sanitized;
 
         this.saveWorkspaces(workspaces);
         this.notify();
@@ -458,7 +473,10 @@ class TeamWorkspacesService {
 
         const now = Date.now();
         const token = this.generateId();
-        const expiresAt = now + Math.max(1, expiresInHours) * 60 * 60 * 1000;
+        const sanitizedExpiryHours = Number.isFinite(expiresInHours)
+            ? Math.max(1, Math.floor(expiresInHours))
+            : 72;
+        const expiresAt = now + sanitizedExpiryHours * 60 * 60 * 1000;
 
         const invite: WorkspaceInvite = {
             token,
@@ -546,16 +564,24 @@ class TeamWorkspacesService {
     removeInvite(workspaceId: string, token: string): TeamWorkspace {
         const workspace = this.requireWorkspace(workspaceId);
         this.requireRole(workspace, ['admin']);
+        const normalizedToken = sanitizeNonEmptyString(token);
+        if (!normalizedToken) {
+            throw new Error('Invite token is required');
+        }
 
-        workspace.invites = workspace.invites.filter(invite => invite.token !== token);
+        workspace.invites = workspace.invites.filter(invite => invite.token !== normalizedToken);
         return this.saveWorkspace(workspace);
     }
 
     updateMemberRole(workspaceId: string, memberId: string, role: WorkspaceRole): TeamWorkspace {
         const workspace = this.requireWorkspace(workspaceId);
         this.requireRole(workspace, ['admin']);
+        const normalizedMemberId = sanitizeNonEmptyString(memberId);
+        if (!normalizedMemberId) {
+            throw new Error('Member ID is required');
+        }
 
-        const target = workspace.members.find(member => member.id === memberId);
+        const target = workspace.members.find(member => member.id === normalizedMemberId);
         if (!target) {
             throw new Error('Member not found');
         }
@@ -573,7 +599,7 @@ class TeamWorkspacesService {
             result: 'success',
             resourceType: 'workspace',
             resourceId: workspace.id,
-            details: { memberId, role },
+            details: { memberId: normalizedMemberId, role },
         });
         return updated;
     }
@@ -581,8 +607,12 @@ class TeamWorkspacesService {
     removeMember(workspaceId: string, memberId: string): TeamWorkspace {
         const workspace = this.requireWorkspace(workspaceId);
         this.requireRole(workspace, ['admin']);
+        const normalizedMemberId = sanitizeNonEmptyString(memberId);
+        if (!normalizedMemberId) {
+            throw new Error('Member ID is required');
+        }
 
-        const target = workspace.members.find(member => member.id === memberId);
+        const target = workspace.members.find(member => member.id === normalizedMemberId);
         if (!target) {
             throw new Error('Member not found');
         }
@@ -592,7 +622,7 @@ class TeamWorkspacesService {
             throw new Error('Workspace must retain at least one admin');
         }
 
-        workspace.members = workspace.members.filter(member => member.id !== memberId);
+        workspace.members = workspace.members.filter(member => member.id !== normalizedMemberId);
         const updated = this.saveWorkspace(workspace);
         this.logComplianceEvent({
             category: 'workspace.members',
@@ -600,7 +630,7 @@ class TeamWorkspacesService {
             result: 'success',
             resourceType: 'workspace',
             resourceId: workspace.id,
-            details: { memberId },
+            details: { memberId: normalizedMemberId },
         });
         return updated;
     }
@@ -610,7 +640,7 @@ class TeamWorkspacesService {
         this.requireRole(workspace, ['admin', 'member']);
 
         const valid = new Set<string>();
-        templateIds.forEach(id => {
+        sanitizeStringArray(templateIds).forEach(id => {
             if (TemplateService.getTemplate(id)) {
                 valid.add(id);
             }
@@ -642,7 +672,7 @@ class TeamWorkspacesService {
         const workspace = this.requireWorkspace(workspaceId);
         this.requireRole(workspace, ['admin', 'member']);
 
-        workspace.conversationIds = Array.from(new Set(conversationIds.map(id => id.trim()).filter(Boolean)));
+        workspace.conversationIds = sanitizeStringArray(conversationIds);
         const updated = this.saveWorkspace(workspace);
         this.logComplianceEvent({
             category: 'workspace.conversations',
@@ -662,11 +692,11 @@ class TeamWorkspacesService {
         this.requireRole(workspace, ['admin']);
 
         workspace.modelPolicy = {
-            allowedProviders: policy.allowedProviders
-                ? Array.from(new Set(policy.allowedProviders.map(provider => provider.trim()).filter(Boolean)))
+            allowedProviders: typeof policy.allowedProviders !== 'undefined'
+                ? sanitizeStringArray(policy.allowedProviders)
                 : workspace.modelPolicy.allowedProviders,
-            allowedModelIds: policy.allowedModelIds
-                ? Array.from(new Set(policy.allowedModelIds.map(modelId => modelId.trim()).filter(Boolean)))
+            allowedModelIds: typeof policy.allowedModelIds !== 'undefined'
+                ? sanitizeStringArray(policy.allowedModelIds)
                 : workspace.modelPolicy.allowedModelIds,
         };
 

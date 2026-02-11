@@ -1259,6 +1259,197 @@ describe('storage hydration guards', () => {
     });
   });
 
+  test('sanitizes ai/trigger/macro/layout/prompt/template/chaining mutation paths', () => {
+    jest.isolateModules(() => {
+      const { aiAgentsService } = require('../src/renderer/services/aiAgents') as typeof import('../src/renderer/services/aiAgents');
+      const { autoResponsesService } = require('../src/renderer/services/autoResponses') as typeof import('../src/renderer/services/autoResponses');
+      const { triggerActionsService } = require('../src/renderer/services/triggerActions') as typeof import('../src/renderer/services/triggerActions');
+      const { macroRecordingService } = require('../src/renderer/services/macroRecording') as typeof import('../src/renderer/services/macroRecording');
+      const { layoutCustomizationService } = require('../src/renderer/services/layoutCustomization') as typeof import('../src/renderer/services/layoutCustomization');
+      const promptVersioningService = (require('../src/renderer/services/promptVersioning') as typeof import('../src/renderer/services/promptVersioning')).default;
+      const { TemplateService } = require('../src/renderer/services/templates') as typeof import('../src/renderer/services/templates');
+      const promptChainingService = (require('../src/renderer/services/promptChaining') as typeof import('../src/renderer/services/promptChaining')).default;
+
+      const agent = aiAgentsService.createAgent({
+        name: '  Agent One  ',
+        description: '  Does useful work  ',
+        role: '  helper  ',
+        capabilities: [' analyze ', 'analyze', '   '] as unknown as string[],
+        model: '  model-1  ',
+        systemPrompt: '  You are helpful  ',
+        isActive: false,
+      });
+      expect(agent.name).toBe('Agent One');
+      expect(agent.capabilities).toEqual(['analyze']);
+      aiAgentsService.updateAgent(agent.id, {
+        id: 'other-agent-id',
+        name: '  Agent Two  ',
+        capabilities: [' monitor ', 'monitor'] as unknown as string[],
+      } as any);
+      const updatedAgent = aiAgentsService.getAgent(agent.id);
+      expect(updatedAgent?.id).toBe(agent.id);
+      expect(updatedAgent?.name).toBe('Agent Two');
+      expect(updatedAgent?.capabilities).toEqual(['monitor']);
+
+      const response = autoResponsesService.createResponse({
+        name: '  Greeting  ',
+        description: '  Auto greet  ',
+        triggers: [
+          { type: 'contains', value: ' hello ', caseSensitive: false },
+          { type: 'contains', value: 'hello', caseSensitive: false },
+          { type: 'regex', value: '   ' } as any,
+        ],
+        response: '  Hi there  ',
+        enabled: true,
+        priority: 2,
+      });
+      expect(response.name).toBe('Greeting');
+      expect(response.triggers).toHaveLength(1);
+      expect(autoResponsesService.updateResponse(response.id, {
+        id: 'other-response-id',
+        name: '  Greeting Updated  ',
+        triggers: [
+          { type: 'contains', value: ' hi ' },
+          { type: 'contains', value: 'hi' },
+        ],
+      } as any)).toBe(true);
+      const updatedResponse = autoResponsesService.getResponse(response.id);
+      expect(updatedResponse?.id).toBe(response.id);
+      expect(updatedResponse?.name).toBe('Greeting Updated');
+      expect(updatedResponse?.triggers).toHaveLength(1);
+
+      const triggerRule = triggerActionsService.createRule({
+        name: '  Message Threshold  ',
+        description: '  Notify on growth  ',
+        conditions: [{ type: 'message-count', operator: 'greater-than', value: 5 }],
+        actions: [{ type: 'send-notification', config: { title: 'Alert' } }],
+        enabled: true,
+        priority: 1,
+      });
+      expect(triggerRule.name).toBe('Message Threshold');
+      expect(triggerActionsService.updateRule(triggerRule.id, {
+        id: 'other-rule-id',
+        name: '  Message Threshold Updated  ',
+        conditions: [{ type: 'message-count', operator: 'greater-than', value: 7.9 }],
+      } as any)).toBe(true);
+      const updatedRule = triggerActionsService.getRule(triggerRule.id);
+      expect(updatedRule?.id).toBe(triggerRule.id);
+      expect(updatedRule?.name).toBe('Message Threshold Updated');
+      expect(updatedRule?.conditions[0]?.value).toBe(7.9);
+
+      const macro = macroRecordingService.createMacro({
+        name: '  Macro One  ',
+        description: '  Demo macro  ',
+        actions: [
+          { type: 'type', timestamp: 0, data: { text: 'Hello' } },
+          { type: 'unknown', timestamp: 1, data: {} } as any,
+        ],
+      });
+      expect(macro.name).toBe('Macro One');
+      expect(macro.actions).toHaveLength(1);
+      expect(macroRecordingService.updateMacro(macro.id, {
+        id: 'other-macro-id',
+        name: '  Macro Two  ',
+        actions: [
+          { type: 'type', timestamp: 1.8, data: { text: 'Updated' } },
+          { type: 'bad-type', timestamp: 2, data: {} } as any,
+        ],
+      } as any)).toBe(true);
+      const updatedMacro = macroRecordingService.getMacro(macro.id);
+      expect(updatedMacro?.id).toBe(macro.id);
+      expect(updatedMacro?.name).toBe('Macro Two');
+      expect(updatedMacro?.actions).toHaveLength(1);
+      expect(updatedMacro?.actions[0]?.timestamp).toBe(1);
+
+      layoutCustomizationService.resetToDefault();
+      const preset = layoutCustomizationService.createPreset('  Focus  ', '  Clean layout  ');
+      expect(preset.name).toBe('Focus');
+      layoutCustomizationService.updatePanel('main', {
+        id: 'other-panel-id',
+        size: 9999,
+        order: -4,
+      } as any);
+      const layout = layoutCustomizationService.getLayout();
+      const mainPanel = layout.panels.find((panel) => panel.id === 'main');
+      expect(mainPanel?.size).toBe(1000);
+      expect(mainPanel?.order).toBe(0);
+      expect(layout.panels.find((panel) => panel.id === 'other-panel-id')).toBeUndefined();
+
+      const prompt = promptVersioningService.createPrompt('  Prompt One  ', '  Initial content  ', {
+        tags: [' alpha ', 'alpha'] as unknown as string[],
+      });
+      expect(prompt.name).toBe('Prompt One');
+      expect(prompt.tags).toEqual(['alpha']);
+      const secondVersion = promptVersioningService.createVersion(`  ${prompt.id}  `, '  Second content  ', {
+        setActive: false,
+        tags: [' beta ', 'beta'] as unknown as string[],
+      });
+      expect(secondVersion?.promptId).toBe(prompt.id);
+      expect(secondVersion?.tags).toEqual(['beta']);
+      const updatedPrompt = promptVersioningService.updatePrompt(prompt.id, {
+        id: 'other-prompt-id',
+        name: '  Prompt Two  ',
+        tags: [' gamma ', 'gamma'] as unknown as string[],
+      } as any);
+      expect(updatedPrompt?.id).toBe(prompt.id);
+      expect(updatedPrompt?.name).toBe('Prompt Two');
+      expect(updatedPrompt?.tags).toEqual(['gamma']);
+      const updatedVersion = promptVersioningService.updateVersion(prompt.id, secondVersion!.id, {
+        description: '   ',
+        tags: [' delta ', 'delta'] as unknown as string[],
+      });
+      expect(updatedVersion?.description).toBeUndefined();
+      expect(updatedVersion?.tags).toEqual(['delta']);
+
+      const template = TemplateService.createTemplate(
+        '  Template One  ',
+        '  Description  ',
+        '  general  ',
+        [{ role: 'user', content: '  Hello  ' }],
+        '  You are helpful  ',
+        undefined,
+        [' alpha ', 'alpha'] as unknown as string[]
+      );
+      expect(template.name).toBe('Template One');
+      expect(template.category).toBe('general');
+      expect(template.tags).toEqual(['alpha']);
+      const updatedTemplate = TemplateService.updateTemplate(template.id, {
+        id: 'other-template-id',
+        name: '  Template Two  ',
+        tags: [' beta ', 'beta'] as unknown as string[],
+        initialMessages: [{ role: 'assistant', content: '  Updated  ' }] as any,
+      } as any);
+      expect(updatedTemplate?.id).toBe(template.id);
+      expect(updatedTemplate?.name).toBe('Template Two');
+      expect(updatedTemplate?.tags).toEqual(['beta']);
+      expect(updatedTemplate?.initialMessages[0]?.content).toBe('Updated');
+
+      const chain = promptChainingService.createChain(
+        '  Chain One  ',
+        '  Description  ',
+        [{ id: ' step-1 ', name: ' Step 1 ', type: 'prompt', prompt: '  {{input}}  ' }] as any,
+        ' step-1 ',
+        [' alpha ', 'alpha'] as unknown as string[]
+      );
+      expect(chain.name).toBe('Chain One');
+      expect(chain.steps[0]?.id).toBe('step-1');
+      expect(chain.tags).toEqual(['alpha']);
+      const updatedChain = promptChainingService.updateChain(chain.id, {
+        id: 'other-chain-id',
+        name: '  Chain Two  ',
+        steps: [
+          { id: ' step-1 ', name: ' Step 1 ', type: 'prompt', prompt: 'Hello' },
+          { id: ' step-1 ', name: ' Step Duplicate ', type: 'prompt', prompt: 'Duplicate' },
+        ] as any,
+        tags: [' beta ', 'beta'] as unknown as string[],
+      } as any);
+      expect(updatedChain?.id).toBe(chain.id);
+      expect(updatedChain?.name).toBe('Chain Two');
+      expect(updatedChain?.steps).toHaveLength(1);
+      expect(updatedChain?.tags).toEqual(['beta']);
+    });
+  });
+
   test('guards crash recovery, api docs, and rag embedding cache hydration', async () => {
     const validEmbedding = Array.from({ length: 128 }, () => 0.125);
     localStorage.setItem('app_recovery_state', JSON.stringify({

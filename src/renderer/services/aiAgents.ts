@@ -45,7 +45,7 @@ const TASK_TYPES = new Set<AgentTask['type']>(['research', 'analysis', 'generati
 const TASK_STATUSES = new Set<AgentTask['status']>(['pending', 'running', 'completed', 'failed']);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -56,71 +56,129 @@ const parseJson = (raw: string): unknown => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeFiniteNonNegativeInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return null;
+    }
+    return Math.floor(value);
+};
+
 const sanitizeStringArray = (value: unknown): string[] => {
     if (!Array.isArray(value)) {
         return [];
     }
-    return value.filter((entry): entry is string => typeof entry === 'string');
+    const seen = new Set<string>();
+    const result: string[] = [];
+    value.forEach((entry) => {
+        const normalized = sanitizeNonEmptyString(entry);
+        if (!normalized || seen.has(normalized)) {
+            return;
+        }
+        seen.add(normalized);
+        result.push(normalized);
+    });
+    return result;
 };
 
 const sanitizeTask = (value: unknown): AgentTask | null => {
-    if (!isRecord(value)
-        || typeof value.id !== 'string'
-        || typeof value.agentId !== 'string'
-        || !TASK_TYPES.has(value.type as AgentTask['type'])
-        || typeof value.description !== 'string'
-        || !TASK_STATUSES.has(value.status as AgentTask['status'])
-        || typeof value.createdAt !== 'number') {
+    if (!isRecord(value)) {
         return null;
     }
+    const id = sanitizeNonEmptyString(value.id);
+    const agentId = sanitizeNonEmptyString(value.agentId);
+    const description = sanitizeNonEmptyString(value.description);
+    const createdAt = sanitizeFiniteNonNegativeInteger(value.createdAt);
+    if (
+        !id
+        || !agentId
+        || !description
+        || !TASK_TYPES.has(value.type as AgentTask['type'])
+        || !TASK_STATUSES.has(value.status as AgentTask['status'])
+        || createdAt === null
+    ) {
+        return null;
+    }
+    const completedAtCandidate = sanitizeFiniteNonNegativeInteger(value.completedAt);
+    const completedAt = completedAtCandidate !== null
+        ? Math.max(createdAt, completedAtCandidate)
+        : undefined;
 
     return {
-        id: value.id,
-        agentId: value.agentId,
+        id,
+        agentId,
         type: value.type as AgentTask['type'],
-        description: value.description,
+        description,
         parameters: isRecord(value.parameters) ? value.parameters : {},
         status: value.status as AgentTask['status'],
         result: value.result,
-        error: typeof value.error === 'string' ? value.error : undefined,
-        createdAt: value.createdAt,
-        completedAt: typeof value.completedAt === 'number' ? value.completedAt : undefined,
+        error: sanitizeNonEmptyString(value.error) || undefined,
+        createdAt,
+        completedAt,
     };
 };
 
 const sanitizeAgent = (value: unknown): AIAgent | null => {
-    if (!isRecord(value)
-        || typeof value.id !== 'string'
-        || typeof value.name !== 'string'
-        || typeof value.description !== 'string'
-        || typeof value.role !== 'string'
-        || typeof value.model !== 'string'
-        || typeof value.systemPrompt !== 'string'
+    if (!isRecord(value)) {
+        return null;
+    }
+    const id = sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    const description = sanitizeNonEmptyString(value.description);
+    const role = sanitizeNonEmptyString(value.role);
+    const model = sanitizeNonEmptyString(value.model);
+    const systemPrompt = sanitizeNonEmptyString(value.systemPrompt);
+    const createdAt = sanitizeFiniteNonNegativeInteger(value.createdAt);
+    const lastActiveCandidate = sanitizeFiniteNonNegativeInteger(value.lastActive);
+    if (
+        !id
+        || !name
+        || !description
+        || !role
+        || !model
+        || !systemPrompt
         || typeof value.isActive !== 'boolean'
         || !Array.isArray(value.taskQueue)
         || !Array.isArray(value.completedTasks)
-        || typeof value.createdAt !== 'number'
-        || typeof value.lastActive !== 'number') {
+        || createdAt === null
+        || lastActiveCandidate === null
+    ) {
         return null;
     }
+    const sanitizeTaskCollection = (source: unknown[]): AgentTask[] => {
+        const seen = new Set<string>();
+        const tasks: AgentTask[] = [];
+        source.forEach((entry) => {
+            const task = sanitizeTask(entry);
+            if (!task || task.agentId !== id || seen.has(task.id)) {
+                return;
+            }
+            seen.add(task.id);
+            tasks.push(task);
+        });
+        return tasks;
+    };
 
     return {
-        id: value.id,
-        name: value.name,
-        description: value.description,
-        role: value.role,
+        id,
+        name,
+        description,
+        role,
         capabilities: sanitizeStringArray(value.capabilities),
-        model: value.model,
-        systemPrompt: value.systemPrompt,
+        model,
+        systemPrompt,
         isActive: value.isActive,
-        taskQueue: value.taskQueue
-            .map((entry) => sanitizeTask(entry))
-            .filter((entry): entry is AgentTask => entry !== null),
-        completedTasks: value.completedTasks
-            .map((entry) => sanitizeTask(entry))
-            .filter((entry): entry is AgentTask => entry !== null),
-        createdAt: value.createdAt,
-        lastActive: value.lastActive,
+        taskQueue: sanitizeTaskCollection(value.taskQueue),
+        completedTasks: sanitizeTaskCollection(value.completedTasks),
+        createdAt,
+        lastActive: Math.max(createdAt, lastActiveCandidate),
     };
 };
 
@@ -130,9 +188,19 @@ const parseStoredAgents = (raw: string): AIAgent[] => {
         return [];
     }
 
+    const seenIds = new Set<string>();
     return parsed
         .map((entry) => sanitizeAgent(entry))
-        .filter((entry): entry is AIAgent => entry !== null);
+        .filter((entry): entry is AIAgent => {
+            if (!entry) {
+                return false;
+            }
+            if (seenIds.has(entry.id)) {
+                return false;
+            }
+            seenIds.add(entry.id);
+            return true;
+        });
 };
 
 export class AIAgentsService {
@@ -187,7 +255,7 @@ export class AIAgentsService {
      * Create a new AI agent
      */
     createAgent(agent: Omit<AIAgent, 'id' | 'taskQueue' | 'completedTasks' | 'createdAt' | 'lastActive'>): AIAgent {
-        const newAgent: AIAgent = {
+        const candidate: AIAgent = {
             ...agent,
             id: crypto.randomUUID(),
             capabilities: sanitizeStringArray(agent.capabilities),
@@ -196,6 +264,10 @@ export class AIAgentsService {
             createdAt: Date.now(),
             lastActive: Date.now(),
         };
+        const newAgent = sanitizeAgent(candidate);
+        if (!newAgent) {
+            throw new Error('Invalid AI agent configuration');
+        }
 
         this.agents.set(newAgent.id, newAgent);
         this.saveAgents();
@@ -232,6 +304,8 @@ export class AIAgentsService {
             const merged = sanitizeAgent({
                 ...agent,
                 ...updates,
+                id: agent.id,
+                createdAt: agent.createdAt,
                 capabilities: typeof updates.capabilities !== 'undefined'
                     ? sanitizeStringArray(updates.capabilities)
                     : agent.capabilities,
@@ -264,13 +338,16 @@ export class AIAgentsService {
             throw new Error(`Agent ${agentId} not found`);
         }
 
-        const newTask: AgentTask = {
+        const newTask = sanitizeTask({
             ...task,
             id: crypto.randomUUID(),
             agentId,
             status: 'pending',
             createdAt: Date.now(),
-        };
+        });
+        if (!newTask) {
+            throw new Error('Invalid agent task configuration');
+        }
 
         agent.taskQueue.push(newTask);
         agent.lastActive = Date.now();
