@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { TokenLogprob, Model, ChatMessage, ChatSession } from '../../shared/types';
+import { Model, ChatMessage, ChatSession } from '../../shared/types';
 import { HistoryService } from '../services/history';
 import {
     buildOutgoingMessagePatch,
@@ -26,6 +26,7 @@ import {
     loadEnterpriseComplianceService,
     loadWebhookService,
 } from '../lib/useChatLazyServices';
+import type { SelectedTokenContext } from '../lib/chatSelectionTypes';
 
 export interface ApiLogCallback {
     (log: {
@@ -38,12 +39,6 @@ export interface ApiLogCallback {
         error?: string;
         duration?: number;
     }): void;
-}
-
-export interface SelectedTokenContext {
-    logprob: TokenLogprob;
-    messageIndex: number;
-    tokenIndex: number;
 }
 
 export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = true) => {

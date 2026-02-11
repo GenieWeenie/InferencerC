@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../../shared/types';
+import type { SelectedTokenContext } from './chatSelectionTypes';
 
 export interface ExperimentalFeatureMenuItem {
   key: string;
@@ -27,7 +28,7 @@ export interface ChatRowMetadata {
   isShowingComparison: boolean;
   isComparisonPartnerHidden: boolean;
   isBookmarked: boolean;
-  selectedTokenForMessage: any;
+  selectedTokenForMessage: SelectedTokenContext | null;
   messageRating: 'up' | 'down' | undefined;
   isEditingRow: boolean;
   editingContentForRow: string;
@@ -41,7 +42,7 @@ interface BuildChatRowMetadataParams {
   activeSearchMessageIndex: number | undefined;
   comparisonIndex: number | null;
   bookmarkedMessages: Set<number>;
-  selectedToken: any;
+  selectedToken: SelectedTokenContext | null;
   messageRatings: Record<number, 'up' | 'down'>;
   editedMessageContent: string;
   loadedMessageIndices: Set<number>;

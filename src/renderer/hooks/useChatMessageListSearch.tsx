@@ -1,26 +1,29 @@
 import React from 'react';
+import type { ChatMessage } from '../../shared/types';
 import { ChatMessageRow } from '../components/chat/ChatMessageRow';
 import { SearchResultRow } from '../components/chat/ChatSearchPanel';
 import {
     buildSearchResultRows,
     getCachedChatRowMetadata,
+    type ChatRowMetadataCacheState,
     type SearchResultPreviewCacheEntry,
 } from '../lib/chatRenderModels';
 import { getWrappedSearchResultIndex } from '../lib/chatUiModels';
+import type { SelectedTokenContext } from '../lib/chatSelectionTypes';
 
 interface UseChatMessageListSearchParams {
-    history: any[];
+    history: ChatMessage[];
     isLoadingMessages: boolean;
     searchResults: number[];
     currentSearchIndex: number;
     editingMessageIndex: number | null;
     comparisonIndex: number | null;
     bookmarkedMessages: Set<number>;
-    selectedToken: any;
+    selectedToken: SelectedTokenContext | null;
     messageRatings: Record<number, 'up' | 'down'>;
     editedMessageContent: string;
     loadedMessageIndices: Set<number>;
-    rowMetadataCacheRef: React.MutableRefObject<any>;
+    rowMetadataCacheRef: React.MutableRefObject<ChatRowMetadataCacheState>;
     searchResultPreviewCacheRef: React.MutableRefObject<Map<number, SearchResultPreviewCacheEntry>>;
     loadMessageRange: (startIndex: number, endIndex: number) => void;
     setEditedMessageContent: React.Dispatch<React.SetStateAction<string>>;
@@ -34,7 +37,7 @@ interface UseChatMessageListSearchParams {
     handleBranchConversation: (index: number) => void;
     mcpAvailable: boolean;
     handleInsertToFile: (code: string, language: string, filePath: string) => void;
-    setSelectedToken: (value: any) => void;
+    setSelectedToken: React.Dispatch<React.SetStateAction<SelectedTokenContext | null>>;
     setActiveTab: (value: 'inspector' | 'controls' | 'prompts' | 'documents') => void;
     setComparisonIndex: React.Dispatch<React.SetStateAction<number | null>>;
     modelNameById: Map<string, string>;
@@ -167,7 +170,7 @@ export const useChatMessageListSearch = ({
         rowMetadataCacheRef,
     ]);
 
-    const renderItemContent = React.useCallback((index: number, msg: any) => {
+    const renderItemContent = React.useCallback((index: number, msg: ChatMessage) => {
         const rowMetadata = rowMetadataByIndex[index];
         if (!rowMetadata) {
             return null;

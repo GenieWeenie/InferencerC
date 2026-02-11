@@ -5,6 +5,13 @@ import { toast } from 'sonner';
 import SkeletonLoader from '../SkeletonLoader';
 import { calculateEntropy } from '../../lib/chatDisplayUtils';
 import { getMessageActionCapabilities } from '../../lib/chatMessageActions';
+import type {
+    ChatMessage,
+    ImageAttachment,
+    TokenLogprob,
+    ToolCall,
+} from '../../../shared/types';
+import type { SelectedTokenContext } from '../../lib/chatSelectionTypes';
 
 const MessageContent = React.lazy(() => import('../MessageContent'));
 const MessageActionsMenu = React.lazy(() => import('../MessageActionsMenu'));
@@ -25,18 +32,10 @@ const MessageSkeleton: React.FC<{ isUser?: boolean }> = ({ isUser = false }) => 
     );
 };
 
-interface ToolCallEntry {
-    id?: string;
-    function: {
-        name?: string;
-        arguments?: string;
-    };
-}
-
-const EMPTY_TOOL_CALLS: ToolCallEntry[] = [];
+const EMPTY_TOOL_CALLS: ToolCall[] = [];
 
 interface ToolCallsListProps {
-    toolCalls: ToolCallEntry[];
+    toolCalls: ToolCall[];
     animated?: boolean;
 }
 
@@ -63,7 +62,7 @@ interface MessageHoverActionsProps {
     isBookmarked: boolean;
     messageContent: string;
     messageIndex: number;
-    messageRole: string;
+    messageRole: ChatMessage['role'];
     isLoading: boolean;
     onToggleBookmark: () => void;
     onCopy: () => void;
@@ -139,10 +138,10 @@ export const resolveBattleModelName = (
 };
 
 interface LogprobTokenListProps {
-    currentLogprobs: any[];
+    currentLogprobs: TokenLogprob[];
     messageIndex: number;
-    selectedTokenForMessage: any;
-    setSelectedToken: (value: any) => void;
+    selectedTokenForMessage: SelectedTokenContext | null;
+    setSelectedToken: React.Dispatch<React.SetStateAction<SelectedTokenContext | null>>;
     setActiveTab: (value: 'inspector' | 'controls' | 'prompts' | 'documents') => void;
 }
 
@@ -154,7 +153,7 @@ const LogprobTokenList: React.FC<LogprobTokenListProps> = React.memo(({
     setActiveTab,
 }) => (
     <div className="leading-relaxed font-mono text-[15px] animate-in fade-in duration-300">
-        {currentLogprobs.map((lp: any, i: number) => {
+        {currentLogprobs.map((lp, i: number) => {
             if (!lp || typeof lp !== 'object') return null;
             const entropy = calculateEntropy(lp.top_logprobs);
             const isSelected = selectedTokenForMessage?.logprob === lp;
@@ -193,13 +192,13 @@ const LogprobTokenList: React.FC<LogprobTokenListProps> = React.memo(({
 
 export interface ChatMessageRowProps {
     index: number;
-    msg: any;
+    msg: ChatMessage;
     isLoadingMessages: boolean;
     isSearchResult: boolean;
     isCurrentSearchResult: boolean;
     isLastMessage: boolean;
-    previousMessage: any | null;
-    nextMessage: any | null;
+    previousMessage: ChatMessage | null;
+    nextMessage: ChatMessage | null;
     isShowingComparison: boolean;
     isComparisonPartnerHidden: boolean;
     isBookmarked: boolean;
@@ -209,8 +208,8 @@ export interface ChatMessageRowProps {
     handleBranchConversation: (index: number) => void;
     mcpAvailable: boolean;
     handleInsertToFile: (code: string, language: string, filePath: string) => void;
-    selectedTokenForMessage: any;
-    setSelectedToken: (value: any) => void;
+    selectedTokenForMessage: SelectedTokenContext | null;
+    setSelectedToken: React.Dispatch<React.SetStateAction<SelectedTokenContext | null>>;
     setActiveTab: (value: 'inspector' | 'controls' | 'prompts' | 'documents') => void;
     setComparisonIndex: React.Dispatch<React.SetStateAction<number | null>>;
     modelNameById: Map<string, string>;
@@ -277,7 +276,7 @@ export const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
     loadMessageAtIndex,
 }) => {
     const activeChoice = msg.choices?.[msg.selectedChoiceIndex || 0];
-    const currentLogprobs = activeChoice?.logprobs?.content || [];
+    const currentLogprobs: TokenLogprob[] = activeChoice?.logprobs?.content || [];
     const hasLogprobs = Array.isArray(currentLogprobs) && currentLogprobs.length > 0;
     const showMissingLogprobsWarning = msg.role === 'assistant' && !hasLogprobs && isLastMessage;
 
@@ -295,7 +294,7 @@ export const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
         isComparisonPartnerHidden;
 
     const toolCalls = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0
-        ? msg.tool_calls as ToolCallEntry[]
+        ? msg.tool_calls as ToolCall[]
         : EMPTY_TOOL_CALLS;
     const hasToolCalls = toolCalls.length > 0;
     const messageActionCapabilities = React.useMemo(
@@ -573,7 +572,7 @@ export const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                 </React.Suspense>
                                 {msg.images && msg.images.length > 0 && (
                                     <div className="mt-2 flex flex-wrap gap-2">
-                                        {msg.images.map((img: any, imgIdx: number) => (
+                                        {msg.images.map((img: ImageAttachment, imgIdx: number) => (
                                             <a
                                                 key={imgIdx}
                                                 href={img.thumbnailUrl}
@@ -607,7 +606,7 @@ export const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
             )}
             {msg.role === 'assistant' && msg.choices && Array.isArray(msg.choices) && msg.choices.length > 1 && (
                 <div className="mt-2 flex gap-2 overflow-x-auto max-w-full pb-1">
-                    {msg.choices.map((_: any, cIdx: number) => (
+                    {msg.choices.map((_, cIdx: number) => (
                         <button key={cIdx} onClick={() => selectChoice(index, cIdx)} className={`px-2 py-1 text-xs border rounded-md transition-colors whitespace-nowrap ${(msg.selectedChoiceIndex || 0) === cIdx ? 'bg-slate-700 text-white border-slate-600' : 'bg-transparent text-slate-500 border-slate-800 hover:border-slate-600 hover:text-slate-300'}`}>Option {cIdx + 1}</button>
                     ))}
                 </div>

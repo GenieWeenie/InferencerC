@@ -9,12 +9,9 @@ import {
     buildTokenEditUpdate,
     buildUpdatedMessageContent,
 } from '../lib/chatStateGuards';
+import type { SelectedTokenContext } from '../lib/chatSelectionTypes';
 
-export interface SelectedTokenContextLike {
-    logprob: TokenLogprob;
-    messageIndex: number;
-    tokenIndex: number;
-}
+export type SelectedTokenContextLike = SelectedTokenContext;
 
 interface UseChatMessageMutationsParams {
     applyHistoryStatePatch: (patch: {

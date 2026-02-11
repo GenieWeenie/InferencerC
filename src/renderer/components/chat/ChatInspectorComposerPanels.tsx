@@ -1,17 +1,19 @@
 import React from 'react';
 import { Activity, AlertCircle, ChevronRight, Eye, EyeOff, FolderOpen, Github, Globe, X } from 'lucide-react';
 import { toast } from 'sonner';
+import type { ChatMessage } from '../../../shared/types';
 import type { ProjectContext } from '../../services/projectContext';
 import type { PromptSnippet } from '../../hooks/usePrompts';
 import { calculateEntropy } from '../../lib/chatDisplayUtils';
 import { buildInspectorAlternativeRows } from '../../lib/chatUiModels';
+import type { SelectedTokenContext } from '../../lib/chatSelectionTypes';
 
 const SmartSuggestionsPanel = React.lazy(() =>
     import('../SmartSuggestionsPanel').then((mod) => ({ default: mod.SmartSuggestionsPanel }))
 );
 
 interface InspectorTokenSummaryCardProps {
-    selectedToken: any;
+    selectedToken: SelectedTokenContext;
     entropyValue: number;
     onUpdateToken: (value: string) => void;
 }
@@ -117,7 +119,7 @@ const InspectorAlternativeList: React.FC<InspectorAlternativeListProps> = React.
 }, (prev, next) => prev.rows === next.rows);
 
 export interface ChatInspectorTabPanelProps {
-    selectedToken: any;
+    selectedToken: SelectedTokenContext | null;
     onUpdateToken: (messageIndex: number, tokenIndex: number, value: string) => void;
 }
 
@@ -134,6 +136,9 @@ export const ChatInspectorTabPanel: React.FC<ChatInspectorTabPanelProps> = React
         [selectedToken?.logprob?.top_logprobs]
     );
     const handleUpdateToken = React.useCallback((value: string) => {
+        if (!selectedToken) {
+            return;
+        }
         onUpdateToken(selectedToken.messageIndex, selectedToken.tokenIndex, value);
         toast.success('Token updated');
     }, [onUpdateToken, selectedToken]);
@@ -233,7 +238,7 @@ export const ComposerAttachmentsPanel: React.FC<ComposerAttachmentsPanelProps> =
 
 export interface ComposerAuxPanelsProps {
     showSuggestions: boolean;
-    history: any[];
+    history: ChatMessage[];
     onSelectSuggestion: (suggestion: string) => void;
     onCloseSuggestions: () => void;
     prefill: string | null;

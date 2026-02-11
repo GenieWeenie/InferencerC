@@ -1,17 +1,4 @@
 import React from 'react';
-import {
-    Activity,
-    BarChart3,
-    Brain,
-    Check,
-    Code2,
-    FolderOpen,
-    Github,
-    Globe,
-    Settings,
-    Sparkles,
-    Users,
-} from 'lucide-react';
 import { toast } from 'sonner';
 import type {
     ComposerControlPillActionConfig,
@@ -25,6 +12,7 @@ import {
     type ComposerControlPillKey,
     type ComposerControlPillDescriptor,
 } from '../lib/chatUiModels';
+import { resolveComposerControlPillPresentation } from '../lib/chatComposerControlPillStyles';
 
 interface ModelOptionItem {
     id: string;
@@ -356,122 +344,18 @@ export const useChatComposerControlBar = ({
     ]);
 
     const composerControlPillActions = React.useMemo<ComposerControlPillActionConfig[]>(() => {
-        const inactiveClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200';
-        const activePrimaryClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-primary text-white border-primary shadow-[0_0_10px_rgba(59,130,246,0.4)]';
-        const activeBlueClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-blue-500 text-white border-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.4)]';
-        const activeBattleClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-gradient-to-r from-orange-500 to-red-600 text-white border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]';
-        const activeToolsClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-primary text-white border-primary animate-pulse';
-
         return composerControlDescriptors
             .filter((descriptor) => descriptor.visible)
             .map((descriptor) => {
-                const baseAction = {
+                const presentation = resolveComposerControlPillPresentation(descriptor);
+                return {
                     key: descriptor.key,
                     label: descriptor.label,
                     onClick: controlPillActionHandlers[descriptor.key],
-                    title: undefined as string | undefined,
+                    icon: presentation.icon,
+                    className: presentation.className,
+                    title: presentation.title,
                 };
-
-                switch (descriptor.key) {
-                    case 'control-response':
-                        return {
-                            ...baseAction,
-                            icon: descriptor.active
-                                ? <Check size={12} strokeWidth={3} />
-                                : <Settings size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                        };
-                    case 'tools':
-                        return {
-                            ...baseAction,
-                            icon: <Globe size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activeToolsClassName : inactiveClassName,
-                        };
-                    case 'github':
-                        return {
-                            ...baseAction,
-                            icon: <Github size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activeBlueClassName : inactiveClassName,
-                        };
-                    case 'project':
-                        return {
-                            ...baseAction,
-                            icon: <FolderOpen size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activeBlueClassName : inactiveClassName,
-                        };
-                    case 'thinking':
-                        return {
-                            ...baseAction,
-                            icon: <Brain size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                        };
-                    case 'battle':
-                        return {
-                            ...baseAction,
-                            icon: <Users size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activeBattleClassName : inactiveClassName,
-                        };
-                    case 'inspector':
-                        return {
-                            ...baseAction,
-                            icon: <Activity size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                        };
-                    case 'expert-config':
-                        return {
-                            ...baseAction,
-                            icon: <Users size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                        };
-                    case 'variables':
-                        return {
-                            ...baseAction,
-                            icon: <Code2 size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                            title: 'Insert variables like {{date}}, {{time}}, {{user_name}}',
-                        };
-                    case 'json':
-                        return {
-                            ...baseAction,
-                            icon: <Code2 size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                            title: 'Enable JSON output format',
-                        };
-                    case 'stream':
-                        return {
-                            ...baseAction,
-                            icon: <Activity size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                            title: descriptor.active ? 'Disable streaming (get full response at once)' : 'Enable streaming (real-time token display)',
-                        };
-                    case 'analytics':
-                        return {
-                            ...baseAction,
-                            icon: <BarChart3 size={12} strokeWidth={2.5} />,
-                            className: 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white',
-                            title: 'View usage analytics and statistics',
-                        };
-                    case 'recommendations':
-                        return {
-                            ...baseAction,
-                            icon: <Sparkles size={12} strokeWidth={2.5} />,
-                            className: 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white',
-                            title: 'Find relevant conversations (Ctrl+Shift+R)',
-                        };
-                    case 'controls':
-                        return {
-                            ...baseAction,
-                            icon: <Settings size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                            title: 'Toggle Controls Panel',
-                        };
-                    default:
-                        return {
-                            ...baseAction,
-                            icon: null,
-                            className: inactiveClassName,
-                        };
-                }
             });
     }, [composerControlDescriptors, controlPillActionHandlers]);
 

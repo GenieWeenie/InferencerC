@@ -1,16 +1,9 @@
 import React from 'react';
 import { Clock, Plus, X, Globe, Settings, Activity, AlertTriangle, ChevronRight, Check, AlertCircle, Brain, Users, Wrench, Eraser, Download, Search, ChevronUp, ChevronDown, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, Network, HelpCircle, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
-import { AnimatePresence } from 'framer-motion';
 import { ChatComposerShell } from '../components/chat/ChatComposerShell';
 import { ChatControlsTabPanel } from '../components/chat/ChatControlsTabPanel';
-import {
-    ExperimentalFeaturesDropdown,
-    HeaderConnectionStatus,
-    TopHeaderModelUtilityControls,
-    TopHeaderPrimaryActions,
-    TopHeaderSecondaryActions,
-} from '../components/chat/ChatHeaderCluster';
+import { ChatHeaderBar } from '../components/chat/ChatHeaderBar';
 import {
     ChatInspectorTabPanel,
     ComposerAttachmentsPanel,
@@ -19,9 +12,9 @@ import {
 import {
     ComposerActionButtons,
     ComposerControlPills,
-    LongPressActionMenu,
     SidebarTabsHeader,
 } from '../components/chat/ChatInlinePanels';
+import { ChatMessagesViewport } from '../components/chat/ChatMessagesViewport';
 import { ChatOverlaySlots } from '../components/chat/ChatOverlaySlots';
 import { ChatSearchPanel } from '../components/chat/ChatSearchPanel';
 import { ChatSidebar, type ChatSidebarPanels } from '../components/chat/ChatSidebar';
@@ -55,6 +48,7 @@ import { useChatSessionIntegrations } from '../hooks/useChatSessionIntegrations'
 import { useChatSlashPrompts } from '../hooks/useChatSlashPrompts';
 import { useChatStartupRecovery } from '../hooks/useChatStartupRecovery';
 import { useComposerOverlayLayout } from '../hooks/useComposerOverlayLayout';
+import { useChatDerivedViewModels } from '../hooks/useChatDerivedViewModels';
 import { getDiagnosticsStatus } from '../lib/chatDiagnosticsModels';
 import {
     loadActivityLogService,
@@ -77,7 +71,6 @@ import {
 import { useMCP } from '../hooks/useMCP';
 import {
     ChatDiagnosticsPopover,
-    ChatEmptyState,
     ConversationSummaryPanel,
     DocumentChatPanel,
     PromptManager,
@@ -98,6 +91,14 @@ const readPersistedApiLogCount = (): number => {
         return 0;
     }
 };
+
+interface VirtuosoHandle {
+    scrollToIndex: (options: {
+        index: number;
+        align?: 'start' | 'center' | 'end';
+        behavior?: ScrollBehavior;
+    }) => void;
+}
 
 const Chat: React.FC = () => {
     // API logs state (defined before useChat so it can be passed as callback)
@@ -329,7 +330,7 @@ const Chat: React.FC = () => {
         handleRateMessage,
         enableProjectContextFeature,
     } = useChatViewState();
-    const virtuosoRef = React.useRef<any>(null);
+    const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
     const searchResultPreviewCacheRef = React.useRef<Map<number, SearchResultPreviewCacheEntry>>(new Map());
     const rowMetadataCacheRef = React.useRef(createChatRowMetadataCacheState());
     const messageListRef = React.useRef<HTMLDivElement | null>(null);
@@ -434,10 +435,20 @@ const Chat: React.FC = () => {
         executeMcpTool,
     });
 
-    const currentModelObj = React.useMemo(
-        () => availableModels.find(m => m.id === currentModel),
-        [availableModels, currentModel]
-    );
+    const {
+        currentModelObj,
+        currentModelName,
+        currentSessionTitle,
+        contextWindowTokens,
+        messageListFooterHeight,
+    } = useChatDerivedViewModels({
+        availableModels,
+        currentModel,
+        savedSessions,
+        sessionId,
+        isCompactViewport,
+        composerOverlayHeight,
+    });
     const navigateToTab = React.useCallback((tab: 'chat' | 'models' | 'settings') => {
         window.dispatchEvent(new CustomEvent('app:navigate-tab', { detail: { tab } }));
     }, []);
@@ -469,7 +480,7 @@ const Chat: React.FC = () => {
     } = useChatLaunchReadiness({
         connectionStatus,
         currentModel,
-        currentModelLabel: currentModelObj?.name || currentModel,
+        currentModelLabel: currentModelName,
         input,
     });
     const diagnosticsStatus = React.useMemo(
@@ -584,7 +595,6 @@ const Chat: React.FC = () => {
         handleDiagnosticsInsertStarterPrompt,
     ]);
 
-    const contextWindowTokens = currentModelObj?.contextLength || 32768;
     const {
         autoSummarizeContext,
         setAutoSummarizeContext,
@@ -1062,16 +1072,14 @@ const Chat: React.FC = () => {
         setMaxTokens,
         modelNameById,
         currentModelContextLength: currentModelObj?.contextLength,
-        modelName: availableModels.find((model) => model.id === currentModel)?.name || currentModel,
+        modelName: currentModelName,
         sessionId,
-        sessionTitle: savedSessions.find((session) => session.id === sessionId)?.title || 'New Chat',
+        sessionTitle: currentSessionTitle,
         handleTogglePrefill,
         handleToggleUrlInput,
         handleToggleGithubInput,
         handleProjectContextControlClick,
     });
-    const composerBottomInset = isCompactViewport ? 16 : 24;
-    const messageListFooterHeight = Math.max(132, composerOverlayHeight + composerBottomInset + 16);
 
     return (
         <ChatWorkspaceShell
@@ -1097,64 +1105,48 @@ const Chat: React.FC = () => {
                 </>
             )}
             header={(
-                <div className="px-4 py-2 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2 backdrop-blur-sm shadow-sm z-10 flex-wrap">
-                    <TopHeaderPrimaryActions
-                        isCompactViewport={isCompactViewport}
-                        showHistory={showHistory}
-                        onToggleHistory={handleToggleHistoryPanel}
-                        actions={topHeaderPrimaryActions}
-                    />
-                    <ExperimentalFeaturesDropdown actions={experimentalFeatureActions} />
-                    <button
-                        onClick={handleOpenCloudSyncPanel}
-                        title={cloudSyncBadge.title}
-                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-all border border-slate-700 text-xs flex-shrink-0 whitespace-nowrap ${cloudSyncBadge.className}`}
-                    >
-                        <Cloud size={14} /> <span>{cloudSyncBadge.label}</span>
-                    </button>
-                    <TopHeaderSecondaryActions
-                        hasHistory={history.length > 0}
-                        showTreeView={showTreeView}
-                        integrationAvailability={integrationAvailability}
-                        onOpenCodeIntegration={handleOpenCodeIntegration}
-                        onClearChat={handleClearChat}
-                        onOpenExportDialog={handleOpenExportDialog}
-                        onToggleTreeView={handleToggleTreeView}
-                        onExportSessionToObsidian={handleExportSessionToObsidian}
-                        onSaveToNotion={handleSaveSessionToNotion}
-                        onSendToSlack={handleSendSessionToSlack}
-                        onSendToDiscord={handleSendSessionToDiscord}
-                        onSendToEmail={handleSendSessionByEmail}
-                        onOpenCalendarSchedule={handleOpenCalendarSchedule}
-                    />
-                    <TopHeaderModelUtilityControls
-                        battleMode={battleMode}
-                        currentModel={currentModel}
-                        secondaryModel={secondaryModel}
-                        allModelOptionElements={allModelOptionElements}
-                        onCurrentModelChange={handleCurrentModelChange}
-                        onSecondaryModelChange={handleSecondaryModelChange}
-                        showRequestLog={showRequestLog}
-                        onToggleRequestLog={handleToggleRequestLog}
-                        apiLogCount={apiLogCount}
-                        hasHistory={history.length > 0}
-                        showSearch={showSearch}
-                        onToggleSearch={handleToggleSearch}
-                        diagnosticsPanelRef={diagnosticsPanelRef}
-                        diagnosticsButtonRef={diagnosticsButtonRef}
-                        diagnosticsStatusClassName={diagnosticsStatus.className}
-                        diagnosticsStatusLabel={diagnosticsStatus.label}
-                        diagnosticsReady={providerReady && modelReady}
-                        showDiagnosticsPanel={showDiagnosticsPanel}
-                        onToggleDiagnosticsPanel={handleToggleDiagnosticsPanel}
-                        diagnosticsPopover={diagnosticsPopover}
-                    />
-
-                    <HeaderConnectionStatus
-                        localStatus={connectionStatus.local}
-                        remoteStatus={connectionStatus.remote}
-                    />
-                </div>
+                <ChatHeaderBar
+                    isCompactViewport={isCompactViewport}
+                    showHistory={showHistory}
+                    onToggleHistory={handleToggleHistoryPanel}
+                    topHeaderPrimaryActions={topHeaderPrimaryActions}
+                    experimentalFeatureActions={experimentalFeatureActions}
+                    onOpenCloudSyncPanel={handleOpenCloudSyncPanel}
+                    cloudSyncBadge={cloudSyncBadge}
+                    hasHistory={history.length > 0}
+                    showTreeView={showTreeView}
+                    integrationAvailability={integrationAvailability}
+                    onOpenCodeIntegration={handleOpenCodeIntegration}
+                    onClearChat={handleClearChat}
+                    onOpenExportDialog={handleOpenExportDialog}
+                    onToggleTreeView={handleToggleTreeView}
+                    onExportSessionToObsidian={handleExportSessionToObsidian}
+                    onSaveToNotion={handleSaveSessionToNotion}
+                    onSendToSlack={handleSendSessionToSlack}
+                    onSendToDiscord={handleSendSessionToDiscord}
+                    onSendToEmail={handleSendSessionByEmail}
+                    onOpenCalendarSchedule={handleOpenCalendarSchedule}
+                    battleMode={battleMode}
+                    currentModel={currentModel}
+                    secondaryModel={secondaryModel}
+                    allModelOptionElements={allModelOptionElements}
+                    onCurrentModelChange={handleCurrentModelChange}
+                    onSecondaryModelChange={handleSecondaryModelChange}
+                    showRequestLog={showRequestLog}
+                    onToggleRequestLog={handleToggleRequestLog}
+                    apiLogCount={apiLogCount}
+                    showSearch={showSearch}
+                    onToggleSearch={handleToggleSearch}
+                    diagnosticsPanelRef={diagnosticsPanelRef}
+                    diagnosticsButtonRef={diagnosticsButtonRef}
+                    diagnosticsStatusClassName={diagnosticsStatus.className}
+                    diagnosticsStatusLabel={diagnosticsStatus.label}
+                    diagnosticsReady={providerReady && modelReady}
+                    showDiagnosticsPanel={showDiagnosticsPanel}
+                    onToggleDiagnosticsPanel={handleToggleDiagnosticsPanel}
+                    diagnosticsPopover={diagnosticsPopover}
+                    connectionStatus={connectionStatus}
+                />
             )}
             searchPanel={(
                 <ChatSearchPanel
@@ -1208,74 +1200,28 @@ const Chat: React.FC = () => {
                 </div>
             ) : null}
             messagesArea={(
-                <>
-                    <div ref={messageListRef} className="flex-1 overflow-hidden bg-background relative min-w-0 max-w-full">
-                        {swipeSessionIndicator && (
-                            <div className="absolute top-3 right-3 z-20 px-2 py-1 rounded bg-primary/20 border border-primary/40 text-primary text-xs font-semibold">
-                                {swipeSessionIndicator === 'next' ? 'Swiped to next chat' : 'Swiped to previous chat'}
-                            </div>
-                        )}
-                        {history.length === 0 ? (
-                            <React.Suspense fallback={<div className="h-full flex items-center justify-center text-sm text-slate-500">Loading starter workspace...</div>}>
-                                <ChatEmptyState
-                                    showBottomControls={showBottomControls}
-                                    isReady={launchChecklistComplete || hasCompletedLaunchChecklist}
-                                    showLaunchChecklist={shouldShowLaunchChecklist}
-                                    readinessCompletedCount={readinessCompletedCount}
-                                    readinessSteps={readinessSteps}
-                                    onSelectPrompt={setInput}
-                                />
-                            </React.Suspense>
-                        ) : VirtuosoComponent ? (
-                            <VirtuosoComponent
-                                ref={virtuosoRef}
-                                style={{ height: '100%', width: '100%' }}
-                                data={isLoadingMessages ? Array(6).fill(null) : history}
-                                followOutput={(isAtBottom: boolean) => {
-                                    const lastMsg = history[history.length - 1];
-                                    if (lastMsg?.isLoading) return 'smooth';
-                                    return isAtBottom ? 'auto' : false;
-                                }}
-                                overscan={{
-                                    main: 300,
-                                    reverse: 300
-                                }}
-                                increaseViewportBy={{
-                                    top: 200,
-                                    bottom: Math.max(220, messageListFooterHeight)
-                                }}
-                                defaultItemHeight={150}
-                                atBottomThreshold={Math.max(100, Math.floor(messageListFooterHeight * 0.45))}
-                                alignToBottom
-                                className="custom-scrollbar px-6"
-                                totalCount={isLoadingMessages ? 6 : history.length}
-                                initialTopMostItemIndex={isLoadingMessages ? 0 : history.length - 1}
-                                computeItemKey={(index: number, item: any) => isLoadingMessages ? `skeleton-${index}` : `${index}-${item.role}`}
-                                itemContent={renderItemContent}
-                                components={{
-                                    Footer: () => <div style={{ height: `${messageListFooterHeight}px` }} />
-                                }}
-                            />
-                        ) : (
-                            <div className="h-full flex items-center justify-center text-sm text-slate-500">
-                                Loading conversation...
-                            </div>
-                        )}
-                    </div>
-
-                    <AnimatePresence>
-                        {longPressMenu && longPressMessage && (
-                            <LongPressActionMenu
-                                menuRef={longPressMenuRef}
-                                menuPosition={longPressMenu}
-                                messageIndex={longPressMenu.messageIndex}
-                                isBookmarked={isLongPressMessageBookmarked}
-                                capabilities={longPressMessageCapabilities}
-                                onAction={handleLongPressAction}
-                            />
-                        )}
-                    </AnimatePresence>
-                </>
+                <ChatMessagesViewport
+                    messageListRef={messageListRef}
+                    longPressMenuRef={longPressMenuRef}
+                    swipeSessionIndicator={swipeSessionIndicator}
+                    history={history}
+                    isLoadingMessages={isLoadingMessages}
+                    VirtuosoComponent={VirtuosoComponent}
+                    virtuosoRef={virtuosoRef}
+                    messageListFooterHeight={messageListFooterHeight}
+                    renderItemContent={renderItemContent}
+                    showBottomControls={showBottomControls}
+                    emptyStateReady={launchChecklistComplete || hasCompletedLaunchChecklist}
+                    showLaunchChecklist={shouldShowLaunchChecklist}
+                    readinessCompletedCount={readinessCompletedCount}
+                    readinessSteps={readinessSteps}
+                    onSelectPrompt={setInput}
+                    longPressMenu={longPressMenu}
+                    longPressMessage={longPressMessage}
+                    isLongPressMessageBookmarked={isLongPressMessageBookmarked}
+                    longPressMessageCapabilities={longPressMessageCapabilities}
+                    onLongPressAction={handleLongPressAction}
+                />
             )}
             composer={(
                 <ChatComposerShell

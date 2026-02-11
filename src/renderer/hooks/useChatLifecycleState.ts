@@ -102,7 +102,7 @@ export const useChatLifecycleState = ({
 }: UseChatLifecycleStateParams) => {
     const [hasConfiguredMcpServers, setHasConfiguredMcpServers] = React.useState(readHasConfiguredMcpServers);
     const [responsiveConfig, setResponsiveConfig] = React.useState<ResponsiveConfig>(() => getFallbackResponsiveConfig());
-    const [VirtuosoComponent, setVirtuosoComponent] = React.useState<any>(null);
+    const [VirtuosoComponent, setVirtuosoComponent] = React.useState<React.ComponentType<Record<string, unknown>> | null>(null);
     const [isCloudSyncAuthenticated, setIsCloudSyncAuthenticated] = React.useState<boolean>(readCloudSyncAuthSnapshot);
     const [githubConfigured, setGithubConfigured] = React.useState<boolean>(readHasGithubCredentialSnapshot);
     const [integrationAvailability, setIntegrationAvailability] = React.useState<IntegrationAvailability>(EMPTY_INTEGRATION_AVAILABILITY);
@@ -173,7 +173,7 @@ export const useChatLifecycleState = ({
         import('react-virtuoso')
             .then((mod) => {
                 if (cancelled) return;
-                setVirtuosoComponent(() => mod.Virtuoso);
+                setVirtuosoComponent(() => mod.Virtuoso as React.ComponentType<Record<string, unknown>>);
             })
             .catch(() => {
                 // Keep fallback UI if loading fails; app remains usable.
