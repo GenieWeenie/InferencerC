@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import bodyParser from 'body-parser';
 import { MockAdapter } from './adapters/mock';
@@ -38,6 +38,37 @@ const cloudSyncService = new CloudSyncService();
 // Adapters
 const mockAdapter = new MockAdapter();
 const lmStudioAdapter = new LMStudioAdapter('http://localhost:1234');
+
+const getErrorMessage = (
+  error: unknown,
+  fallback: string = 'An unexpected error occurred.'
+): string => {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return fallback;
+};
+
+const hasErrorMessageFragment = (error: unknown, fragment: string): boolean => {
+  return getErrorMessage(error, '').includes(fragment);
+};
+
+const streamToResponse = async (
+  stream: ReadableStream<Uint8Array>,
+  res: Response
+): Promise<void> => {
+  const reader = stream.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      res.write(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+};
 
 // --- Chat Routes ---
 
@@ -90,21 +121,19 @@ app.post('/v1/chat/completions', async (req, res) => {
 
       try {
         const stream = await adapter.chatStream(body);
-        // stream is a Web ReadableStream (from fetch)
-        // We need to pipe it to the Express response (Node Writable)
-
-        // @ts-ignore - Iterate over the stream
-        for await (const chunk of stream) {
-          res.write(chunk);
+        if (!stream) {
+          throw new Error('Adapter returned an empty stream.');
         }
+        await streamToResponse(stream, res);
         res.end();
         logger.info('Chat stream completed', { model: body.model });
         return;
-      } catch (err: any) {
-        logger.error("Error during streaming", { error: err.message });
+      } catch (err: unknown) {
+        const message = getErrorMessage(err, 'Streaming request failed');
+        logger.error("Error during streaming", { error: message });
         // If headers sent, we can't send JSON error, just end.
         if (!res.headersSent) {
-          res.status(500).json({ error: { message: err.message } });
+          res.status(500).json({ error: { message } });
         } else {
           res.end();
         }
@@ -124,15 +153,21 @@ app.post('/v1/chat/completions', async (req, res) => {
 
     logger.info('Chat request completed', { model: body.model, choiceCount: response.choices.length });
     res.json(response);
-  } catch (error: any) {
-    logger.error("Error processing chat request", { error: error.message, stack: error.stack });
-    res.status(500).json({ error: { message: error.message } });
+  } catch (error: unknown) {
+    const message = getErrorMessage(error);
+    logger.error("Error processing chat request", { error: message, stack: error instanceof Error ? error.stack : undefined });
+    res.status(500).json({ error: { message } });
   }
 });
 
 // Add error handling middleware
-app.use((error: any, req: any, res: any, next: any) => {
-  logger.error('Unhandled error in server:', { error: error.message, stack: error.stack, url: req.url });
+app.use((error: unknown, req: Request, res: Response, next: NextFunction) => {
+  void next;
+  logger.error('Unhandled error in server:', {
+    error: getErrorMessage(error),
+    stack: error instanceof Error ? error.stack : undefined,
+    url: req.url
+  });
   res.status(500).json({ error: { message: 'An unexpected error occurred.' } });
 });
 
@@ -183,8 +218,8 @@ app.post('/v1/tools/web-fetch', async (req, res) => {
   try {
     const content = await webService.fetchUrl(url);
     res.json({ content });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+  } catch (err: unknown) {
+    res.status(500).json({ error: getErrorMessage(err, 'Web fetch failed') });
   }
 });
 
@@ -212,8 +247,8 @@ app.post('/v1/cloud-sync/register', (req, res) => {
     const password = String(req.body?.password || '');
     const result = cloudSyncService.register(email, password);
     res.json(result);
-  } catch (error: any) {
-    const message = error?.message || 'Registration failed';
+  } catch (error: unknown) {
+    const message = getErrorMessage(error, 'Registration failed');
     const status = message.includes('exists') ? 409 : 400;
     res.status(status).json({ error: message });
   }
@@ -225,8 +260,8 @@ app.post('/v1/cloud-sync/login', (req, res) => {
     const password = String(req.body?.password || '');
     const result = cloudSyncService.login(email, password);
     res.json(result);
-  } catch (error: any) {
-    const message = error?.message || 'Login failed';
+  } catch (error: unknown) {
+    const message = getErrorMessage(error, 'Login failed');
     const status = message.includes('credentials') ? 401 : 400;
     res.status(status).json({ error: message });
   }
@@ -240,8 +275,8 @@ app.post('/v1/cloud-sync/logout', (req, res) => {
     }
     cloudSyncService.logout(token);
     res.json({ success: true });
-  } catch (error: any) {
-    res.status(400).json({ error: error?.message || 'Logout failed' });
+  } catch (error: unknown) {
+    res.status(400).json({ error: getErrorMessage(error, 'Logout failed') });
   }
 });
 
@@ -250,8 +285,8 @@ app.get('/v1/cloud-sync/profile', (req, res) => {
     const auth = authenticateCloudSync(req.headers.authorization);
     const profile = cloudSyncService.getProfile(auth.accountId);
     res.json(profile);
-  } catch (error: any) {
-    const message = error?.message || 'Unauthorized';
+  } catch (error: unknown) {
+    const message = getErrorMessage(error, 'Unauthorized');
     const status = message.includes('Unauthorized') ? 401 : 400;
     res.status(status).json({ error: message });
   }
@@ -262,8 +297,8 @@ app.post('/v1/cloud-sync/sync', (req, res) => {
     const auth = authenticateCloudSync(req.headers.authorization);
     const response = cloudSyncService.sync(auth.accountId, req.body || {});
     res.json(response);
-  } catch (error: any) {
-    const message = error?.message || 'Sync failed';
+  } catch (error: unknown) {
+    const message = getErrorMessage(error, 'Sync failed');
     const status = message.includes('Unauthorized') ? 401 : 400;
     res.status(status).json({ error: message });
   }
@@ -281,8 +316,8 @@ app.post('/v1/collaboration/sessions', (req, res) => {
 
     const created = collaborationService.createSession(name, hostName || 'Host');
     res.json(created);
-  } catch (error: any) {
-    res.status(500).json({ error: error?.message || 'Failed to create session' });
+  } catch (error: unknown) {
+    res.status(500).json({ error: getErrorMessage(error, 'Failed to create session') });
   }
 });
 
@@ -292,8 +327,8 @@ app.post('/v1/collaboration/sessions/:sessionId/join', (req, res) => {
     const name = String(req.body?.name || '').trim();
     const joined = collaborationService.joinSession(sessionId, name || 'Participant');
     res.json(joined);
-  } catch (error: any) {
-    const message = error?.message || 'Failed to join session';
+  } catch (error: unknown) {
+    const message = getErrorMessage(error, 'Failed to join session');
     const status = message.includes('not found') ? 404 : 400;
     res.status(status).json({ error: message });
   }
@@ -308,8 +343,8 @@ app.post('/v1/collaboration/sessions/:sessionId/leave', (req, res) => {
     }
     const session = collaborationService.leaveSession(sessionId, participantId);
     res.json({ session });
-  } catch (error: any) {
-    const message = error?.message || 'Failed to leave session';
+  } catch (error: unknown) {
+    const message = getErrorMessage(error, 'Failed to leave session');
     const status = message.includes('not found') ? 404 : 400;
     res.status(status).json({ error: message });
   }
@@ -323,8 +358,8 @@ app.get('/v1/collaboration/sessions/:sessionId', (req, res) => {
       : undefined;
     const session = collaborationService.getSession(sessionId, participantId);
     res.json({ session });
-  } catch (error: any) {
-    const message = error?.message || 'Failed to load session';
+  } catch (error: unknown) {
+    const message = getErrorMessage(error, 'Failed to load session');
     const status = message.includes('not found') ? 404 : 400;
     res.status(status).json({ error: message });
   }
@@ -353,8 +388,8 @@ app.get('/v1/collaboration/sessions/:sessionId/events', async (req, res) => {
       timeoutMs
     );
     res.json(payload);
-  } catch (error: any) {
-    const message = error?.message || 'Failed to poll events';
+  } catch (error: unknown) {
+    const message = getErrorMessage(error, 'Failed to poll events');
     const status = message.includes('not found') ? 404 : 400;
     res.status(status).json({ error: message });
   }
@@ -381,8 +416,8 @@ app.post('/v1/collaboration/sessions/:sessionId/presence', (req, res) => {
     });
 
     res.json({ session });
-  } catch (error: any) {
-    const message = error?.message || 'Failed to update presence';
+  } catch (error: unknown) {
+    const message = getErrorMessage(error, 'Failed to update presence');
     const status = message.includes('not found') ? 404 : 400;
     res.status(status).json({ error: message });
   }
@@ -400,8 +435,8 @@ app.post('/v1/collaboration/sessions/:sessionId/messages', (req, res) => {
 
     const message = collaborationService.addMessage(sessionId, participantId, content);
     res.json({ message });
-  } catch (error: any) {
-    const message = error?.message || 'Failed to add message';
+  } catch (error: unknown) {
+    const message = getErrorMessage(error, 'Failed to add message');
     const status = message.includes('not found') ? 404 : 400;
     res.status(status).json({ error: message });
   }
@@ -428,8 +463,8 @@ app.put('/v1/collaboration/sessions/:sessionId/messages/:messageId', (req, res) 
     );
 
     res.json(result);
-  } catch (error: any) {
-    const message = error?.message || 'Failed to edit message';
+  } catch (error: unknown) {
+    const message = getErrorMessage(error, 'Failed to edit message');
     const status = message.includes('not found') ? 404 : 400;
     res.status(status).json({ error: message });
   }
@@ -447,9 +482,9 @@ app.post('/v1/collaboration/sessions/:sessionId/participants/:participantId/kick
 
     const session = collaborationService.kickParticipant(sessionId, requesterId, targetId);
     res.json({ session });
-  } catch (error: any) {
-    const message = error?.message || 'Failed to remove participant';
-    const status = message.includes('Only the host') ? 403 : message.includes('not found') ? 404 : 400;
+  } catch (error: unknown) {
+    const message = getErrorMessage(error, 'Failed to remove participant');
+    const status = hasErrorMessageFragment(error, 'Only the host') ? 403 : message.includes('not found') ? 404 : 400;
     res.status(status).json({ error: message });
   }
 });

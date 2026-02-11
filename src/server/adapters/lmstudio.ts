@@ -1,5 +1,17 @@
 import { Model, ModelRuntimeAdapter, ChatRequest, ChatResponse } from '../../shared/types';
 
+type LMStudioMessage = ChatResponse['choices'][number]['message'] & {
+  reasoning_content?: string | null;
+};
+
+type LMStudioChoice = Omit<ChatResponse['choices'][number], 'message'> & {
+  message: LMStudioMessage;
+};
+
+type LMStudioResponse = Omit<ChatResponse, 'choices'> & {
+  choices: LMStudioChoice[];
+};
+
 export class LMStudioAdapter implements ModelRuntimeAdapter {
   private baseUrl: string;
 
@@ -73,15 +85,16 @@ export class LMStudioAdapter implements ModelRuntimeAdapter {
         throw new Error(`LM Studio Error: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const rawData: unknown = await response.json();
+      const data = rawData as LMStudioResponse;
 
       // NORMALIZATION: Handle "reasoning_content" for DeepSeek/GLM models
       // If content is empty but reasoning exists, or just to show reasoning.
-      data.choices = data.choices.map((c: any) => {
+      data.choices = data.choices.map((c) => {
         let finalContent = c.message.content || "";
 
         // If there is reasoning content, prepend it block-quoted
-        if (c.message.reasoning_content) {
+        if (typeof c.message.reasoning_content === 'string' && c.message.reasoning_content.length > 0) {
           finalContent = `> **Thinking Process:**\n> ${c.message.reasoning_content.replace(/\n/g, '\n> ')}\n\n${finalContent}`;
         }
 
@@ -106,7 +119,7 @@ export class LMStudioAdapter implements ModelRuntimeAdapter {
     }
   }
 
-  async chatStream(request: ChatRequest): Promise<any> {
+  async chatStream(request: ChatRequest): Promise<ReadableStream<Uint8Array> | null> {
     const payload = {
       ...request,
       stream: true

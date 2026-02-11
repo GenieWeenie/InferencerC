@@ -81,8 +81,9 @@ export class WebService {
 
       // Limit size to avoid context overflow (e.g. 10k chars)
       return markdown.slice(0, 15000);
-    } catch (err: any) {
-      throw new Error(`Failed to fetch ${url}: ${err.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to fetch ${url}: ${message}`);
     }
   }
 }

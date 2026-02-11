@@ -1,5 +1,22 @@
 import { Model } from '../../shared/types';
 
+type ModelLike = Partial<Model> & Record<string, unknown>;
+type ConfigLike = {
+  models?: unknown;
+  defaultModel?: unknown;
+};
+
+const MODEL_TYPES: Model['type'][] = ['local-folder', 'remote-endpoint'];
+const MODEL_STATUSES: Model['status'][] = ['loaded', 'unloaded', 'loading', 'error'];
+const MODEL_ADAPTERS: Model['adapter'][] = ['mock', 'lm-studio', 'llama-cpp'];
+
+const asModelLike = (value: unknown): ModelLike => {
+  if (value && typeof value === 'object') {
+    return value as ModelLike;
+  }
+  return {};
+};
+
 /**
  * Configuration validation service
  * Provides methods to validate configuration objects
@@ -57,16 +74,17 @@ export class ConfigValidator {
    * @param config The configuration to validate
    * @returns Validation result with success flag and errors
    */
-  static validateConfig(config: any): { success: boolean; errors: string[] } {
+  static validateConfig(config: unknown): { success: boolean; errors: string[] } {
+    const configLike = (config && typeof config === 'object') ? (config as ConfigLike) : {};
     const errors: string[] = [];
 
     // Validate models array
-    if (!config.models || !Array.isArray(config.models)) {
+    if (!configLike.models || !Array.isArray(configLike.models)) {
       errors.push('Configuration must include a "models" array');
     } else {
       // Validate each model
-      config.models.forEach((model: any, index: number) => {
-        const modelValidation = this.validateModel(model);
+      configLike.models.forEach((model, index: number) => {
+        const modelValidation = this.validateModel(asModelLike(model) as Model);
         if (!modelValidation.success) {
           errors.push(`Model at index ${index} is invalid: ${modelValidation.errors.join(', ')}`);
         }
@@ -74,7 +92,7 @@ export class ConfigValidator {
     }
 
     // Validate optional defaultModel
-    if (config.defaultModel !== undefined && typeof config.defaultModel !== 'string') {
+    if (configLike.defaultModel !== undefined && typeof configLike.defaultModel !== 'string') {
       errors.push('Configuration defaultModel must be a string if provided');
     }
 
@@ -89,36 +107,37 @@ export class ConfigValidator {
    * @param model The model to sanitize
    * @returns Sanitized model
    */
-  static sanitizeModel(model: any): Partial<Model> {
+  static sanitizeModel(model: unknown): Partial<Model> {
+    const modelLike = asModelLike(model);
     const sanitized: Partial<Model> = {};
 
     // Only copy valid properties
-    if (model.id && typeof model.id === 'string') {
-      sanitized.id = model.id;
+    if (modelLike.id && typeof modelLike.id === 'string') {
+      sanitized.id = modelLike.id;
     }
 
-    if (model.name && typeof model.name === 'string') {
-      sanitized.name = model.name;
+    if (modelLike.name && typeof modelLike.name === 'string') {
+      sanitized.name = modelLike.name;
     }
 
-    if (model.pathOrUrl && typeof model.pathOrUrl === 'string') {
-      sanitized.pathOrUrl = model.pathOrUrl;
+    if (modelLike.pathOrUrl && typeof modelLike.pathOrUrl === 'string') {
+      sanitized.pathOrUrl = modelLike.pathOrUrl;
     }
 
-    if (model.type && ['local-folder', 'remote-endpoint'].includes(model.type)) {
-      sanitized.type = model.type;
+    if (typeof modelLike.type === 'string' && MODEL_TYPES.includes(modelLike.type as Model['type'])) {
+      sanitized.type = modelLike.type as Model['type'];
     }
 
-    if (model.status && ['loaded', 'unloaded', 'loading', 'error'].includes(model.status)) {
-      sanitized.status = model.status;
+    if (typeof modelLike.status === 'string' && MODEL_STATUSES.includes(modelLike.status as Model['status'])) {
+      sanitized.status = modelLike.status as Model['status'];
     }
 
-    if (model.adapter && ['mock', 'lm-studio', 'llama-cpp'].includes(model.adapter)) {
-      sanitized.adapter = model.adapter;
+    if (typeof modelLike.adapter === 'string' && MODEL_ADAPTERS.includes(modelLike.adapter as Model['adapter'])) {
+      sanitized.adapter = modelLike.adapter as Model['adapter'];
     }
 
-    if (typeof model.contextLength === 'number' && model.contextLength > 0) {
-      sanitized.contextLength = model.contextLength;
+    if (typeof modelLike.contextLength === 'number' && modelLike.contextLength > 0) {
+      sanitized.contextLength = modelLike.contextLength;
     }
 
     return sanitized;

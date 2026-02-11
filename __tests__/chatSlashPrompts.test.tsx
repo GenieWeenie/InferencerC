@@ -26,13 +26,12 @@ describe('useChatSlashPrompts', () => {
             setInput,
         }));
 
-        const focus = jest.fn();
+        const textarea = document.createElement('textarea');
+        textarea.selectionEnd = 3;
+        const focus = jest.spyOn(textarea, 'focus').mockImplementation(() => {});
         act(() => {
             result.current.setSlashMatch({ query: 'gr', index: 0 });
-            (result.current.textareaRef as React.MutableRefObject<any>).current = {
-                selectionEnd: 3,
-                focus,
-            };
+            result.current.textareaRef.current = textarea;
         });
 
         expect(result.current.filteredPrompts).toHaveLength(1);
@@ -45,5 +44,6 @@ describe('useChatSlashPrompts', () => {
 
         expect(setInput).toHaveBeenCalled();
         expect(focus).toHaveBeenCalled();
+        focus.mockRestore();
     });
 });

@@ -52,7 +52,7 @@ export class Logger {
    * @param message The message to log
    * @param meta Optional metadata to include
    */
-  private log(level: LogLevel, message: string, meta?: any): void {
+  private log(level: LogLevel, message: string, meta?: unknown): void {
     if (!this.enabled || this.levelToInt(level) < this.levelToInt(this.logLevel)) {
       return;
     }
@@ -111,7 +111,7 @@ export class Logger {
    * @param message The message to log
    * @param meta Optional metadata to include
    */
-  debug(message: string, meta?: any): void {
+  debug(message: string, meta?: unknown): void {
     this.log(LogLevel.DEBUG, message, meta);
   }
 
@@ -120,7 +120,7 @@ export class Logger {
    * @param message The message to log
    * @param meta Optional metadata to include
    */
-  info(message: string, meta?: any): void {
+  info(message: string, meta?: unknown): void {
     this.log(LogLevel.INFO, message, meta);
   }
 
@@ -129,7 +129,7 @@ export class Logger {
    * @param message The message to log
    * @param meta Optional metadata to include
    */
-  warn(message: string, meta?: any): void {
+  warn(message: string, meta?: unknown): void {
     this.log(LogLevel.WARN, message, meta);
   }
 
@@ -138,7 +138,7 @@ export class Logger {
    * @param message The message to log
    * @param meta Optional metadata to include
    */
-  error(message: string, meta?: any): void {
+  error(message: string, meta?: unknown): void {
     this.log(LogLevel.ERROR, message, meta);
   }
 

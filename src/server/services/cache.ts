@@ -15,7 +15,7 @@ export interface CacheEntry<T> {
  */
 export class CacheService {
   /** Internal map to store cache entries */
-  private cache: Map<string, CacheEntry<any>> = new Map();
+  private cache: Map<string, CacheEntry<unknown>> = new Map();
 
   /**
    * Get a value from the cache
@@ -34,7 +34,7 @@ export class CacheService {
       return undefined;
     }
 
-    return entry.value;
+    return entry.value as T;
   }
 
   /**

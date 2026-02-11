@@ -89,7 +89,12 @@ export interface ModelRuntimeAdapter {
   loadModel(model: Model): Promise<void>;
   unloadModel(model: Model): Promise<void>;
   chat(request: ChatRequest): Promise<ChatResponse>;
-  chatStream?(request: ChatRequest): Promise<any>;
+  chatStream?(request: ChatRequest): Promise<ReadableStream<Uint8Array> | null>;
+}
+
+export interface ConversationTreeNode {
+  branches?: ConversationTreeNode[];
+  [key: string]: unknown;
 }
 
 export interface ChatMessage extends Message {
@@ -123,7 +128,7 @@ export interface ChatSession {
   batchSize?: number;
   encrypted?: boolean;
   encryptedHash?: string;
-  conversationTree?: any;
+  conversationTree?: ConversationTreeNode;
   usesTreeStructure?: boolean;
 }
 

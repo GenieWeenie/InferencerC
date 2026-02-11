@@ -54,9 +54,7 @@ export class StatsService {
     let total = 0;
     const cpus = os.cpus();
     for (const cpu of cpus) {
-      for (const type in cpu.times) {
-        total += (cpu.times as any)[type];
-      }
+      total += Object.values(cpu.times).reduce((sum, value) => sum + value, 0);
       idle += cpu.times.idle;
     }
     return { idle, total };

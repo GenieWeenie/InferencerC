@@ -2,7 +2,9 @@
  * @jest-environment jsdom
  */
 import { renderHook } from '@testing-library/react';
+import type { RefObject } from 'react';
 import { useChatDevMonitors } from '../src/renderer/hooks/useChatDevMonitors';
+import type { ChatVirtuosoHandle } from '../src/renderer/lib/chatVirtuosoTypes';
 
 describe('useChatDevMonitors', () => {
     beforeEach(() => {
@@ -28,11 +30,12 @@ describe('useChatDevMonitors', () => {
     it('attaches scroll listener and logs memory usage on interval', () => {
         const scrollerElement = document.createElement('div');
         const addEventListenerSpy = jest.spyOn(scrollerElement, 'addEventListener');
-        const virtuosoRef = {
+        const virtuosoRef: RefObject<ChatVirtuosoHandle | null> = {
             current: {
+                scrollToIndex: jest.fn(),
                 getScrollerElement: () => scrollerElement,
             },
-        } as any;
+        };
 
         renderHook(() => useChatDevMonitors({
             enabled: true,

@@ -22,6 +22,25 @@ export interface DownloadStatus {
 
 const activeDownloads: Record<string, DownloadStatus> = {};
 
+interface HuggingFaceModelSearchResult {
+  id: string;
+  modelId?: string;
+  [key: string]: unknown;
+}
+
+interface HuggingFaceRepoFile {
+  path: string;
+  [key: string]: unknown;
+}
+
+const isHuggingFaceRepoFile = (value: unknown): value is HuggingFaceRepoFile => {
+  return Boolean(value && typeof value === 'object' && typeof (value as { path?: unknown }).path === 'string');
+};
+
+const getErrorMessage = (error: unknown): string => {
+  return error instanceof Error ? error.message : String(error);
+};
+
 /**
  * Service class for managing model downloads from external sources
  * Handles searching, downloading, and tracking the status of model downloads
@@ -55,7 +74,7 @@ export class ModelDownloadService {
   async searchHuggingFace(query: string) {
     // Create a cache key based on the query
     const cacheKey = `hf-search-${query}`;
-    const cachedResult = cacheService.get<any[]>(cacheKey);
+    const cachedResult = cacheService.get<HuggingFaceModelSearchResult[]>(cacheKey);
     
     if (cachedResult) {
       console.log(`[ModelDownloadService] Returning cached search results for query: ${query}`);
@@ -65,12 +84,13 @@ export class ModelDownloadService {
     const url = `https://huggingface.co/api/models?search=${encodeURIComponent(query)}&filter=gguf&limit=10&full=true`;
     try {
       const res = await fetch(url);
-      const data = await res.json();
+      const data: unknown = await res.json();
+      const parsed = Array.isArray(data) ? data as HuggingFaceModelSearchResult[] : [];
       
       // Cache the results for 10 minutes
-      cacheService.set(cacheKey, data, 10 * 60 * 1000);
+      cacheService.set(cacheKey, parsed, 10 * 60 * 1000);
       
-      return data;
+      return parsed;
     } catch (err) {
       console.error("HF Search failed:", err);
       return [];
@@ -178,9 +198,10 @@ export class ModelDownloadService {
     const url = `https://huggingface.co/api/models/${repoId}/tree/main`;
     try {
         const res = await fetch(url);
-        const files: any[] = await res.json();
+        const files: unknown = await res.json();
+        const parsedFiles = Array.isArray(files) ? files.filter(isHuggingFaceRepoFile) : [];
         // Filter for .gguf files
-        return files.filter((f: any) => f.path.endsWith('.gguf'));
+        return parsedFiles.filter((file) => file.path.endsWith('.gguf'));
     } catch (err) {
         console.error("Failed to fetch repo files:", err);
         return [];
@@ -218,6 +239,7 @@ export class ModelDownloadService {
    */
   private async downloadWithFetch(url: string, destPath: string, id: string, fileName: string, modelName: string, repoId: string) {
       try {
+        void repoId;
         const res = await fetch(url);
         if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
 
@@ -225,13 +247,20 @@ export class ModelDownloadService {
         let downloaded = 0;
 
         const fileStream = fs.createWriteStream(destPath);
-        // @ts-ignore - ReadableStream iterator
-        for await (const chunk of res.body) {
-            fileStream.write(chunk);
-            downloaded += chunk.length;
+        const reader = res.body.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (!value) continue;
+            fileStream.write(value);
+            downloaded += value.length;
             if (totalSize > 0) {
                 activeDownloads[id].progress = Math.round((downloaded / totalSize) * 100);
             }
+          }
+        } finally {
+          reader.releaseLock();
         }
         fileStream.end();
 
@@ -250,9 +279,9 @@ export class ModelDownloadService {
           });
         }
 
-      } catch (err: any) {
+      } catch (err: unknown) {
           activeDownloads[id].status = 'error';
-          activeDownloads[id].error = err.message;
+          activeDownloads[id].error = getErrorMessage(err);
       }
   }
 
