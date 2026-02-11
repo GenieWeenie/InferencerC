@@ -22,8 +22,6 @@ import {
     ComposerControlPills,
     LongPressActionMenu,
     SidebarTabsHeader,
-    type ComposerControlPillActionConfig,
-    type ComposerVariableContext,
     type SidebarTab,
 } from '../components/chat/ChatInlinePanels';
 import { ChatMessageRow } from '../components/chat/ChatMessageRow';
@@ -42,12 +40,16 @@ import { usePrompts } from '../hooks/usePrompts';
 import { useConversationTree } from '../hooks/useConversationTree';
 import { useChatComposerInteractions } from '../hooks/useChatComposerInteractions';
 import { useChatContextOptimizer } from '../hooks/useChatContextOptimizer';
+import { useChatComposerControlBar } from '../hooks/useChatComposerControlBar';
 import { useChatDiagnosticsPanel } from '../hooks/useChatDiagnosticsPanel';
+import { useChatGestureInteractions } from '../hooks/useChatGestureInteractions';
 import { useChatHeaderActions } from '../hooks/useChatHeaderActions';
 import { useChatKeyboardController } from '../hooks/useChatKeyboardController';
-import { useLongPress, usePinchZoom, useSwipeNavigation } from '../hooks/useGestures';
+import { useChatMessageActionsController } from '../hooks/useChatMessageActionsController';
+import { useChatHeaderUtilityControls } from '../hooks/useChatHeaderUtilityControls';
 import { useChatMessageListSearch } from '../hooks/useChatMessageListSearch';
 import { formatPerfMs, useChatPerfBenchmarks } from '../hooks/useChatPerfBenchmarks';
+import { useChatSendPipeline } from '../hooks/useChatSendPipeline';
 import { useChatSessionIntegrations } from '../hooks/useChatSessionIntegrations';
 import { useChatSlashPrompts } from '../hooks/useChatSlashPrompts';
 import { buildReadinessSteps, getDiagnosticsStatus } from '../lib/chatDiagnosticsModels';
@@ -64,16 +66,7 @@ import {
 import {
     type ChatMessageActionCapabilities,
     getMessageActionCapabilities,
-    isLongPressActionAllowed,
-    type ChatMessageAction,
 } from '../lib/chatMessageActions';
-import {
-    buildComposerControlPillDescriptors,
-    type ComposerControlPillDescriptor,
-    type ComposerControlPillKey,
-    getMaxTokensSliderConfig,
-    toggleToolNameInSet,
-} from '../lib/chatUiModels';
 import { useMCP } from '../hooks/useMCP';
 import type { UsageStatsRecord } from '../services/analyticsStore';
 import type { ProjectContext } from '../services/projectContext';
@@ -279,8 +272,6 @@ const loadActivityLogService = async (): Promise<ActivityLogServiceType> => {
     }
     return activityLogServicePromise;
 };
-
-const mightContainPromptVariables = (text: string): boolean => /{{[^{}]+}}/.test(text);
 
 const readPersistedProjectContextFeatureEnabled = (): boolean => {
     try {
@@ -548,7 +539,6 @@ const Chat: React.FC = () => {
     const memoryMonitorInterval = React.useRef<NodeJS.Timeout | null>(null);
     const lastMemoryWarning = React.useRef<number>(0);
 
-    const [bookmarkedMessages, setBookmarkedMessages] = React.useState<Set<number>>(new Set());
     const [hasCompletedLaunchChecklist, setHasCompletedLaunchChecklist] = React.useState<boolean>(() => {
         return localStorage.getItem('chat_launch_checklist_completed') === '1';
     });
@@ -633,13 +623,6 @@ const Chat: React.FC = () => {
     const composerContainerRef = React.useRef<HTMLDivElement | null>(null);
     const longPressMenuRef = React.useRef<HTMLDivElement | null>(null);
 
-    const [conversationFontSize, setConversationFontSize] = React.useState<number>(() => {
-        const stored = Number(localStorage.getItem('chat_font_size'));
-        return Number.isFinite(stored) && stored > 0 ? stored : 16;
-    });
-    const [longPressMenu, setLongPressMenu] = React.useState<{ messageIndex: number; x: number; y: number } | null>(null);
-    const [swipeSessionIndicator, setSwipeSessionIndicator] = React.useState<'previous' | 'next' | null>(null);
-    const swipeSessionTimerRef = React.useRef<number | null>(null);
     const [composerOverlayHeight, setComposerOverlayHeight] = React.useState<number>(showBottomControls ? 300 : 196);
 
     // Initialize conversation tree only when branching is enabled.
@@ -1369,58 +1352,22 @@ const Chat: React.FC = () => {
         persistProjectContextFeatureEnabled(true);
     }, []);
 
-    // Wrapper for sendMessage that processes variables and includes project context
-    const sendMessageWithContext = React.useCallback(async () => {
-        let textToSend = input;
-        let hasChanges = false;
-
-        // 1. Process Prompt Variables
-        if (mightContainPromptVariables(textToSend)) {
-            const promptVariableService = await loadPromptVariableService();
-            if (promptVariableService.hasVariables(textToSend)) {
-                try {
-                    const processed = await promptVariableService.processText(textToSend, {
-                        modelId: currentModel,
-                        modelName: availableModels.find(m => m.id === currentModel)?.name,
-                        sessionId: sessionId,
-                        sessionTitle: savedSessions.find(s => s.id === sessionId)?.title,
-                        messageCount: history.length,
-                        userName: promptVariableService.getUserName()
-                    });
-                    if (processed !== textToSend) {
-                        textToSend = processed;
-                        hasChanges = true;
-                    }
-                } catch (e) {
-                    console.error("Failed to process variables", e);
-                }
-            }
-        }
-
-        // 2. Add Project Context
-        if (projectContext && includeContextInMessages) {
-            const projectContextService = await loadProjectContextService();
-            const contextSummary = projectContextService.getContextSummary(10);
-            if (contextSummary) {
-                textToSend += contextSummary;
-                hasChanges = true;
-            }
-        }
-
-        const sendOptions = buildContextSendOptions(textToSend);
-
-        if (hasChanges) {
-            setInput(textToSend);
-            // Allow state to update before sending
-            setTimeout(() => {
-                beginPerfBenchmark(textToSend);
-                sendMessage(sendOptions);
-            }, 100);
-        } else {
-            beginPerfBenchmark(textToSend);
-            sendMessage(sendOptions);
-        }
-    }, [input, projectContext, includeContextInMessages, sendMessage, currentModel, availableModels, sessionId, savedSessions, history, buildContextSendOptions, beginPerfBenchmark]);
+    const { sendMessageWithContext } = useChatSendPipeline({
+        input,
+        setInput,
+        projectContext,
+        includeContextInMessages,
+        sendMessage,
+        currentModel,
+        availableModels,
+        sessionId,
+        savedSessions,
+        historyLength: history.length,
+        buildContextSendOptions,
+        beginPerfBenchmark,
+        loadPromptVariableService,
+        loadProjectContextService,
+    });
 
     // Project Context subscription (lazily enabled when the feature is used)
     React.useEffect(() => {
@@ -1579,7 +1526,13 @@ const Chat: React.FC = () => {
             setIsLoadingMessages(false);
         }, 300);
     }, [loadSession]);
-    const latestMessageActionsRef = React.useRef({
+    const {
+        handleEditMessage,
+        handleSaveEdit,
+        handleCancelEdit,
+        handleRegenerateResponse,
+        handleBranchConversation,
+    } = useChatMessageActionsController({
         history,
         sessionId,
         currentModel,
@@ -1589,149 +1542,10 @@ const Chat: React.FC = () => {
         sendMessageWithContext,
         replaceHistory,
         truncateHistory,
+        setEditingMessageIndex,
+        setEditedMessageContent,
+        handleLoadSession,
     });
-
-    React.useEffect(() => {
-        latestMessageActionsRef.current = {
-            history,
-            sessionId,
-            currentModel,
-            expertMode,
-            thinkingEnabled,
-            editedMessageContent,
-            sendMessageWithContext,
-            replaceHistory,
-            truncateHistory,
-        };
-    }, [
-        history,
-        sessionId,
-        currentModel,
-        expertMode,
-        thinkingEnabled,
-        editedMessageContent,
-        sendMessageWithContext,
-        replaceHistory,
-        truncateHistory,
-    ]);
-
-    // Message Actions Handlers
-    const handleEditMessage = React.useCallback((index: number) => {
-        const message = latestMessageActionsRef.current.history[index];
-        if (message && message.role === 'user') {
-            setEditingMessageIndex(index);
-            setEditedMessageContent(message.content || '');
-        }
-    }, []);
-
-    const handleSaveEdit = React.useCallback((index: number) => {
-        const {
-            history: currentHistory,
-            editedMessageContent: editContent,
-            replaceHistory: applyHistoryReplace,
-        } = latestMessageActionsRef.current;
-        if (editContent.trim() === '') {
-            toast.error('Message cannot be empty');
-            return;
-        }
-
-        if (!currentHistory[index]) {
-            return;
-        }
-
-        const nextHistory = currentHistory.slice(0, index + 1);
-        nextHistory[index] = {
-            ...nextHistory[index],
-            content: editContent,
-        };
-        applyHistoryReplace(nextHistory);
-
-        setEditingMessageIndex(null);
-        setEditedMessageContent('');
-        toast.success('Message updated. Regenerating response...');
-
-        setTimeout(() => {
-            void latestMessageActionsRef.current.sendMessageWithContext();
-        }, 100);
-    }, [setEditedMessageContent]);
-
-    const handleCancelEdit = React.useCallback(() => {
-        setEditingMessageIndex(null);
-        setEditedMessageContent('');
-    }, [setEditedMessageContent]);
-
-    const handleRegenerateResponse = React.useCallback((index: number) => {
-        const {
-            history: currentHistory,
-            truncateHistory: applyHistoryTruncate,
-        } = latestMessageActionsRef.current;
-        if (index < 0 || index > currentHistory.length) {
-            return;
-        }
-
-        if (index < currentHistory.length) {
-            applyHistoryTruncate(index);
-        }
-
-        toast.info('Regenerating response...');
-        setTimeout(() => {
-            void latestMessageActionsRef.current.sendMessageWithContext();
-        }, 100);
-    }, []);
-
-    const handleBranchConversation = React.useCallback((index: number) => {
-        const {
-            history: currentHistory,
-            sessionId: currentSessionId,
-            currentModel: currentModelId,
-            expertMode: currentExpertMode,
-            thinkingEnabled: currentThinkingEnabled,
-        } = latestMessageActionsRef.current;
-
-        // Create a new session with history up to this point
-        const branchHistory = currentHistory.slice(0, index + 1);
-
-        // Create new session ID
-        const newSessionId = `session-${Date.now()}`;
-
-        // Save current session first
-        const currentSession = {
-            id: currentSessionId,
-            title: `Chat ${new Date().toLocaleDateString()}`,
-            lastModified: Date.now(),
-            modelId: currentModelId,
-            messages: currentHistory,
-            expertMode: currentExpertMode,
-            thinkingEnabled: currentThinkingEnabled
-        };
-
-        // Create branched session
-        const branchedSession = {
-            id: newSessionId,
-            title: `Branch from ${new Date().toLocaleDateString()}`,
-            lastModified: Date.now(),
-            modelId: currentModelId,
-            messages: branchHistory,
-            expertMode: currentExpertMode,
-            thinkingEnabled: currentThinkingEnabled
-        };
-
-        // Save both sessions to localStorage
-        try {
-            const sessions = JSON.parse(localStorage.getItem('app_chat_sessions') || '[]');
-            const updatedSessions = sessions.map((s: any) =>
-                s.id === currentSessionId ? currentSession : s
-            );
-            updatedSessions.push(branchedSession);
-            localStorage.setItem('app_chat_sessions', JSON.stringify(updatedSessions));
-
-            // Load the new branched session
-            handleLoadSession(newSessionId);
-            toast.success('Conversation branched!');
-        } catch (err) {
-            toast.error('Failed to branch conversation');
-        }
-    }, [handleLoadSession]);
 
     const executeChatCompletion = React.useCallback(async (params: {
         prompt: string;
@@ -1849,29 +1663,6 @@ const Chat: React.FC = () => {
         });
     };
 
-    const toggleBookmark = (index: number) => {
-        setBookmarkedMessages(prev => {
-            const newBookmarks = new Set(prev);
-            if (newBookmarks.has(index)) {
-                newBookmarks.delete(index);
-                toast.success('Bookmark removed');
-            } else {
-                newBookmarks.add(index);
-                toast.success('Message bookmarked');
-            }
-
-            // Save to localStorage
-            try {
-                const bookmarkKey = `bookmarks_${sessionId}`;
-                localStorage.setItem(bookmarkKey, JSON.stringify(Array.from(newBookmarks)));
-            } catch (err) {
-                console.error('Failed to save bookmarks:', err);
-            }
-
-            return newBookmarks;
-        });
-    };
-
     const handleToggleHistoryPanel = React.useCallback(() => {
         setShowHistory((prev) => !prev);
     }, []);
@@ -1919,250 +1710,42 @@ const Chat: React.FC = () => {
         setShowFederatedLearning,
     });
 
-    const modelOptionItems = React.useMemo(
-        () => availableModels.map((model) => ({
-            id: model.id,
-            label: model.name || model.id,
-        })),
-        [availableModels]
-    );
-
-    const allModelOptionElements = React.useMemo(
-        () => modelOptionItems.map((model) => (
-            <option key={model.id} value={model.id}>{model.label}</option>
-        )),
-        [modelOptionItems]
-    );
-
-    const nonCurrentModelOptionElements = React.useMemo(
-        () => modelOptionItems
-            .filter((model) => model.id !== currentModel)
-            .map((model) => (
-                <option key={model.id} value={model.id}>{model.label}</option>
-            )),
-        [modelOptionItems, currentModel]
-    );
-
-    const modelNameById = React.useMemo(() => {
-        const next = new Map<string, string>();
-        for (let i = 0; i < modelOptionItems.length; i += 1) {
-            const model = modelOptionItems[i];
-            next.set(model.id, model.label);
-        }
-        return next;
-    }, [modelOptionItems]);
-
-    const handleCurrentModelChange = React.useCallback((nextModelId: string) => {
-        setCurrentModel(nextModelId);
-    }, [setCurrentModel]);
-
-    const handleSecondaryModelChange = React.useCallback((nextModelId: string) => {
-        setSecondaryModel(nextModelId);
-    }, [setSecondaryModel]);
-
-    const handleToggleRequestLog = React.useCallback(() => {
-        setShowRequestLog((prev) => !prev);
-    }, []);
-
-    const handleToggleSearch = React.useCallback(() => {
-        setShowSearch((prev) => !prev);
-    }, []);
-
-    const clampLongPressMenuPosition = React.useCallback((x: number, y: number) => {
-        const margin = 8;
-        const menuWidth = 240;
-        const menuHeight = 240;
-
-        return {
-            x: Math.max(margin, Math.min(x, window.innerWidth - menuWidth - margin)),
-            y: Math.max(margin, Math.min(y, window.innerHeight - menuHeight - margin)),
-        };
-    }, []);
-
-    const closeLongPressMenu = React.useCallback(() => {
-        setLongPressMenu(null);
-    }, []);
-
-    const longPressActionHandlers = React.useMemo<Record<ChatMessageAction, (index: number, message: any) => void>>(() => ({
-        copy: (_index, message) => {
-            navigator.clipboard.writeText(message.content || '');
-            toast.success('Copied to clipboard');
-        },
-        bookmark: (index) => {
-            toggleBookmark(index);
-        },
-        edit: (index) => {
-            handleEditMessage(index);
-        },
-        regenerate: (index) => {
-            handleRegenerateResponse(index);
-        },
-        branch: (index) => {
-            handleBranchConversation(index);
-        },
-        delete: (index) => {
-            deleteMessage(index);
-        },
-    }), [
-        deleteMessage,
-        handleBranchConversation,
-        handleEditMessage,
-        handleRegenerateResponse,
-        toggleBookmark,
-    ]);
-
-    const handleLongPressAction = React.useCallback((action: ChatMessageAction) => {
-        if (!longPressMenu) return;
-
-        const index = longPressMenu.messageIndex;
-        const message = history[index];
-        if (!message) return;
-
-        if (isLongPressActionAllowed(action, message)) {
-            longPressActionHandlers[action](index, message);
-        }
-
-        closeLongPressMenu();
-    }, [
-        closeLongPressMenu,
-        history,
-        longPressActionHandlers,
+    const {
+        modelOptionItems,
+        allModelOptionElements,
+        nonCurrentModelOptionElements,
+        modelNameById,
+        handleCurrentModelChange,
+        handleSecondaryModelChange,
+        handleToggleRequestLog,
+        handleToggleSearch,
+    } = useChatHeaderUtilityControls({
+        availableModels,
+        currentModel,
+        setCurrentModel,
+        setSecondaryModel,
+        setShowRequestLog,
+        setShowSearch,
+    });
+    const {
+        bookmarkedMessages,
+        conversationFontSize,
         longPressMenu,
-    ]);
-
-    usePinchZoom((event) => {
-        const targetNode = event.target as Node | null;
-        if (!targetNode || !messageListRef.current?.contains(targetNode)) {
-            return;
-        }
-
-        setConversationFontSize(prev => {
-            const next = Math.max(12, Math.min(28, prev + (event.delta * 8)));
-            return Number(next.toFixed(2));
-        });
-    }, history.length > 0);
-
-    useLongPress((event) => {
-        const targetElement = event.target instanceof Element ? event.target : null;
-        if (!targetElement) return;
-
-        const bubble = targetElement.closest('[data-message-bubble-index]') as HTMLElement | null;
-        if (!bubble || !messageListRef.current?.contains(bubble)) {
-            return;
-        }
-
-        const messageIndex = Number(bubble.dataset.messageBubbleIndex);
-        if (!Number.isInteger(messageIndex)) {
-            return;
-        }
-
-        const position = clampLongPressMenuPosition(event.x, event.y);
-        setLongPressMenu({
-            messageIndex,
-            x: position.x,
-            y: position.y,
-        });
-    }, history.length > 0);
-
-    React.useEffect(() => {
-        localStorage.setItem('chat_font_size', String(conversationFontSize));
-    }, [conversationFontSize]);
-
-    React.useEffect(() => {
-        if (!longPressMenu) {
-            return;
-        }
-
-        const handleDocumentClick = (event: MouseEvent | TouchEvent) => {
-            const target = event.target as Node | null;
-            if (!target) return;
-
-            if (longPressMenuRef.current && longPressMenuRef.current.contains(target)) {
-                return;
-            }
-
-            closeLongPressMenu();
-        };
-
-        const handleEscape = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                closeLongPressMenu();
-            }
-        };
-
-        document.addEventListener('mousedown', handleDocumentClick);
-        document.addEventListener('touchstart', handleDocumentClick);
-        document.addEventListener('keydown', handleEscape);
-
-        return () => {
-            document.removeEventListener('mousedown', handleDocumentClick);
-            document.removeEventListener('touchstart', handleDocumentClick);
-            document.removeEventListener('keydown', handleEscape);
-        };
-    }, [closeLongPressMenu, longPressMenu]);
-
-    React.useEffect(() => {
-        return () => {
-            if (swipeSessionTimerRef.current !== null) {
-                window.clearTimeout(swipeSessionTimerRef.current);
-            }
-        };
-    }, []);
-
-    useSwipeNavigation((event) => {
-        const targetNode = event.target as Node | null;
-        if (!targetNode || !messageListRef.current?.contains(targetNode)) {
-            return;
-        }
-
-        if (event.direction !== 'left' && event.direction !== 'right') {
-            return;
-        }
-
-        if (savedSessions.length <= 1) {
-            return;
-        }
-
-        const currentIndex = savedSessions.findIndex(session => session.id === sessionId);
-        if (currentIndex === -1) {
-            return;
-        }
-
-        const nextIndex = event.direction === 'left'
-            ? Math.min(currentIndex + 1, savedSessions.length - 1)
-            : Math.max(currentIndex - 1, 0);
-
-        if (nextIndex === currentIndex) {
-            return;
-        }
-
-        loadSession(savedSessions[nextIndex].id);
-        setSwipeSessionIndicator(event.direction === 'left' ? 'next' : 'previous');
-
-        if (swipeSessionTimerRef.current !== null) {
-            window.clearTimeout(swipeSessionTimerRef.current);
-        }
-
-        swipeSessionTimerRef.current = window.setTimeout(() => {
-            setSwipeSessionIndicator(null);
-        }, 700);
-    }, history.length > 0 && savedSessions.length > 1);
-
-    // Load bookmarks when session changes
-    React.useEffect(() => {
-        try {
-            const bookmarkKey = `bookmarks_${sessionId}`;
-            const saved = localStorage.getItem(bookmarkKey);
-            if (saved) {
-                setBookmarkedMessages(new Set(JSON.parse(saved)));
-            } else {
-                setBookmarkedMessages(new Set());
-            }
-        } catch (err) {
-            console.error('Failed to load bookmarks:', err);
-            setBookmarkedMessages(new Set());
-        }
-    }, [sessionId]);
+        swipeSessionIndicator,
+        toggleBookmark,
+        handleLongPressAction,
+    } = useChatGestureInteractions({
+        history,
+        sessionId,
+        savedSessions,
+        loadSession,
+        messageListRef,
+        longPressMenuRef,
+        onEditMessage: handleEditMessage,
+        onRegenerateResponse: handleRegenerateResponse,
+        onBranchConversation: handleBranchConversation,
+        onDeleteMessage: deleteMessage,
+    });
 
     const handleClearChat = React.useCallback(() => {
         if (history.length > 0 && window.confirm('Clear all messages in this chat?')) {
@@ -2344,324 +1927,88 @@ const Chat: React.FC = () => {
         enableProjectContextFeature,
         loadProjectContextService,
     });
-    const handleToggleThinking = React.useCallback(() => {
-        setThinkingEnabled((prev) => !prev);
-    }, [setThinkingEnabled]);
-    const handleToggleBattleMode = React.useCallback(() => {
-        setBattleMode((prev) => !prev);
-    }, [setBattleMode]);
-    const handleToggleInspector = React.useCallback(() => {
-        setShowInspector((prev) => !prev);
-    }, []);
-    const handleToggleExpertMenu = React.useCallback(() => {
-        setShowExpertMenu((prev) => !prev);
-    }, [setShowExpertMenu]);
-    const handleToggleVariableMenu = React.useCallback(() => {
-        setShowVariableMenu((prev) => !prev);
-    }, []);
-    const handleToggleJsonMode = React.useCallback(() => {
-        setJsonMode((prev) => {
-            const next = !prev;
-            toast.success(next ? 'JSON mode enabled' : 'JSON mode disabled');
-            return next;
-        });
-    }, []);
-    const handleToggleStreamingMode = React.useCallback(() => {
-        setStreamingEnabled((prev) => {
-            const next = !prev;
-            toast.success(next ? 'Streaming enabled' : 'Streaming disabled');
-            return next;
-        });
-    }, []);
-    const handleOpenAnalyticsPanel = React.useCallback(() => {
-        setShowAnalytics(true);
-    }, []);
-    const handleOpenRecommendationsPanel = React.useCallback(() => {
-        setShowRecommendations(true);
-    }, []);
-    const handleToggleSidebar = React.useCallback(() => {
-        setSidebarOpen((prev) => !prev);
-    }, []);
-    const handleCloseVariableMenu = React.useCallback(() => {
-        setShowVariableMenu(false);
-    }, []);
-    const handleInsertVariable = React.useCallback((variable: string) => {
-        setInput((prev) => prev + variable);
-        setShowVariableMenu(false);
-    }, [setInput]);
-    const handleCloseSidebar = React.useCallback(() => {
-        setSidebarOpen(false);
-    }, []);
-    const handleSelectInspectorTab = React.useCallback(() => {
-        setActiveTab('inspector');
-    }, []);
-    const handleSelectControlsTab = React.useCallback(() => {
-        setActiveTab('controls');
-    }, []);
-    const handleSelectPromptsTab = React.useCallback(() => {
-        setActiveTab('prompts');
-    }, []);
-    const handleSelectDocumentsTab = React.useCallback(() => {
-        setActiveTab('documents');
-    }, []);
-    const handleStartEditingSystemPrompt = React.useCallback(() => {
-        setIsEditingSystemPrompt(true);
-    }, []);
-    const handleStopEditingSystemPrompt = React.useCallback(() => {
-        setIsEditingSystemPrompt(false);
-    }, []);
-    const handleSystemPromptChange = React.useCallback((value: string) => {
-        setSystemPrompt(value);
-    }, [setSystemPrompt]);
-    const handleToggleBattleModeWithSecondaryFallback = React.useCallback(() => {
-        const next = !battleMode;
-        setBattleMode(next);
-        if (next && !secondaryModel && modelOptionItems.length > 1) {
-            setSecondaryModel(modelOptionItems.find((model) => model.id !== currentModel)?.id || '');
-        }
-    }, [
-        battleMode,
-        currentModel,
-        modelOptionItems,
-        secondaryModel,
-        setBattleMode,
-        setSecondaryModel,
-    ]);
-    const handleToggleAutoRouting = React.useCallback(() => {
-        setAutoRouting((prev) => !prev);
-    }, [setAutoRouting]);
-    const handleToggleToolByName = React.useCallback((toolName: string) => {
-        setEnabledTools((prev) => toggleToolNameInSet(prev, toolName));
-    }, [setEnabledTools]);
-    const handleToggleResponseFormat = React.useCallback(() => {
-        setResponseFormat((prev) => (prev === 'text' ? 'json_object' : 'text'));
-    }, [setResponseFormat]);
-    const handleToggleAutoSummarizeContext = React.useCallback(() => {
-        setAutoSummarizeContext((prev) => !prev);
-    }, []);
-    const handleApplySuggestedTrim = React.useCallback(() => {
-        applyTrimSuggestions(3);
-    }, [applyTrimSuggestions]);
-    const handleIncludeAllContext = React.useCallback(() => {
-        includeAllContext();
-    }, [includeAllContext]);
-    const handleExcludeTrimSuggestion = React.useCallback((messageIndex: number) => {
-        excludeTrimSuggestion(messageIndex);
-    }, [excludeTrimSuggestion]);
-    const handleBatchSizeChange = React.useCallback((value: number) => {
-        setBatchSize(value);
-    }, [setBatchSize]);
-    const handleTemperatureChange = React.useCallback((value: number) => {
-        setTemperature(value);
-    }, [setTemperature]);
-    const handleTopPChange = React.useCallback((value: number) => {
-        setTopP(value);
-    }, [setTopP]);
-    const handleMaxTokensChange = React.useCallback((value: number) => {
-        setMaxTokens(value);
-    }, [setMaxTokens]);
-    const secondaryModelDisplayName = React.useMemo(
-        () => modelNameById.get(secondaryModel) || 'Select...',
-        [modelNameById, secondaryModel]
-    );
-    const maxTokensSliderConfig = React.useMemo(
-        () => getMaxTokensSliderConfig(currentModelObj?.contextLength),
-        [currentModelObj?.contextLength]
-    );
-    const composerControlDescriptors = React.useMemo<ComposerControlPillDescriptor[]>(() => buildComposerControlPillDescriptors({
-        prefillEnabled: prefill !== null,
+    const {
+        handleToggleThinking,
+        handleCloseVariableMenu,
+        handleInsertVariable,
+        handleCloseSidebar,
+        handleSelectInspectorTab,
+        handleSelectControlsTab,
+        handleSelectPromptsTab,
+        handleSelectDocumentsTab,
+        handleStartEditingSystemPrompt,
+        handleStopEditingSystemPrompt,
+        handleSystemPromptChange,
+        handleToggleBattleModeWithSecondaryFallback,
+        handleToggleAutoRouting,
+        handleToggleToolByName,
+        handleToggleResponseFormat,
+        handleToggleAutoSummarizeContext,
+        handleApplySuggestedTrim,
+        handleIncludeAllContext,
+        handleExcludeTrimSuggestion,
+        handleBatchSizeChange,
+        handleTemperatureChange,
+        handleTopPChange,
+        handleMaxTokensChange,
+        secondaryModelDisplayName,
+        maxTokensSliderConfig,
+        composerControlPillActions,
+        composerVariableContext,
+    } = useChatComposerControlBar({
+        prefill,
         showUrlInput,
         githubConfigured,
         showGithubInput,
         hasProjectContext: Boolean(projectContext),
         thinkingEnabled,
+        setThinkingEnabled,
         battleMode,
+        setBattleMode,
         showInspector,
+        setShowInspector,
         expertMode,
+        setShowExpertMenu,
         showVariableMenu,
+        setShowVariableMenu,
         jsonMode,
+        setJsonMode,
         streamingEnabled,
-        hasHistory: history.length > 0,
+        setStreamingEnabled,
+        historyLength: history.length,
         sidebarOpen,
-    }), [
-        prefill,
-        showUrlInput,
-        githubConfigured,
-        showGithubInput,
-        projectContext,
-        thinkingEnabled,
-        battleMode,
-        showInspector,
-        expertMode,
-        showVariableMenu,
-        jsonMode,
-        streamingEnabled,
-        history.length,
-        sidebarOpen,
-    ]);
-    const controlPillActionHandlers = React.useMemo<Record<ComposerControlPillKey, () => void>>(() => ({
-        'control-response': handleTogglePrefill,
-        tools: handleToggleUrlInput,
-        github: handleToggleGithubInput,
-        project: handleProjectContextControlClick,
-        thinking: handleToggleThinking,
-        battle: handleToggleBattleMode,
-        inspector: handleToggleInspector,
-        'expert-config': handleToggleExpertMenu,
-        variables: handleToggleVariableMenu,
-        json: handleToggleJsonMode,
-        stream: handleToggleStreamingMode,
-        analytics: handleOpenAnalyticsPanel,
-        recommendations: handleOpenRecommendationsPanel,
-        controls: handleToggleSidebar,
-    }), [
+        setSidebarOpen,
+        setShowAnalytics,
+        setShowRecommendations,
+        setInput,
+        setActiveTab,
+        setIsEditingSystemPrompt,
+        setSystemPrompt,
+        secondaryModel,
+        modelOptionItems,
+        currentModel,
+        setSecondaryModel,
+        setAutoRouting,
+        setEnabledTools,
+        setResponseFormat,
+        setAutoSummarizeContext,
+        applyTrimSuggestions,
+        includeAllContext,
+        excludeTrimSuggestion,
+        setBatchSize,
+        setTemperature,
+        setTopP,
+        setMaxTokens,
+        modelNameById,
+        currentModelContextLength: currentModelObj?.contextLength,
+        modelName: availableModels.find((model) => model.id === currentModel)?.name || currentModel,
+        sessionId,
+        sessionTitle: savedSessions.find((session) => session.id === sessionId)?.title || 'New Chat',
         handleTogglePrefill,
         handleToggleUrlInput,
         handleToggleGithubInput,
         handleProjectContextControlClick,
-        handleToggleThinking,
-        handleToggleBattleMode,
-        handleToggleInspector,
-        handleToggleExpertMenu,
-        handleToggleVariableMenu,
-        handleToggleJsonMode,
-        handleToggleStreamingMode,
-        handleOpenAnalyticsPanel,
-        handleOpenRecommendationsPanel,
-        handleToggleSidebar,
-    ]);
-    const composerControlPillActions = React.useMemo<ComposerControlPillActionConfig[]>(() => {
-        const inactiveClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200';
-        const activePrimaryClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-primary text-white border-primary shadow-[0_0_10px_rgba(59,130,246,0.4)]';
-        const activeBlueClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-blue-500 text-white border-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.4)]';
-        const activeBattleClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-gradient-to-r from-orange-500 to-red-600 text-white border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]';
-        const activeToolsClassName = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-primary text-white border-primary animate-pulse';
-
-        return composerControlDescriptors
-            .filter((descriptor) => descriptor.visible)
-            .map((descriptor) => {
-                const baseAction = {
-                    key: descriptor.key,
-                    label: descriptor.label,
-                    onClick: controlPillActionHandlers[descriptor.key],
-                    title: undefined as string | undefined,
-                };
-
-                switch (descriptor.key) {
-                    case 'control-response':
-                        return {
-                            ...baseAction,
-                            icon: descriptor.active
-                                ? <Check size={12} strokeWidth={3} />
-                                : <Settings size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                        };
-                    case 'tools':
-                        return {
-                            ...baseAction,
-                            icon: <Globe size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activeToolsClassName : inactiveClassName,
-                        };
-                    case 'github':
-                        return {
-                            ...baseAction,
-                            icon: <Github size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activeBlueClassName : inactiveClassName,
-                        };
-                    case 'project':
-                        return {
-                            ...baseAction,
-                            icon: <FolderOpen size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activeBlueClassName : inactiveClassName,
-                        };
-                    case 'thinking':
-                        return {
-                            ...baseAction,
-                            icon: <Brain size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                        };
-                    case 'battle':
-                        return {
-                            ...baseAction,
-                            icon: <Users size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activeBattleClassName : inactiveClassName,
-                        };
-                    case 'inspector':
-                        return {
-                            ...baseAction,
-                            icon: <Activity size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                        };
-                    case 'expert-config':
-                        return {
-                            ...baseAction,
-                            icon: <Users size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                        };
-                    case 'variables':
-                        return {
-                            ...baseAction,
-                            icon: <Code2 size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                            title: 'Insert variables like {{date}}, {{time}}, {{user_name}}',
-                        };
-                    case 'json':
-                        return {
-                            ...baseAction,
-                            icon: <Code2 size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                            title: 'Enable JSON output format',
-                        };
-                    case 'stream':
-                        return {
-                            ...baseAction,
-                            icon: <Activity size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                            title: descriptor.active ? 'Disable streaming (get full response at once)' : 'Enable streaming (real-time token display)',
-                        };
-                    case 'analytics':
-                        return {
-                            ...baseAction,
-                            icon: <BarChart3 size={12} strokeWidth={2.5} />,
-                            className: 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white',
-                            title: 'View usage analytics and statistics',
-                        };
-                    case 'recommendations':
-                        return {
-                            ...baseAction,
-                            icon: <Sparkles size={12} strokeWidth={2.5} />,
-                            className: 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white',
-                            title: 'Find relevant conversations (Ctrl+Shift+R)',
-                        };
-                    case 'controls':
-                        return {
-                            ...baseAction,
-                            icon: <Settings size={12} strokeWidth={2.5} />,
-                            className: descriptor.active ? activePrimaryClassName : inactiveClassName,
-                            title: 'Toggle Controls Panel',
-                        };
-                    default:
-                        return {
-                            ...baseAction,
-                            icon: null,
-                            className: inactiveClassName,
-                        };
-                }
-            });
-    }, [composerControlDescriptors, controlPillActionHandlers]);
-    const composerVariableContext = React.useMemo<ComposerVariableContext>(() => ({
-        modelId: currentModel,
-        modelName: availableModels.find((model) => model.id === currentModel)?.name || currentModel,
-        sessionId,
-        sessionTitle: savedSessions.find((session) => session.id === sessionId)?.title || 'New Chat',
-        messageCount: history.length,
-    }), [
-        currentModel,
-        availableModels,
-        sessionId,
-        savedSessions,
-        history.length,
-    ]);
+    });
     const composerBottomInset = isCompactViewport ? 16 : 24;
     const messageListFooterHeight = Math.max(132, composerOverlayHeight + composerBottomInset + 16);
 
