@@ -39,6 +39,115 @@ export interface ScheduledRun {
     };
 }
 
+const RECURRENCE_TYPES = new Set<RecurrencePattern['type']>(['once', 'daily', 'weekly', 'monthly', 'custom']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeRecurrence = (value: unknown): RecurrencePattern | undefined => {
+    if (!isRecord(value) || !RECURRENCE_TYPES.has(value.type as RecurrencePattern['type'])) {
+        return undefined;
+    }
+
+    const daysOfWeek = Array.isArray(value.daysOfWeek)
+        ? value.daysOfWeek.filter((entry): entry is number => (
+            typeof entry === 'number' && Number.isInteger(entry) && entry >= 0 && entry <= 6
+        ))
+        : undefined;
+
+    return {
+        type: value.type as RecurrencePattern['type'],
+        interval: typeof value.interval === 'number' ? value.interval : undefined,
+        daysOfWeek,
+        dayOfMonth: typeof value.dayOfMonth === 'number' ? value.dayOfMonth : undefined,
+        endDate: typeof value.endDate === 'number' ? value.endDate : undefined,
+    };
+};
+
+const sanitizeSchedule = (value: unknown): ScheduledConversation | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || typeof value.prompt !== 'string'
+        || typeof value.modelId !== 'string'
+        || typeof value.scheduledTime !== 'number'
+        || typeof value.enabled !== 'boolean'
+        || typeof value.nextRun !== 'number'
+        || typeof value.runCount !== 'number'
+        || typeof value.createdAt !== 'number') {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        name: value.name,
+        prompt: value.prompt,
+        systemPrompt: typeof value.systemPrompt === 'string' ? value.systemPrompt : undefined,
+        modelId: value.modelId,
+        scheduledTime: value.scheduledTime,
+        recurrence: sanitizeRecurrence(value.recurrence),
+        enabled: value.enabled,
+        lastRun: typeof value.lastRun === 'number' ? value.lastRun : undefined,
+        nextRun: value.nextRun,
+        runCount: value.runCount,
+        createdAt: value.createdAt,
+    };
+};
+
+const parseStoredSchedules = (raw: string): ScheduledConversation[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeSchedule(entry))
+        .filter((entry): entry is ScheduledConversation => entry !== null);
+};
+
+const sanitizeRun = (value: unknown): ScheduledRun | null => {
+    if (!isRecord(value)
+        || typeof value.scheduleId !== 'string'
+        || typeof value.executedAt !== 'number') {
+        return null;
+    }
+
+    let result: ScheduledRun['result'];
+    if (isRecord(value.result) && typeof value.result.success === 'boolean') {
+        result = {
+            success: value.result.success,
+            messageId: typeof value.result.messageId === 'string' ? value.result.messageId : undefined,
+            error: typeof value.result.error === 'string' ? value.result.error : undefined,
+        };
+    }
+
+    return {
+        scheduleId: value.scheduleId,
+        executedAt: value.executedAt,
+        result,
+    };
+};
+
+const parseStoredRuns = (raw: string): ScheduledRun[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeRun(entry))
+        .filter((entry): entry is ScheduledRun => entry !== null);
+};
+
 export class ScheduledConversationsService {
     private static instance: ScheduledConversationsService;
     private readonly STORAGE_KEY = 'scheduled_conversations';
@@ -187,7 +296,7 @@ export class ScheduledConversationsService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
-            return JSON.parse(stored);
+            return parseStoredSchedules(stored);
         } catch (error) {
             console.error('Failed to load schedules:', error);
             return [];
@@ -249,7 +358,7 @@ export class ScheduledConversationsService {
     private saveRun(run: ScheduledRun): void {
         try {
             const stored = localStorage.getItem(this.RUNS_KEY);
-            const runs: ScheduledRun[] = stored ? JSON.parse(stored) : [];
+            const runs = stored ? parseStoredRuns(stored) : [];
             runs.push(run);
             // Keep only last 100 runs
             if (runs.length > 100) {
@@ -268,7 +377,7 @@ export class ScheduledConversationsService {
         try {
             const stored = localStorage.getItem(this.RUNS_KEY);
             if (!stored) return [];
-            const runs: ScheduledRun[] = JSON.parse(stored);
+            const runs = parseStoredRuns(stored);
             return runs
                 .filter(r => r.scheduleId === scheduleId)
                 .sort((a, b) => b.executedAt - a.executedAt)

@@ -40,6 +40,150 @@ export interface TriggerExecution {
     error?: string;
 }
 
+const CONDITION_TYPES = new Set<TriggerCondition['type']>([
+    'message-count',
+    'sentiment',
+    'keyword',
+    'topic',
+    'model-response',
+    'error',
+    'custom',
+]);
+
+const CONDITION_OPERATORS = new Set<TriggerCondition['operator']>([
+    'equals',
+    'greater-than',
+    'less-than',
+    'contains',
+    'matches',
+]);
+
+const ACTION_TYPES = new Set<TriggerAction['type']>([
+    'send-notification',
+    'save-to-file',
+    'send-webhook',
+    'change-model',
+    'execute-script',
+    'tag-conversation',
+    'export-conversation',
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeCondition = (value: unknown): TriggerCondition | null => {
+    if (!isRecord(value)
+        || !CONDITION_TYPES.has(value.type as TriggerCondition['type'])
+        || !CONDITION_OPERATORS.has(value.operator as TriggerCondition['operator'])
+        || (typeof value.value !== 'string' && typeof value.value !== 'number')) {
+        return null;
+    }
+
+    return {
+        type: value.type as TriggerCondition['type'],
+        operator: value.operator as TriggerCondition['operator'],
+        value: value.value,
+    };
+};
+
+const sanitizeAction = (value: unknown): TriggerAction | null => {
+    if (!isRecord(value)
+        || !ACTION_TYPES.has(value.type as TriggerAction['type'])) {
+        return null;
+    }
+
+    return {
+        type: value.type as TriggerAction['type'],
+        config: isRecord(value.config) ? value.config : {},
+    };
+};
+
+const sanitizeRule = (value: unknown): TriggerRule | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || !Array.isArray(value.conditions)
+        || !Array.isArray(value.actions)
+        || typeof value.enabled !== 'boolean'
+        || typeof value.priority !== 'number'
+        || typeof value.triggerCount !== 'number'
+        || typeof value.createdAt !== 'number') {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        name: value.name,
+        description: typeof value.description === 'string' ? value.description : undefined,
+        conditions: value.conditions
+            .map((entry) => sanitizeCondition(entry))
+            .filter((entry): entry is TriggerCondition => entry !== null),
+        actions: value.actions
+            .map((entry) => sanitizeAction(entry))
+            .filter((entry): entry is TriggerAction => entry !== null),
+        enabled: value.enabled,
+        priority: value.priority,
+        triggerCount: value.triggerCount,
+        lastTriggered: typeof value.lastTriggered === 'number' ? value.lastTriggered : undefined,
+        createdAt: value.createdAt,
+    };
+};
+
+const parseStoredRules = (raw: string): TriggerRule[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeRule(entry))
+        .filter((entry): entry is TriggerRule => entry !== null);
+};
+
+const sanitizeExecution = (value: unknown): TriggerExecution | null => {
+    if (!isRecord(value)
+        || typeof value.ruleId !== 'string'
+        || typeof value.triggeredAt !== 'number'
+        || typeof value.success !== 'boolean'
+        || !Array.isArray(value.conditionsMatched)
+        || !Array.isArray(value.actionsExecuted)) {
+        return null;
+    }
+
+    return {
+        ruleId: value.ruleId,
+        triggeredAt: value.triggeredAt,
+        conditionsMatched: value.conditionsMatched
+            .map((entry) => sanitizeCondition(entry))
+            .filter((entry): entry is TriggerCondition => entry !== null),
+        actionsExecuted: value.actionsExecuted
+            .map((entry) => sanitizeAction(entry))
+            .filter((entry): entry is TriggerAction => entry !== null),
+        success: value.success,
+        error: typeof value.error === 'string' ? value.error : undefined,
+    };
+};
+
+const parseStoredExecutions = (raw: string): TriggerExecution[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeExecution(entry))
+        .filter((entry): entry is TriggerExecution => entry !== null);
+};
+
 export class TriggerActionsService {
     private static instance: TriggerActionsService;
     private readonly STORAGE_KEY = 'trigger_rules';
@@ -279,7 +423,7 @@ export class TriggerActionsService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
-            return JSON.parse(stored);
+            return parseStoredRules(stored);
         } catch (error) {
             console.error('Failed to load trigger rules:', error);
             return [];
@@ -302,7 +446,11 @@ export class TriggerActionsService {
         if (!rule) return false;
 
         const updated = { ...rule, ...updates };
-        this.saveRule(updated);
+        const sanitized = sanitizeRule(updated);
+        if (!sanitized) {
+            return false;
+        }
+        this.saveRule(sanitized);
         return true;
     }
 
@@ -338,7 +486,7 @@ export class TriggerActionsService {
     private saveExecution(execution: TriggerExecution): void {
         try {
             const stored = localStorage.getItem(this.EXECUTIONS_KEY);
-            const executions: TriggerExecution[] = stored ? JSON.parse(stored) : [];
+            const executions = stored ? parseStoredExecutions(stored) : [];
             executions.push(execution);
             // Keep only last 100 executions
             if (executions.length > 100) {
@@ -357,7 +505,7 @@ export class TriggerActionsService {
         try {
             const stored = localStorage.getItem(this.EXECUTIONS_KEY);
             if (!stored) return [];
-            const executions: TriggerExecution[] = JSON.parse(stored);
+            const executions = parseStoredExecutions(stored);
             return executions
                 .sort((a, b) => b.triggeredAt - a.triggeredAt)
                 .slice(0, limit);

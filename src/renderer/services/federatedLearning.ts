@@ -40,6 +40,83 @@ export interface LocalModelUpdate {
     timestamp: number;
 }
 
+const PARTICIPATION_MODES = new Set<FederatedLearningConfig['participationMode']>(['active', 'passive', 'disabled']);
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const getDefaultConfig = (): FederatedLearningConfig => ({
+    enabled: false,
+    participationMode: 'disabled',
+    trainingRounds: 10,
+    localEpochs: 3,
+    batchSize: 32,
+    learningRate: 0.001,
+});
+
+const sanitizeConfig = (value: unknown): FederatedLearningConfig => {
+    const defaults = getDefaultConfig();
+    if (!isRecord(value)) {
+        return defaults;
+    }
+
+    return {
+        enabled: typeof value.enabled === 'boolean' ? value.enabled : defaults.enabled,
+        participationMode: PARTICIPATION_MODES.has(value.participationMode as FederatedLearningConfig['participationMode'])
+            ? value.participationMode as FederatedLearningConfig['participationMode']
+            : defaults.participationMode,
+        aggregationServer: typeof value.aggregationServer === 'string' ? value.aggregationServer : undefined,
+        modelName: typeof value.modelName === 'string' ? value.modelName : undefined,
+        trainingRounds: typeof value.trainingRounds === 'number' ? value.trainingRounds : defaults.trainingRounds,
+        localEpochs: typeof value.localEpochs === 'number' ? value.localEpochs : defaults.localEpochs,
+        batchSize: typeof value.batchSize === 'number' ? value.batchSize : defaults.batchSize,
+        learningRate: typeof value.learningRate === 'number' ? value.learningRate : defaults.learningRate,
+    };
+};
+
+const sanitizeLocalUpdate = (value: unknown): LocalModelUpdate | null => {
+    if (!isRecord(value)
+        || typeof value.round !== 'number'
+        || typeof value.modelWeights !== 'string'
+        || typeof value.sampleCount !== 'number'
+        || !isRecord(value.metrics)
+        || typeof value.metrics.loss !== 'number'
+        || typeof value.metrics.accuracy !== 'number'
+        || typeof value.timestamp !== 'number') {
+        return null;
+    }
+
+    return {
+        round: value.round,
+        modelWeights: value.modelWeights,
+        sampleCount: value.sampleCount,
+        metrics: {
+            loss: value.metrics.loss,
+            accuracy: value.metrics.accuracy,
+        },
+        timestamp: value.timestamp,
+    };
+};
+
+const parseStoredUpdates = (raw: string): LocalModelUpdate[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeLocalUpdate(entry))
+        .filter((entry): entry is LocalModelUpdate => entry !== null);
+};
+
 export class FederatedLearningService {
     private static instance: FederatedLearningService;
     private readonly STORAGE_KEY = 'federated_learning_config';
@@ -65,27 +142,20 @@ export class FederatedLearningService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                return JSON.parse(stored);
+                return sanitizeConfig(parseJson(stored));
             }
         } catch (error) {
             console.error('Failed to load federated learning config:', error);
         }
 
-        return {
-            enabled: false,
-            participationMode: 'disabled',
-            trainingRounds: 10,
-            localEpochs: 3,
-            batchSize: 32,
-            learningRate: 0.001,
-        };
+        return getDefaultConfig();
     }
 
     /**
      * Save configuration
      */
     saveConfig(config: Partial<FederatedLearningConfig>): void {
-        this.config = { ...this.config, ...config };
+        this.config = sanitizeConfig({ ...this.config, ...config });
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.config));
     }
 
@@ -177,7 +247,7 @@ export class FederatedLearningService {
     private saveLocalUpdate(update: LocalModelUpdate): void {
         try {
             const stored = localStorage.getItem(this.UPDATES_KEY);
-            const updates: LocalModelUpdate[] = stored ? JSON.parse(stored) : [];
+            const updates = stored ? parseStoredUpdates(stored) : [];
             updates.push(update);
             // Keep only last 50 updates
             if (updates.length > 50) {
@@ -216,7 +286,7 @@ export class FederatedLearningService {
         try {
             const stored = localStorage.getItem(this.UPDATES_KEY);
             if (stored) {
-                return JSON.parse(stored);
+                return parseStoredUpdates(stored);
             }
         } catch (error) {
             console.error('Failed to load updates:', error);

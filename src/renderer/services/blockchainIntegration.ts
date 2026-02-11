@@ -31,6 +31,98 @@ export interface BlockchainTransaction {
     timestamp: number;
 }
 
+const BLOCKCHAIN_NETWORKS = new Set<BlockchainConfig['network']>(['ethereum', 'polygon', 'arbitrum', 'local']);
+const TRANSACTION_STATUSES = new Set<BlockchainTransaction['status']>(['pending', 'confirmed', 'failed']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const getDefaultConfig = (): BlockchainConfig => ({
+    enabled: false,
+    network: 'local',
+});
+
+const sanitizeConfig = (value: unknown): BlockchainConfig => {
+    const defaults = getDefaultConfig();
+    if (!isRecord(value)) {
+        return defaults;
+    }
+
+    return {
+        enabled: typeof value.enabled === 'boolean' ? value.enabled : defaults.enabled,
+        network: BLOCKCHAIN_NETWORKS.has(value.network as BlockchainConfig['network'])
+            ? value.network as BlockchainConfig['network']
+            : defaults.network,
+        contractAddress: typeof value.contractAddress === 'string' ? value.contractAddress : undefined,
+        privateKey: typeof value.privateKey === 'string' ? value.privateKey : undefined,
+        gasPrice: typeof value.gasPrice === 'number' ? value.gasPrice : undefined,
+    };
+};
+
+const sanitizeBlock = (value: unknown): ConversationBlock | null => {
+    if (!isRecord(value)
+        || typeof value.blockNumber !== 'number'
+        || typeof value.transactionHash !== 'string'
+        || typeof value.sessionId !== 'string'
+        || typeof value.encryptedData !== 'string'
+        || typeof value.timestamp !== 'number'
+        || typeof value.blockHash !== 'string') {
+        return null;
+    }
+
+    return {
+        blockNumber: value.blockNumber,
+        transactionHash: value.transactionHash,
+        sessionId: value.sessionId,
+        encryptedData: value.encryptedData,
+        timestamp: value.timestamp,
+        blockHash: value.blockHash,
+    };
+};
+
+const sanitizeTransaction = (value: unknown): BlockchainTransaction | null => {
+    if (!isRecord(value)
+        || typeof value.hash !== 'string'
+        || typeof value.from !== 'string'
+        || typeof value.to !== 'string'
+        || typeof value.value !== 'string'
+        || typeof value.gasUsed !== 'number'
+        || !TRANSACTION_STATUSES.has(value.status as BlockchainTransaction['status'])
+        || typeof value.timestamp !== 'number') {
+        return null;
+    }
+
+    return {
+        hash: value.hash,
+        from: value.from,
+        to: value.to,
+        value: value.value,
+        gasUsed: value.gasUsed,
+        status: value.status as BlockchainTransaction['status'],
+        timestamp: value.timestamp,
+    };
+};
+
+const parseStoredTransactions = (raw: string): BlockchainTransaction[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeTransaction(entry))
+        .filter((entry): entry is BlockchainTransaction => entry !== null);
+};
+
 export class BlockchainIntegrationService {
     private static instance: BlockchainIntegrationService;
     private readonly STORAGE_KEY = 'blockchain_config';
@@ -55,23 +147,20 @@ export class BlockchainIntegrationService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                return JSON.parse(stored);
+                return sanitizeConfig(parseJson(stored));
             }
         } catch (error) {
             console.error('Failed to load blockchain config:', error);
         }
 
-        return {
-            enabled: false,
-            network: 'local',
-        };
+        return getDefaultConfig();
     }
 
     /**
      * Save configuration
      */
     saveConfig(config: Partial<BlockchainConfig>): void {
-        this.config = { ...this.config, ...config };
+        this.config = sanitizeConfig({ ...this.config, ...config });
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.config));
     }
 
@@ -142,7 +231,10 @@ export class BlockchainIntegrationService {
             throw new Error('Conversation not found on blockchain');
         }
 
-        const block: ConversationBlock = JSON.parse(stored);
+        const block = sanitizeBlock(parseJson(stored));
+        if (!block) {
+            throw new Error('Stored blockchain payload is invalid');
+        }
         
         // Decrypt if needed
         if (encryptionKey) {
@@ -189,7 +281,7 @@ export class BlockchainIntegrationService {
     private saveTransaction(transaction: BlockchainTransaction): void {
         try {
             const stored = localStorage.getItem(this.TRANSACTIONS_KEY);
-            const transactions: BlockchainTransaction[] = stored ? JSON.parse(stored) : [];
+            const transactions = stored ? parseStoredTransactions(stored) : [];
             transactions.push(transaction);
             // Keep only last 100 transactions
             if (transactions.length > 100) {
@@ -208,7 +300,7 @@ export class BlockchainIntegrationService {
         try {
             const stored = localStorage.getItem(this.TRANSACTIONS_KEY);
             if (!stored) return [];
-            const transactions: BlockchainTransaction[] = JSON.parse(stored);
+            const transactions = parseStoredTransactions(stored);
             return transactions.slice(-limit).reverse();
         } catch (error) {
             console.error('Failed to load transactions:', error);

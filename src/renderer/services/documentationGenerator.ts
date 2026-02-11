@@ -20,6 +20,58 @@ export interface DocumentationResult {
     generatedAt: number;
 }
 
+const DOCUMENTATION_FORMATS = new Set<DocumentationOptions['format']>([
+    'jsdoc',
+    'tsdoc',
+    'python-docstring',
+    'markdown',
+    'asciidoc',
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeResult = (value: unknown): DocumentationResult | null => {
+    if (!isRecord(value)
+        || typeof value.code !== 'string'
+        || typeof value.language !== 'string'
+        || typeof value.documentedCode !== 'string'
+        || typeof value.documentation !== 'string'
+        || !DOCUMENTATION_FORMATS.has(value.format as DocumentationOptions['format'])
+        || typeof value.generatedAt !== 'number') {
+        return null;
+    }
+
+    return {
+        code: value.code,
+        language: value.language,
+        documentedCode: value.documentedCode,
+        documentation: value.documentation,
+        format: value.format as DocumentationOptions['format'],
+        generatedAt: value.generatedAt,
+    };
+};
+
+const parseStoredResults = (raw: string): DocumentationResult[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeResult(entry))
+        .filter((entry): entry is DocumentationResult => entry !== null);
+};
+
 export class DocumentationGeneratorService {
     private static instance: DocumentationGeneratorService;
     private readonly STORAGE_KEY = 'documentation_results';
@@ -178,7 +230,7 @@ export class DocumentationGeneratorService {
     private saveResult(result: DocumentationResult): void {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
-            const results: DocumentationResult[] = stored ? JSON.parse(stored) : [];
+            const results = stored ? parseStoredResults(stored) : [];
             results.push(result);
             // Keep only last 50
             if (results.length > 50) {
@@ -197,7 +249,7 @@ export class DocumentationGeneratorService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
-            const results: DocumentationResult[] = JSON.parse(stored);
+            const results = parseStoredResults(stored);
             return results.slice(-limit).reverse();
         } catch (error) {
             console.error('Failed to load documentation history:', error);

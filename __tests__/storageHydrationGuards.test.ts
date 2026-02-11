@@ -538,4 +538,149 @@ describe('storage hydration guards', () => {
       expect(codeReviewService.getReviewHistory()[0]?.issues).toHaveLength(1);
     });
   });
+
+  test('guards blockchain/git/trigger/federated/scheduled/docs storage payloads', () => {
+    localStorage.setItem('blockchain_config', JSON.stringify({
+      enabled: 'yes',
+      network: 'bad-network',
+      gasPrice: 'high',
+    }));
+    localStorage.setItem('blockchain_transactions', JSON.stringify([
+      {
+        hash: '0x1',
+        from: '0xabc',
+        to: '0xdef',
+        value: '0',
+        gasUsed: 21000,
+        status: 'confirmed',
+        timestamp: 1,
+      },
+      { hash: 1 },
+    ]));
+    localStorage.setItem('git_config', JSON.stringify({
+      enabled: true,
+      autoCommit: 'yes',
+      authorName: 'Dev',
+    }));
+    localStorage.setItem('git_commits', JSON.stringify([
+      {
+        id: 'commit-1',
+        sessionId: 'session-1',
+        messageId: 1,
+        filePath: 'src/a.ts',
+        code: 'const a = 1;',
+        commitMessage: 'feat: add a',
+        committedAt: 2,
+        success: true,
+      },
+      { id: 'bad' },
+    ]));
+    localStorage.setItem('trigger_rules', JSON.stringify([
+      {
+        id: 'rule-1',
+        name: 'Rule',
+        conditions: [{ type: 'keyword', operator: 'contains', value: 'error' }],
+        actions: [{ type: 'send-notification', config: { title: 'Alert' } }],
+        enabled: true,
+        priority: 1,
+        triggerCount: 0,
+        createdAt: 3,
+      },
+      { id: 'bad' },
+    ]));
+    localStorage.setItem('trigger_executions', JSON.stringify([
+      {
+        ruleId: 'rule-1',
+        triggeredAt: 4,
+        conditionsMatched: [{ type: 'keyword', operator: 'contains', value: 'error' }],
+        actionsExecuted: [{ type: 'send-notification', config: { title: 'Alert' } }],
+        success: true,
+      },
+      { ruleId: 5 },
+    ]));
+    localStorage.setItem('federated_learning_config', JSON.stringify({
+      enabled: true,
+      participationMode: 'unsupported',
+      trainingRounds: 'bad',
+    }));
+    localStorage.setItem('federated_updates', JSON.stringify([
+      {
+        round: 1,
+        modelWeights: 'abc',
+        sampleCount: 100,
+        metrics: { loss: 0.2, accuracy: 0.8 },
+        timestamp: 5,
+      },
+      { round: 'bad' },
+    ]));
+    localStorage.setItem('scheduled_conversations', JSON.stringify([
+      {
+        id: 'schedule-1',
+        name: 'Morning',
+        prompt: 'Check status',
+        modelId: 'model-1',
+        scheduledTime: 1000,
+        recurrence: { type: 'daily' },
+        enabled: true,
+        nextRun: 2000,
+        runCount: 0,
+        createdAt: 6,
+      },
+      { id: 'bad' },
+    ]));
+    localStorage.setItem('scheduled_runs', JSON.stringify([
+      {
+        scheduleId: 'schedule-1',
+        executedAt: 3000,
+        result: { success: true, messageId: 'm1' },
+      },
+      { scheduleId: 1 },
+    ]));
+    localStorage.setItem('documentation_results', JSON.stringify([
+      {
+        code: 'function x() {}',
+        language: 'javascript',
+        documentedCode: '/** x */\\nfunction x() {}',
+        documentation: 'Docs',
+        format: 'jsdoc',
+        generatedAt: 7,
+      },
+      { code: 8 },
+    ]));
+
+    jest.isolateModules(() => {
+      const { blockchainIntegrationService } = require('../src/renderer/services/blockchainIntegration') as typeof import('../src/renderer/services/blockchainIntegration');
+      const { gitIntegrationService } = require('../src/renderer/services/gitIntegration') as typeof import('../src/renderer/services/gitIntegration');
+      const { triggerActionsService } = require('../src/renderer/services/triggerActions') as typeof import('../src/renderer/services/triggerActions');
+      const { federatedLearningService } = require('../src/renderer/services/federatedLearning') as typeof import('../src/renderer/services/federatedLearning');
+      const { scheduledConversationsService } = require('../src/renderer/services/scheduledConversations') as typeof import('../src/renderer/services/scheduledConversations');
+      const { documentationGeneratorService } = require('../src/renderer/services/documentationGenerator') as typeof import('../src/renderer/services/documentationGenerator');
+
+      const blockchainConfig = blockchainIntegrationService.getConfig();
+      expect(blockchainConfig.enabled).toBe(false);
+      expect(blockchainConfig.network).toBe('local');
+      expect(blockchainIntegrationService.getTransactionHistory()).toHaveLength(1);
+
+      const gitConfig = gitIntegrationService.getConfig();
+      expect(gitConfig.enabled).toBe(true);
+      expect(gitConfig.autoCommit).toBe(false);
+      expect(gitConfig.authorName).toBe('Dev');
+      expect(gitIntegrationService.getCommitHistory()).toHaveLength(1);
+
+      expect(triggerActionsService.getAllRules()).toHaveLength(1);
+      expect(triggerActionsService.getExecutionHistory()).toHaveLength(1);
+
+      const federatedConfig = federatedLearningService.getConfig();
+      expect(federatedConfig.enabled).toBe(true);
+      expect(federatedConfig.participationMode).toBe('disabled');
+      expect(federatedConfig.trainingRounds).toBe(10);
+      expect(federatedLearningService.getLocalUpdates()).toHaveLength(1);
+
+      expect(scheduledConversationsService.getAllSchedules()).toHaveLength(1);
+      expect(scheduledConversationsService.getRunHistory('schedule-1')).toHaveLength(1);
+      scheduledConversationsService.stopScheduler();
+
+      expect(documentationGeneratorService.getHistory()).toHaveLength(1);
+    });
+  });
 });

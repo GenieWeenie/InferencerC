@@ -33,6 +33,75 @@ export interface GitRepository {
     lastCommit?: string;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const getDefaultConfig = (): GitConfig => ({
+    enabled: false,
+    autoCommit: false,
+});
+
+const sanitizeConfig = (value: unknown): GitConfig => {
+    const defaults = getDefaultConfig();
+    if (!isRecord(value)) {
+        return defaults;
+    }
+
+    return {
+        enabled: typeof value.enabled === 'boolean' ? value.enabled : defaults.enabled,
+        autoCommit: typeof value.autoCommit === 'boolean' ? value.autoCommit : defaults.autoCommit,
+        defaultCommitMessage: typeof value.defaultCommitMessage === 'string' ? value.defaultCommitMessage : undefined,
+        authorName: typeof value.authorName === 'string' ? value.authorName : undefined,
+        authorEmail: typeof value.authorEmail === 'string' ? value.authorEmail : undefined,
+    };
+};
+
+const sanitizeCommit = (value: unknown): GitCommit | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.sessionId !== 'string'
+        || typeof value.messageId !== 'number'
+        || typeof value.filePath !== 'string'
+        || typeof value.code !== 'string'
+        || typeof value.commitMessage !== 'string'
+        || typeof value.committedAt !== 'number'
+        || typeof value.success !== 'boolean') {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        sessionId: value.sessionId,
+        messageId: value.messageId,
+        filePath: value.filePath,
+        code: value.code,
+        commitMessage: value.commitMessage,
+        committedAt: value.committedAt,
+        success: value.success,
+        error: typeof value.error === 'string' ? value.error : undefined,
+    };
+};
+
+const parseStoredCommits = (raw: string): GitCommit[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeCommit(entry))
+        .filter((entry): entry is GitCommit => entry !== null);
+};
+
 export class GitIntegrationService {
     private static instance: GitIntegrationService;
     private readonly STORAGE_KEY = 'git_config';
@@ -70,16 +139,13 @@ export class GitIntegrationService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                return JSON.parse(stored);
+                return sanitizeConfig(parseJson(stored));
             }
         } catch (error) {
             console.error('Failed to load Git config:', error);
         }
 
-        return {
-            enabled: false,
-            autoCommit: false,
-        };
+        return getDefaultConfig();
     }
 
     /**
@@ -87,7 +153,7 @@ export class GitIntegrationService {
      */
     updateConfig(config: Partial<GitConfig>): void {
         const current = this.getConfig();
-        const updated = { ...current, ...config };
+        const updated = sanitizeConfig({ ...current, ...config });
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(updated));
     }
 
@@ -157,7 +223,7 @@ export class GitIntegrationService {
         try {
             const stored = localStorage.getItem(this.COMMITS_KEY);
             if (!stored) return [];
-            const commits: GitCommit[] = JSON.parse(stored);
+            const commits = parseStoredCommits(stored);
             return commits.slice(-limit).reverse();
         } catch (error) {
             console.error('Failed to load commit history:', error);
@@ -171,7 +237,7 @@ export class GitIntegrationService {
     private saveCommit(commit: GitCommit): void {
         try {
             const stored = localStorage.getItem(this.COMMITS_KEY);
-            const commits: GitCommit[] = stored ? JSON.parse(stored) : [];
+            const commits = stored ? parseStoredCommits(stored) : [];
             commits.push(commit);
             // Keep only last 100 commits
             if (commits.length > 100) {
