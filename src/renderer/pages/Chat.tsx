@@ -10,8 +10,6 @@ import {
     TopHeaderModelUtilityControls,
     TopHeaderPrimaryActions,
     TopHeaderSecondaryActions,
-    type ExperimentalFeatureAction,
-    type HeaderPrimaryActionConfig,
     type IntegrationAvailability,
 } from '../components/chat/ChatHeaderCluster';
 import {
@@ -40,13 +38,18 @@ import { crashRecoveryService } from '../services/crashRecovery';
 import type { CloudSyncStatus } from '../services/cloudSync';
 const PromptManager = React.lazy(() => import('../components/PromptManager'));
 import { useChat } from '../hooks/useChat';
-import { usePrompts, PromptSnippet } from '../hooks/usePrompts';
+import { usePrompts } from '../hooks/usePrompts';
 import { useConversationTree } from '../hooks/useConversationTree';
 import { useChatComposerInteractions } from '../hooks/useChatComposerInteractions';
+import { useChatContextOptimizer } from '../hooks/useChatContextOptimizer';
+import { useChatDiagnosticsPanel } from '../hooks/useChatDiagnosticsPanel';
+import { useChatHeaderActions } from '../hooks/useChatHeaderActions';
+import { useChatKeyboardController } from '../hooks/useChatKeyboardController';
 import { useLongPress, usePinchZoom, useSwipeNavigation } from '../hooks/useGestures';
 import { useChatMessageListSearch } from '../hooks/useChatMessageListSearch';
 import { formatPerfMs, useChatPerfBenchmarks } from '../hooks/useChatPerfBenchmarks';
 import { useChatSessionIntegrations } from '../hooks/useChatSessionIntegrations';
+import { useChatSlashPrompts } from '../hooks/useChatSlashPrompts';
 import { buildReadinessSteps, getDiagnosticsStatus } from '../lib/chatDiagnosticsModels';
 import { readIntegrationAvailability } from '../lib/chatIntegrations';
 import {
@@ -56,8 +59,6 @@ import {
 } from '../lib/chatSearch';
 import {
     createChatRowMetadataCacheState,
-    EXPERIMENTAL_FEATURE_MENU_ITEMS,
-    type ExperimentalFeatureMenuItem,
     type SearchResultPreviewCacheEntry,
 } from '../lib/chatRenderModels';
 import {
@@ -67,27 +68,17 @@ import {
     type ChatMessageAction,
 } from '../lib/chatMessageActions';
 import {
-    applyPromptSnippetAtSlash,
-    buildContextTrimSuggestionRows,
     buildComposerControlPillDescriptors,
-    buildRecentContextMessageRows,
     type ComposerControlPillDescriptor,
     type ComposerControlPillKey,
     getMaxTokensSliderConfig,
-    type RecentContextMessageRow,
     toggleToolNameInSet,
 } from '../lib/chatUiModels';
-import {
-    dispatchChatShortcutAction,
-    isTypingShortcutTarget,
-    resolveChatShortcutAction,
-} from '../lib/chatKeyboardShortcuts';
 import { useMCP } from '../hooks/useMCP';
 import type { UsageStatsRecord } from '../services/analyticsStore';
 import type { ProjectContext } from '../services/projectContext';
 import { HistoryService } from '../services/history';
 import type { ConversationTemplate } from '../services/templates';
-import type { ContextTrimSuggestion, ContextUsage } from '../services/contextManagement';
 import { RecoveryState } from '../../shared/types';
 import SkeletonLoader from '../components/SkeletonLoader';
 
@@ -181,7 +172,6 @@ const MCP_SERVERS_CONFIG_KEY = 'mcp_servers';
 const GITHUB_CREDENTIAL_MARKER_KEY = 'secure_marker_github_api_key';
 const GITHUB_CREDENTIAL_LEGACY_KEY = 'github_api_key';
 const MAX_ACTIVITY_LOG_ENTRIES = 200;
-const NOOP = () => {};
 
 type OnboardingServiceModule = typeof import('../services/onboarding');
 type CloudSyncService = typeof import('../services/cloudSync')['cloudSyncService'];
@@ -290,12 +280,6 @@ const loadActivityLogService = async (): Promise<ActivityLogServiceType> => {
     return activityLogServicePromise;
 };
 
-const estimateTokensFallback = (text: string): number => {
-    const normalized = text.trim();
-    if (!normalized) return 0;
-    return Math.max(1, Math.ceil(normalized.length / 4));
-};
-
 const mightContainPromptVariables = (text: string): boolean => /{{[^{}]+}}/.test(text);
 
 const readPersistedProjectContextFeatureEnabled = (): boolean => {
@@ -398,18 +382,6 @@ const EMPTY_INTEGRATION_AVAILABILITY: IntegrationAvailability = {
     discord: false,
     email: false,
     calendar: false,
-};
-
-const EXPERIMENTAL_FEATURE_ICON_MAP: Record<ExperimentalFeatureMenuItem['icon'], React.ComponentType<{ size?: number }>> = {
-    brain: Brain,
-    multimodal: Video,
-    collaboration: Users,
-    cloud: Cloud,
-    workspaces: Shield,
-    compliance: ClipboardList,
-    blockchain: Link,
-    agents: Bot,
-    federated: Shield,
 };
 
 const readPersistedApiLogCount = (): number => {
@@ -577,7 +549,6 @@ const Chat: React.FC = () => {
     const lastMemoryWarning = React.useRef<number>(0);
 
     const [bookmarkedMessages, setBookmarkedMessages] = React.useState<Set<number>>(new Set());
-    const [showDiagnosticsPanel, setShowDiagnosticsPanel] = React.useState(false);
     const [hasCompletedLaunchChecklist, setHasCompletedLaunchChecklist] = React.useState<boolean>(() => {
         return localStorage.getItem('chat_launch_checklist_completed') === '1';
     });
@@ -588,7 +559,6 @@ const Chat: React.FC = () => {
     const [devMonitorsEnabled, setDevMonitorsEnabled] = React.useState<boolean>(() => {
         return localStorage.getItem(CHAT_DEV_MONITORS_ENABLED_KEY) === '1';
     });
-    const [diagnosticsPanelPosition, setDiagnosticsPanelPosition] = React.useState<{ left: number; top: number }>({ left: 12, top: 12 });
     const [messageRatings, setMessageRatings] = React.useState<Record<number, 'up' | 'down'>>({});
     const [jsonMode, setJsonMode] = React.useState(false);
     const [showAnalytics, setShowAnalytics] = React.useState(false);
@@ -649,9 +619,6 @@ const Chat: React.FC = () => {
     const [showAIAgents, setShowAIAgents] = React.useState(false);
     const [showFederatedLearning, setShowFederatedLearning] = React.useState(false);
     const [integrationAvailability, setIntegrationAvailability] = React.useState<IntegrationAvailability>(EMPTY_INTEGRATION_AVAILABILITY);
-    const [excludedContextIndices, setExcludedContextIndices] = React.useState<Set<number>>(new Set());
-    const [autoSummarizeContext, setAutoSummarizeContext] = React.useState(true);
-    const contextWarningTriggered = React.useRef(false);
 
     // Recovery dialog state
     const [showRecoveryDialog, setShowRecoveryDialog] = React.useState(false);
@@ -665,9 +632,6 @@ const Chat: React.FC = () => {
     const messageListRef = React.useRef<HTMLDivElement | null>(null);
     const composerContainerRef = React.useRef<HTMLDivElement | null>(null);
     const longPressMenuRef = React.useRef<HTMLDivElement | null>(null);
-    const diagnosticsPanelRef = React.useRef<HTMLDivElement | null>(null);
-    const diagnosticsButtonRef = React.useRef<HTMLButtonElement | null>(null);
-    const diagnosticsPopoverRef = React.useRef<HTMLDivElement | null>(null);
 
     const [conversationFontSize, setConversationFontSize] = React.useState<number>(() => {
         const stored = Number(localStorage.getItem('chat_font_size'));
@@ -818,30 +782,6 @@ const Chat: React.FC = () => {
     }, [isCompactViewport, setShowHistory, showHistory]);
 
     React.useEffect(() => {
-        if (!showDiagnosticsPanel) return;
-
-        const handlePointerDown = (event: MouseEvent) => {
-            const target = event.target as Node | null;
-            if (diagnosticsPanelRef.current && target && !diagnosticsPanelRef.current.contains(target)) {
-                setShowDiagnosticsPanel(false);
-            }
-        };
-
-        const handleEscape = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                setShowDiagnosticsPanel(false);
-            }
-        };
-
-        document.addEventListener('mousedown', handlePointerDown);
-        document.addEventListener('keydown', handleEscape);
-        return () => {
-            document.removeEventListener('mousedown', handlePointerDown);
-            document.removeEventListener('keydown', handleEscape);
-        };
-    }, [showDiagnosticsPanel]);
-
-    React.useEffect(() => {
         if (!showRequestLog || hasHydratedApiLogs) return;
         let cancelled = false;
         void loadActivityLogService()
@@ -950,39 +890,6 @@ const Chat: React.FC = () => {
             window.removeEventListener('focus', handleFocus);
             window.removeEventListener('credentials-updated', handleCredentialsUpdated as EventListener);
         };
-    }, [history.length]);
-
-    // Context management state persistence (per session)
-    React.useEffect(() => {
-        if (!sessionId) {
-            setExcludedContextIndices(new Set());
-            return;
-        }
-
-        try {
-            const raw = localStorage.getItem(`context-exclusions-${sessionId}`);
-            if (!raw) {
-                setExcludedContextIndices(new Set());
-                return;
-            }
-            const parsed = JSON.parse(raw) as number[];
-            setExcludedContextIndices(new Set(parsed.filter(n => Number.isInteger(n) && n >= 0)));
-        } catch {
-            setExcludedContextIndices(new Set());
-        }
-    }, [sessionId]);
-
-    React.useEffect(() => {
-        if (!sessionId) return;
-        const safe = Array.from(excludedContextIndices).filter(index => index < history.length);
-        localStorage.setItem(`context-exclusions-${sessionId}`, JSON.stringify(safe));
-    }, [sessionId, excludedContextIndices, history.length]);
-
-    React.useEffect(() => {
-        setExcludedContextIndices(prev => {
-            const next = new Set(Array.from(prev).filter(index => index < history.length));
-            return next.size === prev.size ? prev : next;
-        });
     }, [history.length]);
 
     // Check for onboarding on mount
@@ -1334,62 +1241,32 @@ const Chat: React.FC = () => {
         localStorage.setItem('chat_launch_checklist_completed', '1');
     }, [launchChecklistComplete, hasCompletedLaunchChecklist]);
 
-    const updateDiagnosticsPanelPosition = React.useCallback(() => {
-        const trigger = diagnosticsButtonRef.current;
-        if (!trigger) return;
-
-        const triggerRect = trigger.getBoundingClientRect();
-        const panelWidth = 288;
-        const panelHeight = diagnosticsPopoverRef.current?.offsetHeight || 320;
-        const margin = 12;
-        const left = Math.min(
-            Math.max(margin, triggerRect.right - panelWidth),
-            window.innerWidth - panelWidth - margin
-        );
-        const topBelow = triggerRect.bottom + 8;
-        const topAbove = triggerRect.top - panelHeight - 8;
-        const top = topBelow + panelHeight + margin <= window.innerHeight
-            ? topBelow
-            : Math.max(margin, topAbove);
-
-        setDiagnosticsPanelPosition({ left, top });
-    }, []);
-
-    React.useEffect(() => {
-        if (!showDiagnosticsPanel) return;
-
-        const raf = window.requestAnimationFrame(updateDiagnosticsPanelPosition);
-        window.addEventListener('resize', updateDiagnosticsPanelPosition);
-        window.addEventListener('scroll', updateDiagnosticsPanelPosition, true);
-        return () => {
-            window.cancelAnimationFrame(raf);
-            window.removeEventListener('resize', updateDiagnosticsPanelPosition);
-            window.removeEventListener('scroll', updateDiagnosticsPanelPosition, true);
-        };
-    }, [showDiagnosticsPanel, updateDiagnosticsPanelPosition]);
-
     const handleToggleDevMonitors = React.useCallback(() => {
         setDevMonitorsEnabled((prev) => !prev);
     }, []);
-
-    const handleCloseDiagnosticsPanel = React.useCallback(() => {
-        setShowDiagnosticsPanel(false);
-    }, []);
-
-    const handleDiagnosticsOpenSettings = React.useCallback(() => {
-        setShowDiagnosticsPanel(false);
+    const handleOpenSettingsTab = React.useCallback(() => {
         navigateToTab('settings');
     }, [navigateToTab]);
-
-    const handleDiagnosticsOpenModels = React.useCallback(() => {
-        setShowDiagnosticsPanel(false);
+    const handleOpenModelsTab = React.useCallback(() => {
         navigateToTab('models');
     }, [navigateToTab]);
 
-    const handleDiagnosticsInsertStarterPrompt = React.useCallback(() => {
-        insertStarterPrompt();
-        setShowDiagnosticsPanel(false);
-    }, [insertStarterPrompt]);
+    const {
+        showDiagnosticsPanel,
+        diagnosticsPanelPosition,
+        diagnosticsPanelRef,
+        diagnosticsButtonRef,
+        diagnosticsPopoverRef,
+        handleToggleDiagnosticsPanel,
+        handleCloseDiagnosticsPanel,
+        handleDiagnosticsOpenSettings,
+        handleDiagnosticsOpenModels,
+        handleDiagnosticsInsertStarterPrompt,
+    } = useChatDiagnosticsPanel({
+        onOpenSettings: handleOpenSettingsTab,
+        onOpenModels: handleOpenModelsTab,
+        onInsertStarterPrompt: insertStarterPrompt,
+    });
 
     const {
         recentPerfBenchmarks,
@@ -1466,146 +1343,26 @@ const Chat: React.FC = () => {
     ]);
 
     const contextWindowTokens = currentModelObj?.contextLength || 32768;
-    const excludedContextKey = React.useMemo(
-        () => Array.from(excludedContextIndices).sort((a, b) => a - b).join(','),
-        [excludedContextIndices]
-    );
-
-    const estimateTokens = React.useCallback((text: string) => {
-        if (contextManagementService) {
-            return contextManagementService.estimateTokens(text);
-        }
-        return estimateTokensFallback(text);
-    }, [contextManagementService]);
-
-    const contextUsage = React.useMemo<ContextUsage>(() => {
-        if (contextManagementService) {
-            return contextManagementService.estimateUsage({
-                messages: history,
-                excludedIndices: excludedContextIndices,
-                systemPrompt,
-                currentInput: input,
-                reservedOutputTokens: maxTokens,
-                maxContextTokens: contextWindowTokens,
-            });
-        }
-
-        let inputTokens = estimateTokensFallback(systemPrompt || '') + estimateTokensFallback(input || '');
-        history.forEach((message, index) => {
-            if (excludedContextIndices.has(index)) return;
-            inputTokens += estimateTokensFallback(message.content || '') + 4;
-        });
-        const totalTokens = inputTokens + Math.max(0, maxTokens);
-        const fillRatio = contextWindowTokens > 0 ? totalTokens / contextWindowTokens : 1;
-        return {
-            inputTokens,
-            reservedOutputTokens: maxTokens,
-            totalTokens,
-            maxContextTokens: contextWindowTokens,
-            fillRatio,
-            warning: fillRatio >= 0.8,
-        };
-    }, [history, excludedContextIndices, systemPrompt, input, maxTokens, contextWindowTokens, excludedContextKey, contextManagementService]);
-
-    const trimSuggestions = React.useMemo<ContextTrimSuggestion[]>(() => {
-        if (!contextManagementService) return [];
-        return contextManagementService.suggestMessagesToTrim({
-            messages: history,
-            excludedIndices: excludedContextIndices,
-            targetFillRatio: 0.75,
-            usage: contextUsage,
-        });
-    }, [history, excludedContextIndices, contextUsage, excludedContextKey, contextManagementService]);
-    const trimSuggestionRows = React.useMemo(
-        () => buildContextTrimSuggestionRows(trimSuggestions, 3),
-        [trimSuggestions]
-    );
-    const recentContextRows = React.useMemo(
-        () => buildRecentContextMessageRows(history, excludedContextIndices, estimateTokens, 20),
-        [history, excludedContextIndices, excludedContextKey, estimateTokens]
-    );
-
-    React.useEffect(() => {
-        if (contextUsage.fillRatio >= 0.8 && !contextWarningTriggered.current) {
-            toast.warning(`Context window is ${(contextUsage.fillRatio * 100).toFixed(0)}% full. Consider trimming older messages.`);
-            contextWarningTriggered.current = true;
-        } else if (contextUsage.fillRatio < 0.75) {
-            contextWarningTriggered.current = false;
-        }
-    }, [contextUsage.fillRatio]);
-
-    const toggleMessageContextInclusion = React.useCallback((messageIndex: number) => {
-        setExcludedContextIndices(prev => {
-            const next = new Set(prev);
-            if (next.has(messageIndex)) {
-                next.delete(messageIndex);
-            } else {
-                next.add(messageIndex);
-            }
-            return next;
-        });
-    }, []);
-
-    const applyTrimSuggestions = React.useCallback((count: number = 3) => {
-        if (trimSuggestions.length === 0) return;
-        setExcludedContextIndices(prev => {
-            const next = new Set(prev);
-            trimSuggestions.slice(0, count).forEach(suggestion => next.add(suggestion.messageIndex));
-            return next;
-        });
-    }, [trimSuggestions]);
-
-    const buildContextSendOptions = React.useCallback((pendingInput: string) => {
-        let effectiveExcluded = new Set(excludedContextIndices);
-        let contextSummary: string | undefined;
-
-        const usageAtSend: ContextUsage = contextManagementService
-            ? contextManagementService.estimateUsage({
-                messages: history,
-                excludedIndices: effectiveExcluded,
-                systemPrompt,
-                currentInput: pendingInput,
-                reservedOutputTokens: maxTokens,
-                maxContextTokens: contextWindowTokens,
-            })
-            : (() => {
-                let inputTokens = estimateTokensFallback(systemPrompt || '') + estimateTokensFallback(pendingInput || '');
-                history.forEach((message, index) => {
-                    if (effectiveExcluded.has(index)) return;
-                    inputTokens += estimateTokensFallback(message.content || '') + 4;
-                });
-                const totalTokens = inputTokens + Math.max(0, maxTokens);
-                const fillRatio = contextWindowTokens > 0 ? totalTokens / contextWindowTokens : 1;
-                return {
-                    inputTokens,
-                    reservedOutputTokens: maxTokens,
-                    totalTokens,
-                    maxContextTokens: contextWindowTokens,
-                    fillRatio,
-                    warning: fillRatio >= 0.8,
-                };
-            })();
-
-        if (autoSummarizeContext && usageAtSend.fillRatio >= 0.8) {
-            const plan = contextManagementService?.buildAutoSummaryPlan({
-                messages: history,
-                excludedIndices: effectiveExcluded,
-                keepRecentCount: 8,
-            });
-
-            if (plan && plan.indicesToExclude.length > 0) {
-                plan.indicesToExclude.forEach(index => effectiveExcluded.add(index));
-                contextSummary = plan.summary;
-                setExcludedContextIndices(new Set(effectiveExcluded));
-                toast.info(`Auto-summarized ${plan.indicesToExclude.length} older messages to fit context limits.`);
-            }
-        }
-
-        return {
-            excludedMessageIndices: Array.from(effectiveExcluded),
-            contextSummary,
-        };
-    }, [excludedContextIndices, history, systemPrompt, maxTokens, contextWindowTokens, autoSummarizeContext, contextManagementService]);
+    const {
+        autoSummarizeContext,
+        setAutoSummarizeContext,
+        contextUsage,
+        trimSuggestionRows,
+        recentContextRows,
+        toggleMessageContextInclusion,
+        applyTrimSuggestions,
+        includeAllContext,
+        excludeTrimSuggestion,
+        buildContextSendOptions,
+    } = useChatContextOptimizer({
+        sessionId,
+        history,
+        systemPrompt,
+        input,
+        maxTokens,
+        maxContextTokens: contextWindowTokens,
+        contextManagementService,
+    });
 
     const enableProjectContextFeature = React.useCallback(() => {
         setProjectContextFeatureEnabled(true);
@@ -1799,29 +1556,19 @@ const Chat: React.FC = () => {
         return () => window.removeEventListener('beforeunload', handleBeforeUnload);
     }, [input, history]);
 
-    // Slash Command State
-    const [slashMatch, setSlashMatch] = React.useState<{ query: string; index: number } | null>(null);
-    const [activePromptIndex, setActivePromptIndex] = React.useState(0);
-    const textareaRef = React.useRef<HTMLTextAreaElement>(null);
-
-    const filteredPrompts = React.useMemo(() => {
-        if (!slashMatch) return [];
-        return prompts.filter(p => p.alias.toLowerCase().startsWith(slashMatch.query.toLowerCase()));
-    }, [slashMatch, prompts]);
-
-    const insertPrompt = React.useCallback((prompt: PromptSnippet) => {
-        if (!slashMatch || !textareaRef.current) return;
-
-        const cursorEnd = textareaRef.current.selectionEnd ?? input.length;
-        const nextInput = applyPromptSnippetAtSlash(input, cursorEnd, slashMatch.index, prompt.content);
-        setInput(nextInput);
-        setSlashMatch(null);
-
-        // Wait for render to re-focus.
-        setTimeout(() => {
-            textareaRef.current?.focus();
-        }, 10);
-    }, [input, setInput, slashMatch]);
+    const {
+        slashMatch,
+        setSlashMatch,
+        activePromptIndex,
+        setActivePromptIndex,
+        textareaRef,
+        filteredPrompts,
+        insertPrompt,
+    } = useChatSlashPrompts({
+        prompts,
+        input,
+        setInput,
+    });
 
     // Wrapper for loadSession with loading state
     const handleLoadSession = React.useCallback((id: string) => {
@@ -2129,42 +1876,6 @@ const Chat: React.FC = () => {
         setShowHistory((prev) => !prev);
     }, []);
 
-    const handleOpenTemplateLibrary = React.useCallback(() => {
-        setShowTemplateLibrary(true);
-    }, []);
-
-    const handleOpenABTesting = React.useCallback(() => {
-        setShowABTesting(true);
-    }, []);
-
-    const handleOpenPromptOptimization = React.useCallback(() => {
-        setShowPromptOptimization(true);
-    }, []);
-
-    const handleOpenWorkflows = React.useCallback(() => {
-        setShowWorkflows(true);
-    }, []);
-
-    const handleOpenAPIPlayground = React.useCallback(() => {
-        setShowAPIPlayground(true);
-    }, []);
-
-    const handleOpenDeveloperDocs = React.useCallback(() => {
-        setShowDeveloperDocs(true);
-    }, []);
-
-    const handleOpenPluginManager = React.useCallback(() => {
-        setShowPluginManager(true);
-    }, []);
-
-    const handleOpenWorkspaceViews = React.useCallback(() => {
-        setShowWorkspaceViews(true);
-    }, []);
-
-    const handleOpenCloudSyncPanel = React.useCallback(() => {
-        setShowCloudSync(true);
-    }, []);
-
     const {
         handleOpenCodeIntegration,
         handleOpenExportDialog,
@@ -2183,82 +1894,30 @@ const Chat: React.FC = () => {
         setShowCalendarSchedule,
     });
 
-    const topHeaderPrimaryActions = React.useMemo<HeaderPrimaryActionConfig[]>(() => ([
-        {
-            key: 'new-chat',
-            title: 'New Chat',
-            label: 'New',
-            icon: Plus,
-            onClick: createNewSession,
-            variant: 'primary',
-        },
-        {
-            key: 'templates',
-            title: 'Templates',
-            label: 'Templates',
-            icon: FileText,
-            onClick: handleOpenTemplateLibrary,
-        },
-        {
-            key: 'ab-test',
-            title: 'A/B Testing (Test different prompts)',
-            label: 'A/B Test',
-            icon: TestTube,
-            onClick: handleOpenABTesting,
-        },
-        {
-            key: 'optimize',
-            title: 'Prompt Optimization (AI-powered suggestions)',
-            label: 'Optimize',
-            icon: Sparkles,
-            onClick: handleOpenPromptOptimization,
-        },
-        {
-            key: 'workflows',
-            title: 'Workflows (Automation)',
-            label: 'Workflows',
-            icon: Zap,
-            onClick: handleOpenWorkflows,
-        },
-        {
-            key: 'api',
-            title: 'API Playground (Developer Tools)',
-            label: 'API',
-            icon: Code2,
-            onClick: handleOpenAPIPlayground,
-        },
-        {
-            key: 'docs',
-            title: 'Developer Documentation',
-            label: 'Docs',
-            icon: HelpCircle,
-            onClick: handleOpenDeveloperDocs,
-        },
-        {
-            key: 'plugins',
-            title: 'Plugin Manager',
-            label: 'Plugins',
-            icon: Package,
-            onClick: handleOpenPluginManager,
-        },
-        {
-            key: 'views',
-            title: 'Workspace Views',
-            label: 'Views',
-            icon: LayoutGrid,
-            onClick: handleOpenWorkspaceViews,
-        },
-    ]), [
+    const {
+        topHeaderPrimaryActions,
+        experimentalFeatureActions,
+        handleOpenCloudSyncPanel,
+    } = useChatHeaderActions({
         createNewSession,
-        handleOpenABTesting,
-        handleOpenAPIPlayground,
-        handleOpenDeveloperDocs,
-        handleOpenPluginManager,
-        handleOpenPromptOptimization,
-        handleOpenTemplateLibrary,
-        handleOpenWorkflows,
-        handleOpenWorkspaceViews,
-    ]);
+        setShowTemplateLibrary,
+        setShowABTesting,
+        setShowPromptOptimization,
+        setShowWorkflows,
+        setShowAPIPlayground,
+        setShowDeveloperDocs,
+        setShowPluginManager,
+        setShowWorkspaceViews,
+        setShowCloudSync,
+        setShowBCI,
+        setShowMultiModal,
+        setShowCollaboration,
+        setShowTeamWorkspaces,
+        setShowEnterpriseCompliance,
+        setShowBlockchain,
+        setShowAIAgents,
+        setShowFederatedLearning,
+    });
 
     const modelOptionItems = React.useMemo(
         () => availableModels.map((model) => ({
@@ -2308,75 +1967,6 @@ const Chat: React.FC = () => {
     const handleToggleSearch = React.useCallback(() => {
         setShowSearch((prev) => !prev);
     }, []);
-
-    const handleToggleDiagnosticsPanel = React.useCallback(() => {
-        setShowDiagnosticsPanel((prev) => !prev);
-    }, []);
-
-    const handleOpenBCI = React.useCallback(() => {
-        setShowBCI(true);
-    }, []);
-
-    const handleOpenMultiModal = React.useCallback(() => {
-        setShowMultiModal(true);
-    }, []);
-
-    const handleOpenCollaboration = React.useCallback(() => {
-        setShowCollaboration(true);
-    }, []);
-
-    const handleOpenTeamWorkspaces = React.useCallback(() => {
-        setShowTeamWorkspaces(true);
-    }, []);
-
-    const handleOpenEnterpriseCompliance = React.useCallback(() => {
-        setShowEnterpriseCompliance(true);
-    }, []);
-
-    const handleOpenBlockchain = React.useCallback(() => {
-        setShowBlockchain(true);
-    }, []);
-
-    const handleOpenAIAgents = React.useCallback(() => {
-        setShowAIAgents(true);
-    }, []);
-
-    const handleOpenFederatedLearning = React.useCallback(() => {
-        setShowFederatedLearning(true);
-    }, []);
-
-    const experimentalFeatureOpeners = React.useMemo<Record<string, () => void>>(() => ({
-        bci: handleOpenBCI,
-        multimodal: handleOpenMultiModal,
-        collaboration: handleOpenCollaboration,
-        cloudSync: handleOpenCloudSyncPanel,
-        teamWorkspaces: handleOpenTeamWorkspaces,
-        enterpriseCompliance: handleOpenEnterpriseCompliance,
-        blockchain: handleOpenBlockchain,
-        aiAgents: handleOpenAIAgents,
-        federatedLearning: handleOpenFederatedLearning,
-    }), [
-        handleOpenAIAgents,
-        handleOpenBCI,
-        handleOpenBlockchain,
-        handleOpenCloudSyncPanel,
-        handleOpenCollaboration,
-        handleOpenEnterpriseCompliance,
-        handleOpenFederatedLearning,
-        handleOpenMultiModal,
-        handleOpenTeamWorkspaces,
-    ]);
-
-    const experimentalFeatureActions = React.useMemo<ExperimentalFeatureAction[]>(
-        () =>
-            EXPERIMENTAL_FEATURE_MENU_ITEMS.map((item) => ({
-                key: item.key,
-                label: item.label,
-                icon: EXPERIMENTAL_FEATURE_ICON_MAP[item.icon],
-                onClick: experimentalFeatureOpeners[item.key] || NOOP,
-            })),
-        [experimentalFeatureOpeners]
-    );
 
     const clampLongPressMenuPosition = React.useCallback((x: number, y: number) => {
         const margin = 8;
@@ -2619,85 +2209,27 @@ const Chat: React.FC = () => {
         treeHook.switchToSibling(currentIndex + direction);
     }, [treeHook]);
 
-    const handleShortcutEscape = React.useCallback(() => {
-        if (showShortcutsModal) {
-            setShowShortcutsModal(false);
-        } else if (editingMessageIndex !== null) {
-            handleCancelEdit();
-        } else {
-            stopGeneration();
-        }
-    }, [showShortcutsModal, editingMessageIndex, handleCancelEdit, stopGeneration]);
-
-    const shortcutStateRef = React.useRef({
+    useChatKeyboardController({
         historyLength: history.length,
         branchingEnabled,
+        showShortcutsModal,
+        editingMessageIndex,
+        onOpenShortcutsModal: () => setShowShortcutsModal(true),
+        onNewChat: createNewSession,
+        onToggleHistory: handleToggleHistoryPanel,
+        onClearChat: handleClearChat,
+        onToggleSearch: handleToggleSearch,
+        onCopyLastResponse: handleCopyLastResponse,
+        onOpenExportDialog: handleOpenExportDialogShortcut,
+        onOpenGlobalSearch: () => setShowGlobalSearch(true),
+        onOpenRecommendations: () => setShowRecommendations(true),
+        onToggleTreeView: handleToggleTreeView,
+        onToggleBranching: handleToggleBranching,
+        onNavigateBranch: handleNavigateBranch,
+        onCloseShortcutsModal: () => setShowShortcutsModal(false),
+        onCancelEdit: handleCancelEdit,
+        onStopGeneration: stopGeneration,
     });
-    const shortcutDispatcherRef = React.useRef<(action: ReturnType<typeof resolveChatShortcutAction>) => void>(() => {});
-
-    React.useEffect(() => {
-        shortcutStateRef.current = {
-            historyLength: history.length,
-            branchingEnabled,
-        };
-    }, [history.length, branchingEnabled]);
-
-    React.useEffect(() => {
-        shortcutDispatcherRef.current = (action) => {
-            if (!action) {
-                return;
-            }
-
-            dispatchChatShortcutAction(action, {
-                openShortcutsModal: () => setShowShortcutsModal(true),
-                newChat: createNewSession,
-                toggleHistory: handleToggleHistoryPanel,
-                clearChat: handleClearChat,
-                toggleSearch: handleToggleSearch,
-                copyLastResponse: handleCopyLastResponse,
-                openExportDialog: handleOpenExportDialogShortcut,
-                openGlobalSearch: () => setShowGlobalSearch(true),
-                openRecommendations: () => setShowRecommendations(true),
-                toggleTreeView: handleToggleTreeView,
-                toggleBranching: handleToggleBranching,
-                navigateBranch: handleNavigateBranch,
-                escape: handleShortcutEscape,
-            });
-        };
-    }, [
-        createNewSession,
-        handleClearChat,
-        handleCopyLastResponse,
-        handleNavigateBranch,
-        handleOpenExportDialogShortcut,
-        handleShortcutEscape,
-        handleToggleSearch,
-        handleToggleBranching,
-        handleToggleHistoryPanel,
-        handleToggleTreeView,
-    ]);
-
-    // Keyboard shortcuts listener attaches once and delegates via refs.
-    React.useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            const action = resolveChatShortcutAction(event, {
-                isTyping: isTypingShortcutTarget(event.target),
-                branchingEnabled: shortcutStateRef.current.branchingEnabled,
-                allowClearChat: shortcutStateRef.current.historyLength > 0,
-                allowExportDialog: shortcutStateRef.current.historyLength > 0,
-            });
-
-            if (!action) {
-                return;
-            }
-
-            event.preventDefault();
-            shortcutDispatcherRef.current(action);
-        };
-
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
 
     const {
         handleToggleSearchResultsList,
@@ -2911,15 +2443,11 @@ const Chat: React.FC = () => {
         applyTrimSuggestions(3);
     }, [applyTrimSuggestions]);
     const handleIncludeAllContext = React.useCallback(() => {
-        setExcludedContextIndices(new Set());
-    }, []);
+        includeAllContext();
+    }, [includeAllContext]);
     const handleExcludeTrimSuggestion = React.useCallback((messageIndex: number) => {
-        setExcludedContextIndices((prev) => {
-            const next = new Set(prev);
-            next.add(messageIndex);
-            return next;
-        });
-    }, []);
+        excludeTrimSuggestion(messageIndex);
+    }, [excludeTrimSuggestion]);
     const handleBatchSizeChange = React.useCallback((value: number) => {
         setBatchSize(value);
     }, [setBatchSize]);
