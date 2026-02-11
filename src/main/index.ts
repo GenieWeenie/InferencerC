@@ -104,6 +104,70 @@ ipcMain.handle('quit-and-install', () => {
 const RECOVERY_STATE_PATH = path.join(app.getPath('userData'), 'recovery-state.json');
 const getSecureStoragePath = () => path.join(app.getPath('userData'), 'secure-storage.json');
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const parseStringRecord = (raw: string): Record<string, string> => {
+  const parsed = parseJson(raw);
+  if (!isRecord(parsed)) {
+    return {};
+  }
+  const result: Record<string, string> = {};
+  Object.entries(parsed).forEach(([key, value]) => {
+    if (typeof value === 'string') {
+      result[key] = value;
+    }
+  });
+  return result;
+};
+
+const parseRecoveryState = (raw: string): RecoveryState | null => {
+  const parsed = parseJson(raw);
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  if (
+    typeof parsed.sessionId !== 'string'
+    || typeof parsed.timestamp !== 'number'
+    || !Number.isFinite(parsed.timestamp)
+  ) {
+    return null;
+  }
+  return {
+    sessionId: parsed.sessionId,
+    timestamp: parsed.timestamp,
+    draftMessage: typeof parsed.draftMessage === 'string' ? parsed.draftMessage : undefined,
+    pendingResponse: typeof parsed.pendingResponse === 'boolean' ? parsed.pendingResponse : undefined,
+  };
+};
+
+const parseWindowState = (raw: string): WindowState | null => {
+  const parsed = parseJson(raw);
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  if (typeof parsed.width !== 'number' || typeof parsed.height !== 'number') {
+    return null;
+  }
+  return {
+    x: typeof parsed.x === 'number' ? parsed.x : undefined,
+    y: typeof parsed.y === 'number' ? parsed.y : undefined,
+    width: parsed.width,
+    height: parsed.height,
+    isMaximized: typeof parsed.isMaximized === 'boolean' ? parsed.isMaximized : undefined,
+    isFullscreen: typeof parsed.isFullscreen === 'boolean' ? parsed.isFullscreen : undefined,
+  };
+};
+
 const loadSecureStorage = (): Record<string, string> => {
   try {
     const storePath = getSecureStoragePath();
@@ -111,7 +175,7 @@ const loadSecureStorage = (): Record<string, string> => {
       return {};
     }
     const raw = fs.readFileSync(storePath, 'utf-8');
-    return JSON.parse(raw) as Record<string, string>;
+    return parseStringRecord(raw);
   } catch (error) {
     console.error('Failed to load secure storage file:', error);
     return {};
@@ -141,7 +205,7 @@ ipcMain.handle('get-recovery-state', async () => {
   try {
     if (fs.existsSync(RECOVERY_STATE_PATH)) {
       const data = fs.readFileSync(RECOVERY_STATE_PATH, 'utf-8');
-      return { success: true, state: JSON.parse(data) };
+      return { success: true, state: parseRecoveryState(data) };
     }
     return { success: true, state: null };
   } catch (error: unknown) {
@@ -309,7 +373,11 @@ function saveWindowState(win: BrowserWindow) {
 function loadWindowState(): WindowState {
   try {
     if (fs.existsSync(WINDOW_STATE_PATH)) {
-      const savedState = JSON.parse(fs.readFileSync(WINDOW_STATE_PATH, 'utf-8'));
+      const rawState = fs.readFileSync(WINDOW_STATE_PATH, 'utf-8');
+      const savedState = parseWindowState(rawState);
+      if (!savedState) {
+        throw new Error('Invalid saved window state format');
+      }
 
       // Validate bounds (size constraints)
       const validatedState = validateBounds(savedState);

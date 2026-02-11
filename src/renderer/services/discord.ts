@@ -45,12 +45,38 @@ interface DiscordWebhookResponse {
     id?: string;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 class DiscordService {
     private config: DiscordConfig | null = null;
     private readonly STORAGE_KEY = 'discord_config';
 
     constructor() {
         this.loadConfig();
+    }
+
+    private sanitizeConfig(value: unknown): DiscordConfig | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+        if (typeof value.webhookUrl !== 'string' || value.webhookUrl.trim().length === 0) {
+            return null;
+        }
+        return {
+            webhookUrl: value.webhookUrl,
+            username: typeof value.username === 'string' && value.username.trim().length > 0 ? value.username : undefined,
+            avatarUrl: typeof value.avatarUrl === 'string' && value.avatarUrl.trim().length > 0 ? value.avatarUrl : undefined,
+        };
     }
 
     /**
@@ -60,7 +86,8 @@ class DiscordService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                this.config = JSON.parse(stored);
+                const parsed = parseJson(stored);
+                this.config = this.sanitizeConfig(parsed);
             }
         } catch (error) {
             console.error('Failed to load Discord config:', error);
@@ -86,7 +113,7 @@ class DiscordService {
      * Set configuration
      */
     setConfig(config: DiscordConfig): void {
-        this.config = config;
+        this.config = this.sanitizeConfig(config);
         this.saveConfig();
     }
 

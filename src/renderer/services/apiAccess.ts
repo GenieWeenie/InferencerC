@@ -29,6 +29,18 @@ export interface APIStatus {
     endpoints: APIEndpoint[];
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 class APIAccessService {
     private config: APIConfig | null = null;
     private readonly STORAGE_KEY = 'api_access_config';
@@ -38,6 +50,43 @@ class APIAccessService {
         this.loadConfig();
     }
 
+    private getDefaultConfig(): APIConfig {
+        return {
+            enabled: false,
+            port: this.DEFAULT_PORT,
+            rateLimit: {
+                requestsPerMinute: 60,
+            },
+        };
+    }
+
+    private sanitizeConfig(value: unknown): APIConfig | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+
+        const defaultConfig = this.getDefaultConfig();
+        const portCandidate = typeof value.port === 'number' ? value.port : Number(value.port);
+        const normalizedPort = Number.isFinite(portCandidate)
+            ? Math.max(1, Math.min(65535, Math.round(portCandidate)))
+            : defaultConfig.port;
+
+        const allowedOrigins = Array.isArray(value.allowedOrigins)
+            ? value.allowedOrigins.filter((origin): origin is string => typeof origin === 'string' && origin.trim().length > 0)
+            : undefined;
+        const rateLimit = isRecord(value.rateLimit) && typeof value.rateLimit.requestsPerMinute === 'number' && Number.isFinite(value.rateLimit.requestsPerMinute)
+            ? { requestsPerMinute: Math.max(1, Math.round(value.rateLimit.requestsPerMinute)) }
+            : defaultConfig.rateLimit;
+
+        return {
+            enabled: typeof value.enabled === 'boolean' ? value.enabled : defaultConfig.enabled,
+            port: normalizedPort,
+            apiKey: typeof value.apiKey === 'string' && value.apiKey.trim().length > 0 ? value.apiKey : undefined,
+            allowedOrigins: allowedOrigins && allowedOrigins.length > 0 ? allowedOrigins : undefined,
+            rateLimit,
+        };
+    }
+
     /**
      * Load configuration from localStorage
      */
@@ -45,23 +94,14 @@ class APIAccessService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                this.config = JSON.parse(stored);
+                const parsed = parseJson(stored);
+                this.config = this.sanitizeConfig(parsed) || this.getDefaultConfig();
             } else {
-                // Default config
-                this.config = {
-                    enabled: false,
-                    port: this.DEFAULT_PORT,
-                    rateLimit: {
-                        requestsPerMinute: 60,
-                    },
-                };
+                this.config = this.getDefaultConfig();
             }
         } catch (error) {
             console.error('Failed to load API config:', error);
-            this.config = {
-                enabled: false,
-                port: this.DEFAULT_PORT,
-            };
+            this.config = this.getDefaultConfig();
         }
     }
 
@@ -84,10 +124,11 @@ class APIAccessService {
      * Set configuration
      */
     setConfig(config: Partial<APIConfig>): void {
-        this.config = {
-            ...this.config,
+        const merged = {
+            ...(this.config || this.getDefaultConfig()),
             ...config,
-        } as APIConfig;
+        };
+        this.config = this.sanitizeConfig(merged) || this.getDefaultConfig();
         this.saveConfig();
     }
 
@@ -95,10 +136,7 @@ class APIAccessService {
      * Get current configuration
      */
     getConfig(): APIConfig {
-        return this.config || {
-            enabled: false,
-            port: this.DEFAULT_PORT,
-        };
+        return this.config || this.getDefaultConfig();
     }
 
     /**

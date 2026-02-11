@@ -59,12 +59,41 @@ export interface SlackResult {
     error?: string;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 class SlackService {
     private config: SlackConfig | null = null;
     private readonly STORAGE_KEY = 'slack_config';
 
     constructor() {
         this.loadConfig();
+    }
+
+    private sanitizeConfig(value: unknown): SlackConfig | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+        return {
+            webhookUrl: typeof value.webhookUrl === 'string' && value.webhookUrl.trim().length > 0
+                ? value.webhookUrl
+                : undefined,
+            apiToken: typeof value.apiToken === 'string' && value.apiToken.trim().length > 0
+                ? value.apiToken
+                : undefined,
+            defaultChannel: typeof value.defaultChannel === 'string' && value.defaultChannel.trim().length > 0
+                ? value.defaultChannel
+                : undefined,
+        };
     }
 
     /**
@@ -74,7 +103,8 @@ class SlackService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                this.config = JSON.parse(stored);
+                const parsed = parseJson(stored);
+                this.config = this.sanitizeConfig(parsed);
             }
         } catch (error) {
             console.error('Failed to load Slack config:', error);
@@ -100,7 +130,7 @@ class SlackService {
      * Set configuration
      */
     setConfig(config: SlackConfig): void {
-        this.config = config;
+        this.config = this.sanitizeConfig(config);
         this.saveConfig();
     }
 

@@ -31,12 +31,45 @@ export interface CalendarResult {
     error?: string;
 }
 
+const CALENDAR_PROVIDERS = new Set<CalendarConfig['provider']>([
+    'google',
+    'outlook',
+    'ical',
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 class CalendarService {
     private config: CalendarConfig | null = null;
     private readonly STORAGE_KEY = 'calendar_config';
 
     constructor() {
         this.loadConfig();
+    }
+
+    private sanitizeConfig(value: unknown): CalendarConfig | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+        if (!CALENDAR_PROVIDERS.has(value.provider as CalendarConfig['provider'])) {
+            return null;
+        }
+        return {
+            provider: value.provider as CalendarConfig['provider'],
+            apiKey: typeof value.apiKey === 'string' && value.apiKey.trim().length > 0 ? value.apiKey : undefined,
+            clientId: typeof value.clientId === 'string' && value.clientId.trim().length > 0 ? value.clientId : undefined,
+            accessToken: typeof value.accessToken === 'string' && value.accessToken.trim().length > 0 ? value.accessToken : undefined,
+        };
     }
 
     /**
@@ -46,7 +79,8 @@ class CalendarService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                this.config = JSON.parse(stored);
+                const parsed = parseJson(stored);
+                this.config = this.sanitizeConfig(parsed);
             }
         } catch (error) {
             console.error('Failed to load calendar config:', error);
@@ -72,7 +106,7 @@ class CalendarService {
      * Set configuration
      */
     setConfig(config: CalendarConfig): void {
-        this.config = config;
+        this.config = this.sanitizeConfig(config);
         this.saveConfig();
     }
 

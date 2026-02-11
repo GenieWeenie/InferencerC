@@ -34,6 +34,20 @@ export interface MockMatch {
     params?: Record<string, string>;
 }
 
+const HTTP_METHODS = new Set<MockEndpoint['method']>(['GET', 'POST', 'PUT', 'DELETE', 'PATCH']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 export class MockServerService {
     private static instance: MockServerService;
     private readonly STORAGE_KEY = 'mock_endpoints';
@@ -42,6 +56,67 @@ export class MockServerService {
 
     private constructor() {
         this.loadMockEndpoints();
+    }
+
+    private sanitizeResponse(value: unknown): MockResponse | null {
+        if (!isRecord(value) || typeof value.status !== 'number' || !Number.isFinite(value.status)) {
+            return null;
+        }
+        const headers = isRecord(value.headers)
+            ? Object.fromEntries(
+                Object.entries(value.headers).filter(([, headerValue]) => typeof headerValue === 'string')
+            )
+            : undefined;
+        return {
+            status: value.status,
+            headers: headers && Object.keys(headers).length > 0 ? headers : undefined,
+            body: value.body,
+        };
+    }
+
+    private sanitizeEndpoint(value: unknown): MockEndpoint | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+        if (
+            typeof value.id !== 'string'
+            || !HTTP_METHODS.has(value.method as MockEndpoint['method'])
+            || typeof value.path !== 'string'
+            || typeof value.enabled !== 'boolean'
+            || typeof value.createdAt !== 'number'
+            || !Number.isFinite(value.createdAt)
+        ) {
+            return null;
+        }
+        const response = this.sanitizeResponse(value.response);
+        if (!response) {
+            return null;
+        }
+        return {
+            id: value.id,
+            method: value.method as MockEndpoint['method'],
+            path: value.path,
+            response,
+            enabled: value.enabled,
+            delay: typeof value.delay === 'number' && Number.isFinite(value.delay) ? value.delay : undefined,
+            statusCode: typeof value.statusCode === 'number' && Number.isFinite(value.statusCode) ? value.statusCode : undefined,
+            createdAt: value.createdAt,
+        };
+    }
+
+    private parseStoredEndpoints(raw: string): MockEndpoint[] {
+        const parsed = parseJson(raw);
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        const endpoints: MockEndpoint[] = [];
+        for (let index = 0; index < parsed.length; index++) {
+            const endpoint = this.sanitizeEndpoint(parsed[index]);
+            if (endpoint) {
+                endpoints.push(endpoint);
+            }
+        }
+        return endpoints;
     }
 
     static getInstance(): MockServerService {
@@ -87,7 +162,7 @@ export class MockServerService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
-            return JSON.parse(stored);
+            return this.parseStoredEndpoints(stored);
         } catch (error) {
             console.error('Failed to load mock endpoints:', error);
             return [];
@@ -109,7 +184,10 @@ export class MockServerService {
         const endpoint = this.getEndpoint(id);
         if (!endpoint) return false;
 
-        const updated = { ...endpoint, ...updates };
+        const updated = this.sanitizeEndpoint({ ...endpoint, ...updates });
+        if (!updated) {
+            return false;
+        }
         this.saveEndpoint(updated);
         return true;
     }
@@ -314,19 +392,25 @@ export class MockServerService {
      * Import endpoints from JSON
      */
     importEndpoints(json: string): { success: boolean; count: number; error?: string } {
-        try {
-            const endpoints: MockEndpoint[] = JSON.parse(json);
-            endpoints.forEach(endpoint => {
-                this.saveEndpoint(endpoint);
-            });
-            return { success: true, count: endpoints.length };
-        } catch (error) {
+        const parsed = parseJson(json);
+        if (!Array.isArray(parsed)) {
             return {
                 success: false,
                 count: 0,
-                error: error instanceof Error ? error.message : 'Invalid JSON',
+                error: 'Invalid JSON',
             };
         }
+
+        let importedCount = 0;
+        parsed.forEach((entry) => {
+            const endpoint = this.sanitizeEndpoint(entry);
+            if (!endpoint) {
+                return;
+            }
+            this.saveEndpoint(endpoint);
+            importedCount += 1;
+        });
+        return { success: true, count: importedCount };
     }
 }
 

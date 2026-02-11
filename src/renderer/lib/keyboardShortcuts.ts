@@ -38,6 +38,48 @@ export interface ShortcutConflict {
  */
 export type ChordBinding = string[][];
 
+const SHORTCUT_CATEGORIES = new Set<ShortcutCategory>([
+    'Navigation',
+    'Chat',
+    'Editing',
+    'View',
+    'Tools',
+    'System',
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeKeyBinding = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+};
+
+const sanitizeChordBinding = (value: unknown): ChordBinding => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const chord: ChordBinding = [];
+    for (let index = 0; index < value.length; index++) {
+        const keys = sanitizeKeyBinding(value[index]);
+        if (keys.length > 0) {
+            chord.push(keys);
+        }
+    }
+    return chord;
+};
+
 // Default keyboard shortcuts configuration
 export const DEFAULT_SHORTCUTS: KeyboardShortcut[] = [
     // Navigation
@@ -241,6 +283,119 @@ export class KeyboardShortcutsManager {
         this.loadShortcuts();
     }
 
+    private hydrateShortcutFromDefaults(
+        defaultsById: Map<string, KeyboardShortcut>,
+        storedEntryById: Map<string, Record<string, unknown>>
+    ): void {
+        DEFAULT_SHORTCUTS.forEach((defaultShortcut) => {
+            const storedShortcut = storedEntryById.get(defaultShortcut.id);
+            if (!storedShortcut) {
+                this.shortcuts.set(defaultShortcut.id, { ...defaultShortcut });
+                return;
+            }
+
+            const isChord = typeof storedShortcut.isChord === 'boolean'
+                ? storedShortcut.isChord
+                : (defaultShortcut.isChord ?? false);
+
+            const merged: KeyboardShortcut = {
+                ...defaultShortcut,
+                enabled: typeof storedShortcut.enabled === 'boolean'
+                    ? storedShortcut.enabled
+                    : defaultShortcut.enabled,
+                isChord,
+            };
+
+            if (isChord) {
+                const customChord = sanitizeChordBinding(storedShortcut.customChord);
+                if (customChord.length > 0) {
+                    merged.customChord = customChord;
+                }
+            } else {
+                const customKeys = sanitizeKeyBinding(storedShortcut.customKeys);
+                if (customKeys.length > 0) {
+                    merged.customKeys = customKeys;
+                }
+            }
+
+            this.shortcuts.set(merged.id, merged);
+        });
+
+        storedEntryById.forEach((storedShortcut, id) => {
+            if (defaultsById.has(id)) {
+                return;
+            }
+            const customShortcut = this.sanitizeCustomShortcut(storedShortcut);
+            if (customShortcut) {
+                this.shortcuts.set(id, customShortcut);
+            }
+        });
+    }
+
+    private sanitizeCustomShortcut(value: unknown): KeyboardShortcut | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+        if (
+            typeof value.id !== 'string'
+            || typeof value.label !== 'string'
+            || typeof value.description !== 'string'
+            || !SHORTCUT_CATEGORIES.has(value.category as ShortcutCategory)
+            || typeof value.enabled !== 'boolean'
+        ) {
+            return null;
+        }
+
+        const isChord = typeof value.isChord === 'boolean' ? value.isChord : false;
+        const defaultKeys = sanitizeKeyBinding(value.defaultKeys);
+        const defaultChord = sanitizeChordBinding(value.defaultChord);
+        if (!isChord && defaultKeys.length === 0) {
+            return null;
+        }
+        if (isChord && defaultChord.length === 0) {
+            return null;
+        }
+
+        const shortcut: KeyboardShortcut = {
+            id: value.id,
+            label: value.label,
+            description: value.description,
+            category: value.category as ShortcutCategory,
+            defaultKeys: isChord ? [] : defaultKeys,
+            enabled: value.enabled,
+            isChord,
+            defaultChord: isChord ? defaultChord : undefined,
+        };
+
+        const customKeys = sanitizeKeyBinding(value.customKeys);
+        const customChord = sanitizeChordBinding(value.customChord);
+        if (!isChord && customKeys.length > 0) {
+            shortcut.customKeys = customKeys;
+        }
+        if (isChord && customChord.length > 0) {
+            shortcut.customChord = customChord;
+        }
+
+        return shortcut;
+    }
+
+    private loadStoredShortcutRecords(stored: string): Map<string, Record<string, unknown>> {
+        const parsed = parseJson(stored);
+        if (!Array.isArray(parsed)) {
+            return new Map();
+        }
+
+        const storedById = new Map<string, Record<string, unknown>>();
+        parsed.forEach((entry) => {
+            if (!isRecord(entry) || typeof entry.id !== 'string') {
+                return;
+            }
+            storedById.set(entry.id, entry);
+        });
+
+        return storedById;
+    }
+
     /**
      * Load shortcuts from localStorage or use defaults
      */
@@ -249,52 +404,9 @@ export class KeyboardShortcutsManager {
             const stored = localStorage.getItem(KeyboardShortcutsManager.STORAGE_KEY);
 
             if (stored) {
-                const parsed = JSON.parse(stored) as KeyboardShortcut[];
                 const defaultsById = new Map(DEFAULT_SHORTCUTS.map(shortcut => [shortcut.id, shortcut]));
-                const storedById = new Map<string, KeyboardShortcut>();
-
-                if (Array.isArray(parsed)) {
-                    parsed.forEach(shortcut => {
-                        if (shortcut && typeof shortcut.id === 'string') {
-                            storedById.set(shortcut.id, shortcut);
-                        }
-                    });
-                }
-
-                // Merge stored shortcuts with latest defaults so default key updates
-                // (and conflict fixes) propagate without removing user custom overrides.
-                DEFAULT_SHORTCUTS.forEach(defaultShortcut => {
-                    const storedShortcut = storedById.get(defaultShortcut.id);
-                    if (!storedShortcut) {
-                        this.shortcuts.set(defaultShortcut.id, { ...defaultShortcut });
-                        return;
-                    }
-
-                    const isChord = storedShortcut.isChord ?? defaultShortcut.isChord ?? false;
-                    const merged: KeyboardShortcut = {
-                        ...defaultShortcut,
-                        enabled: storedShortcut.enabled ?? defaultShortcut.enabled,
-                        isChord,
-                    };
-
-                    if (isChord) {
-                        if (Array.isArray(storedShortcut.customChord) && storedShortcut.customChord.length > 0) {
-                            merged.customChord = storedShortcut.customChord;
-                        }
-                    } else if (Array.isArray(storedShortcut.customKeys) && storedShortcut.customKeys.length > 0) {
-                        merged.customKeys = storedShortcut.customKeys;
-                    }
-
-                    this.shortcuts.set(merged.id, merged);
-                });
-
-                // Preserve any non-default shortcuts that may have been imported.
-                storedById.forEach((shortcut, id) => {
-                    if (!defaultsById.has(id)) {
-                        this.shortcuts.set(id, shortcut);
-                    }
-                });
-
+                const storedById = this.loadStoredShortcutRecords(stored);
+                this.hydrateShortcutFromDefaults(defaultsById, storedById);
                 // Persist normalized structure back to storage after migration.
                 localStorage.setItem(
                     KeyboardShortcutsManager.STORAGE_KEY,
@@ -587,21 +699,27 @@ export class KeyboardShortcutsManager {
      * Import shortcuts configuration
      */
     importShortcuts(json: string): void {
-        try {
-            const imported = JSON.parse(json) as KeyboardShortcut[];
-
-            // Validate imported shortcuts
-            imported.forEach(shortcut => {
-                if (this.shortcuts.has(shortcut.id)) {
-                    this.shortcuts.set(shortcut.id, shortcut);
-                }
-            });
-
-            this.saveShortcuts();
-        } catch (error) {
-            console.error('Failed to import shortcuts:', error);
+        const parsed = parseJson(json);
+        if (!Array.isArray(parsed)) {
             throw new Error('Invalid shortcuts configuration');
         }
+
+        const defaultsById = new Map(DEFAULT_SHORTCUTS.map(shortcut => [shortcut.id, shortcut]));
+        const importedById = new Map<string, Record<string, unknown>>();
+        parsed.forEach((entry) => {
+            if (!isRecord(entry) || typeof entry.id !== 'string') {
+                return;
+            }
+            importedById.set(entry.id, entry);
+        });
+
+        if (importedById.size === 0) {
+            throw new Error('Invalid shortcuts configuration');
+        }
+
+        this.shortcuts.clear();
+        this.hydrateShortcutFromDefaults(defaultsById, importedById);
+        this.saveShortcuts();
     }
 
     /**

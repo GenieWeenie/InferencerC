@@ -37,12 +37,64 @@ export interface EmailResult {
     error?: string;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 class EmailService {
     private config: EmailConfig | null = null;
     private readonly STORAGE_KEY = 'email_config';
 
     constructor() {
         this.loadConfig();
+    }
+
+    private sanitizeConfig(value: unknown): EmailConfig | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+
+        let smtpConfig: SMTPConfig | undefined;
+        if (isRecord(value.smtpConfig) && isRecord(value.smtpConfig.auth)) {
+            const smtp = value.smtpConfig;
+            const auth = smtp.auth;
+            if (
+                typeof smtp.host === 'string'
+                && typeof smtp.port === 'number'
+                && Number.isFinite(smtp.port)
+                && typeof smtp.secure === 'boolean'
+                && typeof auth.user === 'string'
+                && typeof auth.password === 'string'
+            ) {
+                smtpConfig = {
+                    host: smtp.host,
+                    port: smtp.port,
+                    secure: smtp.secure,
+                    auth: {
+                        user: auth.user,
+                        password: auth.password,
+                    },
+                };
+            }
+        }
+
+        return {
+            defaultRecipient: typeof value.defaultRecipient === 'string' && value.defaultRecipient.trim().length > 0
+                ? value.defaultRecipient
+                : undefined,
+            defaultSubject: typeof value.defaultSubject === 'string' && value.defaultSubject.trim().length > 0
+                ? value.defaultSubject
+                : undefined,
+            smtpConfig,
+        };
     }
 
     /**
@@ -52,7 +104,8 @@ class EmailService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                this.config = JSON.parse(stored);
+                const parsed = parseJson(stored);
+                this.config = this.sanitizeConfig(parsed);
             }
         } catch (error) {
             console.error('Failed to load email config:', error);
@@ -78,7 +131,7 @@ class EmailService {
      * Set configuration
      */
     setConfig(config: EmailConfig): void {
-        this.config = config;
+        this.config = this.sanitizeConfig(config);
         this.saveConfig();
     }
 

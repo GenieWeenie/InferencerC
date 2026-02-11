@@ -30,6 +30,15 @@ import { InteractiveTutorial } from '../components/InteractiveTutorial';
 import { PluginManager } from '../components/PluginManager';
 import { onboardingService } from '../services/onboarding';
 import { credentialService } from '../services/credentials';
+import {
+    DEFAULT_SYSTEM_PRESETS,
+    DEFAULT_USAGE_STATS,
+    parseStoredModelEndpoints,
+    parseStoredSystemPresets,
+    parseStoredUsageStats,
+    readStoredIntegerWithFallback,
+    readStoredStringWithFallback,
+} from './settingsStorage';
 
 const Settings: React.FC = () => {
     // API Keys
@@ -82,14 +91,14 @@ const Settings: React.FC = () => {
     
     // Preferences
     const [preferences, setPreferences] = useState<SettingsPreferences>({
-        defaultModel: localStorage.getItem('app_default_model') || '',
-        codeFont: localStorage.getItem('app_code_font') || 'JetBrains Mono',
-        chatFont: localStorage.getItem('app_chat_font') || 'Inter',
-        codeFontSize: parseInt(localStorage.getItem('app_code_font_size') || '13'),
-        chatFontSize: parseInt(localStorage.getItem('app_chat_font_size') || '14'),
-        layoutMode: localStorage.getItem('app_layout_mode') || 'normal', // normal, compact, wide
-        autoScroll: localStorage.getItem('app_auto_scroll') !== 'false', // default true
-        notifications: localStorage.getItem('app_notifications') !== 'false', // default true
+        defaultModel: readStoredStringWithFallback('app_default_model', ''),
+        codeFont: readStoredStringWithFallback('app_code_font', 'JetBrains Mono'),
+        chatFont: readStoredStringWithFallback('app_chat_font', 'Inter'),
+        codeFontSize: readStoredIntegerWithFallback('app_code_font_size', 13),
+        chatFontSize: readStoredIntegerWithFallback('app_chat_font_size', 14),
+        layoutMode: readStoredStringWithFallback('app_layout_mode', 'normal'), // normal, compact, wide
+        autoScroll: readStoredStringWithFallback('app_auto_scroll', 'true') !== 'false', // default true
+        notifications: readStoredStringWithFallback('app_notifications', 'true') !== 'false', // default true
     });
 
     useEffect(() => {
@@ -114,16 +123,19 @@ const Settings: React.FC = () => {
         };
 
         void loadCredentials();
-        
+
         const nDbId = localStorage.getItem('notion_database_id');
         if (nDbId) setNotionDatabaseId(nDbId);
 
         const savedEndpoints = localStorage.getItem('modelEndpoints');
-        if (savedEndpoints) setEndpoints(JSON.parse(savedEndpoints));
-        
+        if (savedEndpoints) {
+            const parsedEndpoints = parseStoredModelEndpoints(savedEndpoints);
+            setEndpoints(parsedEndpoints || []);
+        }
+
         // Load webhooks
         setWebhooks(webhookService.getWebhooks());
-        
+
         // Load privacy settings
         const privacySettings = privacyService.getSettings();
         setPrivacyMode(privacySettings.privacyMode);
@@ -145,19 +157,18 @@ const Settings: React.FC = () => {
 
         const savedPresets = localStorage.getItem('systemPresets');
         if (savedPresets) {
-            setPresets(JSON.parse(savedPresets));
+            const parsedPresets = parseStoredSystemPresets(savedPresets);
+            setPresets(parsedPresets || DEFAULT_SYSTEM_PRESETS);
         } else {
-            // Default presets
-            setPresets([
-                { id: '1', name: 'Assistant', prompt: 'You are a helpful assistant.' },
-                { id: '2', name: 'Coder', prompt: 'You are an expert software engineer. Write clean, efficient, well-documented code.' },
-                { id: '3', name: 'Creative', prompt: 'You are a creative writer. Use vivid imagery and engaging language.' }
-            ]);
+            setPresets(DEFAULT_SYSTEM_PRESETS);
         }
 
         // Load usage stats
         const savedUsage = localStorage.getItem('usageStats');
-        if (savedUsage) setUsageStats(JSON.parse(savedUsage));
+        if (savedUsage) {
+            const parsedUsage = parseStoredUsageStats(savedUsage);
+            setUsageStats(parsedUsage || DEFAULT_USAGE_STATS);
+        }
         
         // Subscribe to theme changes
         const handleThemeChange = (theme: ThemeConfig) => {

@@ -1,16 +1,21 @@
 import type { IntegrationAvailability } from '../components/chat/ChatHeaderCluster';
 
 type StorageConfig = Record<string, unknown>;
+const CALENDAR_PROVIDERS = new Set(['google', 'outlook', 'ical']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
 
 const parseStorageConfig = (key: string): StorageConfig | null => {
     try {
         const raw = localStorage.getItem(key);
         if (!raw) return null;
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        const parsed: unknown = JSON.parse(raw);
+        if (!isRecord(parsed)) {
             return null;
         }
-        return parsed as StorageConfig;
+        return parsed;
     } catch {
         return null;
     }
@@ -34,6 +39,10 @@ export const readIntegrationAvailability = (): IntegrationAvailability => {
         slack: hasStringField(slackConfig, 'webhookUrl') || hasStringField(slackConfig, 'apiToken'),
         discord: hasStringField(discordConfig, 'webhookUrl'),
         email: hasStringField(emailConfig, 'defaultRecipient'),
-        calendar: hasStringField(calendarConfig, 'provider'),
+        calendar: Boolean(
+            calendarConfig
+            && typeof calendarConfig.provider === 'string'
+            && CALENDAR_PROVIDERS.has(calendarConfig.provider)
+        ),
     };
 };
