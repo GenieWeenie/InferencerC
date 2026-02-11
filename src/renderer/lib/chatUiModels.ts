@@ -1,5 +1,6 @@
 import type { ChatMessageAction, ChatMessageActionCapabilities } from './chatMessageActions';
 import type { ChatMessage } from '../../shared/types';
+import type { TopLogprob } from '../../shared/types';
 
 export type SearchNavigationDirection = 'previous' | 'next';
 
@@ -269,4 +270,80 @@ export const getMaxTokensSliderConfig = (contextLength?: number): MaxTokensSlide
     sliderMax,
     sliderStep,
   };
+};
+
+const SUPPORTED_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const TEXT_ATTACHMENT_PATTERN = /\.(md|txt|js|ts|tsx|jsx|json|py|html|css|c|cpp|h|rs|go|java|yaml|xml)$/i;
+const SLASH_COMMAND_PATTERN = /(?:^|\s)\/([a-zA-Z0-9-]*)$/;
+
+export type DroppedFileKind = 'image' | 'text' | 'unsupported';
+
+export const classifyDroppedFile = (file: Pick<File, 'type' | 'name'>): DroppedFileKind => {
+  if (file.type.startsWith('image/') && SUPPORTED_IMAGE_MIME_TYPES.has(file.type)) {
+    return 'image';
+  }
+  if (file.type.startsWith('text/') || TEXT_ATTACHMENT_PATTERN.test(file.name)) {
+    return 'text';
+  }
+  return 'unsupported';
+};
+
+export interface SlashCommandMatch {
+  query: string;
+  index: number;
+}
+
+export const getSlashCommandMatch = (
+  value: string,
+  cursor: number
+): SlashCommandMatch | null => {
+  const upToCursor = value.slice(0, cursor);
+  const match = SLASH_COMMAND_PATTERN.exec(upToCursor);
+  if (!match) {
+    return null;
+  }
+
+  const query = match[1];
+  const slashIndex = match.index + match[0].lastIndexOf('/') + 1;
+  return { query, index: slashIndex };
+};
+
+export const applyPromptSnippetAtSlash = (
+  currentInput: string,
+  selectionEnd: number,
+  slashMatchIndex: number,
+  snippet: string
+): string => {
+  const prefix = currentInput.substring(0, slashMatchIndex - 1);
+  const suffix = currentInput.substring(selectionEnd);
+  return `${prefix}${snippet}${suffix}`;
+};
+
+export interface InspectorAlternativeRow {
+  key: string;
+  token: string;
+  probabilityPercent: number;
+  widthPercent: number;
+}
+
+export const buildInspectorAlternativeRows = (
+  topLogprobs: Array<TopLogprob | null | undefined> | undefined
+): InspectorAlternativeRow[] => {
+  if (!topLogprobs || topLogprobs.length === 0) {
+    return [];
+  }
+  return topLogprobs.flatMap((entry, index) => {
+    if (!entry) {
+      return [];
+    }
+    const probability = Math.exp(entry.logprob);
+    const probabilityPercent = probability * 100;
+    const widthPercent = Math.min(100, Math.max(1, probabilityPercent));
+    return [{
+      key: `${index}-${entry.token}`,
+      token: entry.token,
+      probabilityPercent,
+      widthPercent,
+    }];
+  });
 };

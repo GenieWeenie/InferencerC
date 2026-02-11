@@ -33,12 +33,16 @@ import {
     type ChatMessageAction,
 } from '../lib/chatMessageActions';
 import {
+    applyPromptSnippetAtSlash,
+    buildInspectorAlternativeRows,
     buildContextTrimSuggestionRows,
     buildComposerControlPillDescriptors,
     buildLongPressMenuActionItems,
     buildRecentContextMessageRows,
+    classifyDroppedFile,
     type ComposerControlPillDescriptor,
     type ComposerControlPillKey,
+    getSlashCommandMatch,
     getMaxTokensSliderConfig,
     getWrappedSearchResultIndex,
     type RecentContextMessageRow,
@@ -2589,6 +2593,525 @@ const ChatControlsTabPanel: React.FC<ChatControlsTabPanelProps> = React.memo(({
     prev.modelContextLength === next.modelContextLength
 ));
 
+interface InspectorTokenSummaryCardProps {
+    selectedToken: any;
+    entropyValue: number;
+    onUpdateToken: (value: string) => void;
+}
+
+const InspectorTokenSummaryCard: React.FC<InspectorTokenSummaryCardProps> = React.memo(({
+    selectedToken,
+    entropyValue,
+    onUpdateToken,
+}) => (
+    <div className="animate-in fade-in zoom-in-95 duration-200">
+        <div className="bg-white text-slate-900 rounded-xl p-6 text-center shadow-lg mb-6 border-4 border-slate-800 relative">
+            <div className="text-3xl font-heading font-bold mb-1">"{selectedToken.logprob.token}"</div>
+            <div className="text-xs text-slate-500 uppercase tracking-widest font-bold">Selected Token</div>
+
+            <div className="mt-4 pt-4 border-t border-slate-200">
+                <div className="flex gap-2">
+                    <input
+                        type="text"
+                        className="flex-1 bg-slate-100 border border-slate-300 rounded px-2 py-1 text-sm font-mono"
+                        defaultValue={selectedToken.logprob.token}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                                onUpdateToken(event.currentTarget.value);
+                            }
+                        }}
+                    />
+                    <button className="text-xs bg-slate-900 text-white px-2 py-1 rounded hover:bg-slate-700">Update</button>
+                </div>
+                <div className="text-[10px] text-slate-400 mt-1">Press Enter to apply changes</div>
+            </div>
+        </div>
+
+        <div className="space-y-4 mb-6">
+            <div className="bg-slate-900 rounded-lg p-4 border border-slate-800">
+                <div className="flex justify-between items-center mb-2">
+                    <span className="text-slate-400 text-sm">Logprob</span>
+                    <span className="font-mono text-emerald-400">{selectedToken.logprob.logprob?.toFixed(4) ?? 'N/A'}</span>
+                </div>
+                <div className="flex justify-between items-center mb-2">
+                    <span className="text-slate-400 text-sm">Probability</span>
+                    <span className="font-mono text-emerald-400">{(Math.exp(selectedToken.logprob.logprob || 0) * 100).toFixed(2)}%</span>
+                </div>
+                <div className="flex justify-between items-center">
+                    <span className="text-slate-400 text-sm">Entropy</span>
+                    <span className="font-mono text-amber-400">{entropyValue.toFixed(3)}</span>
+                </div>
+            </div>
+        </div>
+        <details className="mb-6 group">
+            <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-300 transition-colors list-none flex items-center gap-1">
+                <ChevronRight size={12} className="group-open:rotate-90 transition-transform" /> Debug Data
+            </summary>
+            <pre className="mt-2 text-[10px] bg-slate-950 p-2 rounded text-slate-400 overflow-x-auto border border-slate-800 font-mono">
+                {JSON.stringify(selectedToken.logprob, null, 2)}
+            </pre>
+        </details>
+    </div>
+), (prev, next) => (
+    prev.selectedToken === next.selectedToken &&
+    prev.entropyValue === next.entropyValue &&
+    prev.onUpdateToken === next.onUpdateToken
+));
+
+interface InspectorAlternativeListProps {
+    rows: Array<{
+        key: string;
+        token: string;
+        probabilityPercent: number;
+        widthPercent: number;
+    }>;
+}
+
+const InspectorAlternativeList: React.FC<InspectorAlternativeListProps> = React.memo(({
+    rows,
+}) => {
+    if (rows.length === 0) {
+        return (
+            <div className="p-4 bg-amber-900/20 border border-amber-900/50 rounded-lg text-amber-200 text-sm flex items-start gap-3">
+                <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
+                <div>
+                    <p className="font-bold">No alternatives found.</p>
+                    <p className="opacity-80 text-xs mt-1">If you just updated the server, please restart the application.</p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
+            {rows.map((row) => (
+                <div key={row.key} className="p-3 border-b border-slate-800 last:border-0 hover:bg-slate-800/50 transition-colors group">
+                    <div className="flex justify-between items-center mb-1.5">
+                        <span className="font-mono font-bold text-slate-200 bg-slate-950 px-1.5 py-0.5 rounded text-xs">"{row.token}"</span>
+                        <span className="text-xs text-slate-400 group-hover:text-white font-mono">{row.probabilityPercent.toFixed(1)}%</span>
+                    </div>
+                    <div className="h-1.5 bg-slate-950 rounded-full overflow-hidden">
+                        <div className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full transition-all duration-500" style={{ width: `${row.widthPercent}%` }} />
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}, (prev, next) => prev.rows === next.rows);
+
+interface ChatInspectorTabPanelProps {
+    selectedToken: any;
+    onUpdateToken: (messageIndex: number, tokenIndex: number, value: string) => void;
+}
+
+const ChatInspectorTabPanel: React.FC<ChatInspectorTabPanelProps> = React.memo(({
+    selectedToken,
+    onUpdateToken,
+}) => {
+    const alternativeRows = React.useMemo(
+        () => buildInspectorAlternativeRows(selectedToken?.logprob?.top_logprobs),
+        [selectedToken?.logprob?.top_logprobs]
+    );
+    const entropyValue = React.useMemo(
+        () => calculateEntropy(selectedToken?.logprob?.top_logprobs),
+        [selectedToken?.logprob?.top_logprobs]
+    );
+    const handleUpdateToken = React.useCallback((value: string) => {
+        onUpdateToken(selectedToken.messageIndex, selectedToken.tokenIndex, value);
+        toast.success('Token updated');
+    }, [onUpdateToken, selectedToken]);
+
+    return (
+        <div className="p-6 flex-1 overflow-y-auto custom-scrollbar pr-4">
+            {selectedToken ? (
+                <>
+                    <InspectorTokenSummaryCard
+                        selectedToken={selectedToken}
+                        entropyValue={entropyValue}
+                        onUpdateToken={handleUpdateToken}
+                    />
+                    <h4 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2">
+                        <Activity size={14} className="text-primary" /> Top Alternatives
+                    </h4>
+                    <InspectorAlternativeList rows={alternativeRows} />
+                </>
+            ) : (
+                <div className="flex flex-col items-center justify-center h-full text-slate-500 text-center space-y-4 p-8">
+                    <div className="w-16 h-16 rounded-full bg-slate-900 flex items-center justify-center mb-2 animate-pulse">
+                        <Activity size={32} className="text-slate-700" />
+                    </div>
+                    <p className="font-medium">Inspect Token Details</p>
+                    <p className="text-sm opacity-70">Select any token in the chat message to view its probabilities and entropy.</p>
+                    <div className="text-xs bg-slate-900/50 p-3 rounded border border-slate-800">
+                        <span className="text-amber-500">Note:</span> If tokens are not clickable, logprobs might be disabled on the server.
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}, (prev, next) => (
+    prev.selectedToken === next.selectedToken &&
+    prev.onUpdateToken === next.onUpdateToken
+));
+
+interface ComposerAttachmentsPanelProps {
+    attachments: Array<{ id: string; name: string; content: string }>;
+    imageAttachments: Array<{ id: string; name: string; thumbnailUrl: string }>;
+    onRemoveImageAttachment: (id: string) => void;
+    onRemoveAttachment: (id: string) => void;
+}
+
+const ComposerAttachmentsPanel: React.FC<ComposerAttachmentsPanelProps> = React.memo(({
+    attachments,
+    imageAttachments,
+    onRemoveImageAttachment,
+    onRemoveAttachment,
+}) => {
+    if (attachments.length === 0 && imageAttachments.length === 0) {
+        return null;
+    }
+
+    return (
+        <div className="flex flex-wrap gap-2 px-4 pt-4 pb-1 animate-in slide-in-from-bottom-2 duration-200">
+            {imageAttachments.map((img) => (
+                <div key={img.id} className="relative group">
+                    <img
+                        src={img.thumbnailUrl}
+                        alt={img.name}
+                        className="w-16 h-16 object-cover rounded-lg border border-slate-700/50 group-hover:border-primary/50 transition-colors"
+                    />
+                    <button
+                        onClick={() => onRemoveImageAttachment(img.id)}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 hover:bg-red-400 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                    >
+                        <X size={10} />
+                    </button>
+                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-sm rounded-b-lg px-1 py-0.5">
+                        <span className="text-[8px] text-white truncate block">{img.name.slice(0, 10)}</span>
+                    </div>
+                </div>
+            ))}
+            {attachments.map((attachment) => (
+                <div key={attachment.id} className="flex items-center gap-2 bg-slate-800/80 border border-slate-700/50 rounded-lg pl-3 pr-2 py-1.5 text-xs text-slate-200 group hover:border-slate-600 transition-colors">
+                    <div className="flex flex-col">
+                        <span className="font-bold truncate max-w-[150px]">{attachment.name}</span>
+                        <span className="text-[10px] text-slate-500 font-mono">{(attachment.content.length / 1024).toFixed(1)} KB</span>
+                    </div>
+                    <button
+                        onClick={() => onRemoveAttachment(attachment.id)}
+                        className="p-1 hover:bg-slate-700 rounded-md text-slate-400 hover:text-red-400 transition-colors"
+                    >
+                        <X size={12} />
+                    </button>
+                </div>
+            ))}
+        </div>
+    );
+}, (prev, next) => (
+    prev.attachments === next.attachments &&
+    prev.imageAttachments === next.imageAttachments &&
+    prev.onRemoveImageAttachment === next.onRemoveImageAttachment &&
+    prev.onRemoveAttachment === next.onRemoveAttachment
+));
+
+interface ComposerDropAreaProps {
+    isDragging: boolean;
+    onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
+    onDragLeave: (event: React.DragEvent<HTMLDivElement>) => void;
+    onDrop: (event: React.DragEvent<HTMLDivElement>) => void;
+    children: React.ReactNode;
+}
+
+const ComposerDropArea: React.FC<ComposerDropAreaProps> = React.memo(({
+    isDragging,
+    onDragOver,
+    onDragLeave,
+    onDrop,
+    children,
+}) => (
+    <div
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        className={`bg-slate-900/90 border backdrop-blur-xl rounded-2xl shadow-2xl flex flex-col transition-all duration-300 min-w-0 max-w-full overflow-x-hidden ${isDragging ? 'border-primary ring-2 ring-primary/50 bg-slate-800/90' : 'border-slate-700/50'}`}
+    >
+        {children}
+    </div>
+), (prev, next) => (
+    prev.isDragging === next.isDragging &&
+    prev.onDragOver === next.onDragOver &&
+    prev.onDragLeave === next.onDragLeave &&
+    prev.onDrop === next.onDrop &&
+    prev.children === next.children
+));
+
+interface ComposerAuxPanelsProps {
+    showSuggestions: boolean;
+    history: any[];
+    onSelectSuggestion: (suggestion: string) => void;
+    onCloseSuggestions: () => void;
+    prefill: string | null;
+    onPrefillChange: (value: string) => void;
+    showUrlInput: boolean;
+    urlInput: string;
+    onUrlInputChange: (value: string) => void;
+    onUrlInputKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
+    onExecuteWebFetch: () => void;
+    isFetchingWeb: boolean;
+    showGithubInput: boolean;
+    githubUrl: string;
+    onGithubUrlChange: (value: string) => void;
+    onGithubInputKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
+    onExecuteGithubFetch: () => void;
+    isFetchingGithub: boolean;
+    githubConfigured: boolean;
+    projectContext: ProjectContext | null;
+    includeContextInMessages: boolean;
+    onToggleIncludeContextInMessages: () => void;
+    onClearProjectContext: () => void;
+    onStartWatchingProjectContext: () => void;
+    slashMatch: { query: string; index: number } | null;
+    filteredPrompts: PromptSnippet[];
+    activePromptIndex: number;
+    onInsertPrompt: (prompt: PromptSnippet) => void;
+}
+
+const ComposerAuxPanels: React.FC<ComposerAuxPanelsProps> = React.memo(({
+    showSuggestions,
+    history,
+    onSelectSuggestion,
+    onCloseSuggestions,
+    prefill,
+    onPrefillChange,
+    showUrlInput,
+    urlInput,
+    onUrlInputChange,
+    onUrlInputKeyDown,
+    onExecuteWebFetch,
+    isFetchingWeb,
+    showGithubInput,
+    githubUrl,
+    onGithubUrlChange,
+    onGithubInputKeyDown,
+    onExecuteGithubFetch,
+    isFetchingGithub,
+    githubConfigured,
+    projectContext,
+    includeContextInMessages,
+    onToggleIncludeContextInMessages,
+    onClearProjectContext,
+    onStartWatchingProjectContext,
+    slashMatch,
+    filteredPrompts,
+    activePromptIndex,
+    onInsertPrompt,
+}) => (
+    <>
+        {showSuggestions && history.length > 0 && (
+            <div className="px-4">
+                <React.Suspense fallback={<div className="text-xs text-slate-500 px-2 py-1">Loading suggestions...</div>}>
+                    <SmartSuggestionsPanel
+                        conversationHistory={history}
+                        lastMessage={history[history.length - 1]?.content}
+                        onSelectSuggestion={onSelectSuggestion}
+                        isOpen={showSuggestions}
+                        onClose={onCloseSuggestions}
+                    />
+                </React.Suspense>
+            </div>
+        )}
+
+        {prefill !== null && (
+            <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
+                <div className="relative">
+                    <div className="absolute left-3 top-3 text-primary">
+                        <ChevronRight size={16} strokeWidth={3} />
+                    </div>
+                    <input
+                        type="text"
+                        value={prefill}
+                        onChange={(event) => onPrefillChange(event.target.value)}
+                        className="w-full bg-slate-950 border-2 border-primary/30 rounded-lg pl-9 pr-4 py-3 text-sm font-mono text-white placeholder-slate-500 focus:outline-none focus:border-primary transition-colors shadow-inner"
+                        placeholder="Type the response here... (Steer the model)"
+                    />
+                </div>
+                <p className="text-[10px] text-slate-500 mt-2 ml-1 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary inline-block"></span>
+                    This seeds the model's response, forcing it to continue from your text.
+                </p>
+            </div>
+        )}
+
+        {showUrlInput && (
+            <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
+                <div className="relative flex gap-2 items-center">
+                    <div className="absolute left-3 top-3 text-primary">
+                        <Globe size={16} strokeWidth={3} />
+                    </div>
+                    <input
+                        type="text"
+                        value={urlInput}
+                        onChange={(event) => onUrlInputChange(event.target.value)}
+                        onKeyDown={onUrlInputKeyDown}
+                        className="flex-1 bg-slate-950 border-2 border-primary/30 rounded-lg pl-9 pr-4 py-3 text-sm font-mono text-white placeholder-slate-500 focus:outline-none focus:border-primary transition-colors shadow-inner"
+                        placeholder="Enter URL to fetch context from..."
+                    />
+                    <button
+                        onClick={onExecuteWebFetch}
+                        disabled={isFetchingWeb || !urlInput}
+                        className="px-4 py-3 bg-primary hover:bg-primary-600 text-white font-bold rounded-lg text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                    >
+                        {isFetchingWeb ? <span className="animate-spin inline-block mr-1">⌛</span> : 'Fetch'}
+                    </button>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-2 ml-1 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                    Fetches the text content of the URL and adds it to the chat context.
+                </p>
+            </div>
+        )}
+
+        {showGithubInput && (
+            <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
+                <div className="relative flex gap-2 items-center">
+                    <div className="absolute left-3 top-3 text-primary">
+                        <Github size={16} strokeWidth={3} />
+                    </div>
+                    <input
+                        type="text"
+                        value={githubUrl}
+                        onChange={(event) => onGithubUrlChange(event.target.value)}
+                        onKeyDown={onGithubInputKeyDown}
+                        className="flex-1 bg-slate-950 border-2 border-primary/30 rounded-lg pl-9 pr-4 py-3 text-sm font-mono text-white placeholder-slate-500 focus:outline-none focus:border-primary transition-colors shadow-inner"
+                        placeholder="owner/repo/path or full GitHub URL..."
+                    />
+                    <button
+                        onClick={onExecuteGithubFetch}
+                        disabled={isFetchingGithub || !githubUrl || !githubConfigured}
+                        className="px-4 py-3 bg-primary hover:bg-primary-600 text-white font-bold rounded-lg text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                    >
+                        {isFetchingGithub ? <span className="animate-spin inline-block mr-1">⌛</span> : 'Fetch'}
+                    </button>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-2 ml-1 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block"></span>
+                    {githubConfigured
+                        ? 'Fetches file contents from GitHub repositories. Format: owner/repo/path/to/file'
+                        : 'Configure GitHub API key in Settings → API Keys to use this feature.'}
+                </p>
+            </div>
+        )}
+
+        {projectContext && (
+            <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
+                <div className="bg-slate-950 border-2 border-blue-500/30 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                            <FolderOpen size={16} className="text-blue-400" />
+                            <span className="text-xs font-bold text-blue-400">Project Context</span>
+                            {projectContext.isWatching && (
+                                <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">Watching</span>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={onToggleIncludeContextInMessages}
+                                className="p-1 hover:bg-slate-800 rounded transition-colors"
+                                title={includeContextInMessages ? 'Context is included' : 'Context is excluded'}
+                            >
+                                {includeContextInMessages ? <Eye size={14} className="text-blue-400" /> : <EyeOff size={14} className="text-slate-500" />}
+                            </button>
+                            <button
+                                onClick={onClearProjectContext}
+                                className="p-1 hover:bg-slate-800 rounded transition-colors"
+                                title="Clear context"
+                            >
+                                <X size={14} className="text-slate-500 hover:text-red-400" />
+                            </button>
+                        </div>
+                    </div>
+                    <p className="text-[10px] text-slate-500 font-mono truncate mb-2" title={projectContext.folderPath}>
+                        {projectContext.folderPath}
+                    </p>
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-400">
+                            {projectContext.files.length} file{projectContext.files.length !== 1 ? 's' : ''} loaded
+                        </span>
+                        {!projectContext.isWatching && (
+                            <button
+                                onClick={onStartWatchingProjectContext}
+                                className="text-[10px] text-blue-400 hover:text-blue-300 underline"
+                            >
+                                Start watching
+                            </button>
+                        )}
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {slashMatch && (
+            <div className="absolute bottom-full left-4 mb-2 w-64 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl overflow-hidden z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
+                <div className="p-2 border-b border-slate-800 text-[10px] font-bold text-slate-500 uppercase tracking-widest flex justify-between items-center">
+                    <span>Prompt Library</span>
+                    <span className="bg-slate-800 px-1 rounded text-slate-400">/</span>
+                </div>
+                <div className="max-h-48 overflow-y-auto">
+                    {filteredPrompts.length === 0 ? (
+                        <div className="p-3 text-xs text-slate-500 italic text-center">No matching prompts</div>
+                    ) : (
+                        filteredPrompts.map((prompt, index) => (
+                            <button
+                                key={prompt.id}
+                                onClick={() => onInsertPrompt(prompt)}
+                                className={`w-full text-left px-3 py-2 text-xs border-b border-slate-800/50 last:border-0 transition-colors flex flex-col gap-0.5 ${index === activePromptIndex ? 'bg-primary/20 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+                            >
+                                <span className="font-bold flex items-center gap-2">/{prompt.alias} <span className="font-normal opacity-50 text-[10px] ml-auto">↵</span></span>
+                                <span className="opacity-70 truncate w-full block">{prompt.title}</span>
+                            </button>
+                        ))
+                    )}
+                </div>
+            </div>
+        )}
+    </>
+), (prev, next) => (
+    prev.showSuggestions === next.showSuggestions &&
+    prev.history === next.history &&
+    prev.onSelectSuggestion === next.onSelectSuggestion &&
+    prev.onCloseSuggestions === next.onCloseSuggestions &&
+    prev.prefill === next.prefill &&
+    prev.onPrefillChange === next.onPrefillChange &&
+    prev.showUrlInput === next.showUrlInput &&
+    prev.urlInput === next.urlInput &&
+    prev.onUrlInputChange === next.onUrlInputChange &&
+    prev.onUrlInputKeyDown === next.onUrlInputKeyDown &&
+    prev.onExecuteWebFetch === next.onExecuteWebFetch &&
+    prev.isFetchingWeb === next.isFetchingWeb &&
+    prev.showGithubInput === next.showGithubInput &&
+    prev.githubUrl === next.githubUrl &&
+    prev.onGithubUrlChange === next.onGithubUrlChange &&
+    prev.onGithubInputKeyDown === next.onGithubInputKeyDown &&
+    prev.onExecuteGithubFetch === next.onExecuteGithubFetch &&
+    prev.isFetchingGithub === next.isFetchingGithub &&
+    prev.githubConfigured === next.githubConfigured &&
+    prev.projectContext === next.projectContext &&
+    prev.includeContextInMessages === next.includeContextInMessages &&
+    prev.onToggleIncludeContextInMessages === next.onToggleIncludeContextInMessages &&
+    prev.onClearProjectContext === next.onClearProjectContext &&
+    prev.onStartWatchingProjectContext === next.onStartWatchingProjectContext &&
+    prev.slashMatch === next.slashMatch &&
+    prev.filteredPrompts === next.filteredPrompts &&
+    prev.activePromptIndex === next.activePromptIndex &&
+    prev.onInsertPrompt === next.onInsertPrompt
+));
+
+interface ChatOverlayPortalsProps {
+    children: React.ReactNode;
+}
+
+const ChatOverlayPortals: React.FC<ChatOverlayPortalsProps> = React.memo(({ children }) => <>{children}</>, (prev, next) => prev.children === next.children);
+
 const readPersistedApiLogCount = (): number => {
     try {
         const rawCount = localStorage.getItem(ACTIVITY_LOG_COUNT_KEY);
@@ -4157,27 +4680,19 @@ const Chat: React.FC = () => {
         return prompts.filter(p => p.alias.toLowerCase().startsWith(slashMatch.query.toLowerCase()));
     }, [slashMatch, prompts]);
 
-    const insertPrompt = (p: PromptSnippet) => {
+    const insertPrompt = React.useCallback((prompt: PromptSnippet) => {
         if (!slashMatch || !textareaRef.current) return;
 
-        const cursorEnd = textareaRef.current.selectionEnd;
-        // The slash is at slashMatch.index - 1
-        const prefix = input.substring(0, slashMatch.index - 1);
-        const suffix = input.substring(cursorEnd);
-
-        setInput(prefix + p.content + suffix);
+        const cursorEnd = textareaRef.current.selectionEnd ?? input.length;
+        const nextInput = applyPromptSnippetAtSlash(input, cursorEnd, slashMatch.index, prompt.content);
+        setInput(nextInput);
         setSlashMatch(null);
 
-        // Wait for render to re-focus
+        // Wait for render to re-focus.
         setTimeout(() => {
-            if (textareaRef.current) {
-                textareaRef.current.focus();
-                // move cursor to end of inserted content
-                // const newCursorPos = prefix.length + p.content.length;
-                // textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
-            }
+            textareaRef.current?.focus();
         }, 10);
-    };
+    }, [input, setInput, slashMatch]);
 
     // Wrapper for loadSession with loading state
     const handleLoadSession = React.useCallback((id: string) => {
@@ -5362,6 +5877,173 @@ const Chat: React.FC = () => {
     const handleSendComposerMessage = React.useCallback(() => {
         sendMessageWithContext();
     }, [sendMessageWithContext]);
+    const handleComposerDragOver = React.useCallback((event: React.DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setIsDragging(true);
+    }, []);
+    const handleComposerDragLeave = React.useCallback((event: React.DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setIsDragging(false);
+    }, []);
+    const handleComposerDrop = React.useCallback(async (event: React.DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setIsDragging(false);
+
+        const files = Array.from(event.dataTransfer.files);
+        if (files.length === 0) return;
+
+        for (const file of files) {
+            const kind = classifyDroppedFile(file);
+            if (kind === 'image') {
+                try {
+                    const { base64, thumbnailUrl } = await compressImage(file);
+                    addImageAttachment({
+                        name: file.name,
+                        mimeType: 'image/webp',
+                        base64,
+                        thumbnailUrl,
+                    });
+                } catch (error) {
+                    console.error('Failed to read/compress image', file.name, error);
+                    toast.error(`Failed to process image: ${file.name}`);
+                }
+                continue;
+            }
+
+            if (kind === 'text') {
+                try {
+                    const text = await file.text();
+                    addAttachment({ name: file.name, content: text });
+                } catch (error) {
+                    console.error('Failed to read file', file.name, error);
+                }
+            }
+        }
+    }, [addAttachment, addImageAttachment]);
+    const handleComposerInputChange = React.useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const newValue = event.target.value;
+        const cursor = event.target.selectionEnd ?? newValue.length;
+        const nextSlashMatch = getSlashCommandMatch(newValue, cursor);
+
+        if (nextSlashMatch) {
+            setSlashMatch(nextSlashMatch);
+            setActivePromptIndex(0);
+        } else {
+            setSlashMatch(null);
+        }
+
+        setInput(newValue);
+        event.target.style.height = 'auto';
+        event.target.style.height = `${Math.min(event.target.scrollHeight, 300)}px`;
+    }, [setInput]);
+    const handleComposerInputPaste = React.useCallback(async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        const items = Array.from(event.clipboardData.items);
+        for (const item of items) {
+            if (!item.type.startsWith('image/')) continue;
+
+            event.preventDefault();
+            const file = item.getAsFile();
+            if (!file) continue;
+
+            try {
+                const { base64, thumbnailUrl } = await compressImage(file);
+                addImageAttachment({
+                    name: file.name || `pasted-${Date.now()}.png`,
+                    mimeType: 'image/webp',
+                    base64,
+                    thumbnailUrl,
+                });
+                toast.success('Image pasted');
+            } catch (error) {
+                console.error('Paste failed', error);
+                toast.error('Failed to paste image');
+            }
+        }
+    }, [addImageAttachment]);
+    const handleComposerInputKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (slashMatch && filteredPrompts.length > 0) {
+            if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                setActivePromptIndex((prev) => Math.max(0, prev - 1));
+                return;
+            }
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                setActivePromptIndex((prev) => Math.min(filteredPrompts.length - 1, prev + 1));
+                return;
+            }
+            if (event.key === 'Enter' || event.key === 'Tab') {
+                event.preventDefault();
+                insertPrompt(filteredPrompts[activePromptIndex]);
+                return;
+            }
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                setSlashMatch(null);
+                return;
+            }
+        }
+
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            sendMessageWithContext();
+        }
+    }, [activePromptIndex, filteredPrompts, insertPrompt, sendMessageWithContext, slashMatch]);
+    const handleSelectSuggestion = React.useCallback((suggestion: string) => {
+        setInput(suggestion);
+        setShowSuggestions(false);
+        textareaRef.current?.focus();
+    }, [setInput]);
+    const handleCloseSuggestionsPanel = React.useCallback(() => {
+        setShowSuggestions(false);
+    }, []);
+    const handlePrefillChange = React.useCallback((value: string) => {
+        setPrefill(value);
+    }, [setPrefill]);
+    const handleUrlInputChange = React.useCallback((value: string) => {
+        setUrlInput(value);
+    }, [setUrlInput]);
+    const handleUrlInputKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+        if (event.key === 'Enter') {
+            executeWebFetch();
+        }
+    }, [executeWebFetch]);
+    const handleGithubUrlChange = React.useCallback((value: string) => {
+        setGithubUrl(value);
+    }, []);
+    const handleGithubInputKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+        if (event.key === 'Enter') {
+            executeGithubFetch();
+        }
+    }, [executeGithubFetch]);
+    const handleToggleIncludeContextInMessages = React.useCallback(() => {
+        setIncludeContextInMessages((prev) => !prev);
+    }, []);
+    const handleClearProjectContext = React.useCallback(() => {
+        void loadProjectContextService()
+            .then((projectContextService) => {
+                projectContextService.clearContext();
+                toast.success('Project context cleared');
+            })
+            .catch(() => {
+                toast.error('Failed to clear project context');
+            });
+    }, []);
+    const handleStartWatchingProjectContext = React.useCallback(() => {
+        void (async () => {
+            enableProjectContextFeature();
+            const projectContextService = await loadProjectContextService();
+            const success = await projectContextService.startWatching();
+            if (success) {
+                toast.success('Started watching folder for changes');
+            } else {
+                toast.error('Failed to start watching');
+            }
+        })();
+    }, [enableProjectContextFeature]);
     const handleTogglePrefill = React.useCallback(() => {
         setPrefill((prev) => (prev === null ? '' : null));
     }, []);
@@ -5926,106 +6608,49 @@ const Chat: React.FC = () => {
 
                 {/* Floating Input Area with Control Bar */}
                 <div ref={composerContainerRef} className={`absolute bottom-6 left-1/2 -translate-x-1/2 w-full ${isCompactViewport ? 'max-w-full' : 'max-w-4xl'} px-4 z-20 min-w-0 overflow-x-hidden`}>
-                    <div
-                        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
-                        onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
-                        onDrop={async (e) => {
-                            e.preventDefault(); e.stopPropagation(); setIsDragging(false);
-                            const files = Array.from(e.dataTransfer.files);
-                            if (files.length === 0) return;
-
-                            for (const file of files) {
-                                // Handle image files
-                                if (file.type.startsWith('image/')) {
-                                    const validTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-                                    if (validTypes.includes(file.type)) {
-                                        try {
-                                            const { base64, thumbnailUrl } = await compressImage(file);
-                                            addImageAttachment({
-                                                name: file.name,
-                                                mimeType: 'image/webp', // compressImage outputs webp
-                                                base64: base64,
-                                                thumbnailUrl: thumbnailUrl
-                                            });
-                                        } catch (err) {
-                                            console.error("Failed to read/compress image", file.name, err);
-                                            toast.error(`Failed to process image: ${file.name}`);
-                                        }
-                                    }
-                                }
-                                // Handle text files
-                                else if (file.type.startsWith('text/') || file.name.match(/\.(md|txt|js|ts|tsx|jsx|json|py|html|css|c|cpp|h|rs|go|java|yaml|xml)$/)) {
-                                    try {
-                                        const text = await file.text();
-                                        addAttachment({ name: file.name, content: text });
-                                    } catch (err) {
-                                        console.error("Failed to read file", file.name);
-                                    }
-                                }
-                            }
-                        }}
-                        className={`bg-slate-900/90 border backdrop-blur-xl rounded-2xl shadow-2xl flex flex-col transition-all duration-300 min-w-0 max-w-full overflow-x-hidden ${isDragging ? 'border-primary ring-2 ring-primary/50 bg-slate-800/90' : 'border-slate-700/50'}`}
+                    <ComposerDropArea
+                        isDragging={isDragging}
+                        onDragOver={handleComposerDragOver}
+                        onDragLeave={handleComposerDragLeave}
+                        onDrop={handleComposerDrop}
                     >
-                        {/* 0. Attachment List */}
-                        {(attachments.length > 0 || imageAttachments.length > 0) && (
-                            <div className="flex flex-wrap gap-2 px-4 pt-4 pb-1 animate-in slide-in-from-bottom-2 duration-200">
-                                {/* Image Thumbnails */}
-                                {imageAttachments.map(img => (
-                                    <div key={img.id} className="relative group">
-                                        <img
-                                            src={img.thumbnailUrl}
-                                            alt={img.name}
-                                            className="w-16 h-16 object-cover rounded-lg border border-slate-700/50 group-hover:border-primary/50 transition-colors"
-                                        />
-                                        <button
-                                            onClick={() => removeImageAttachment(img.id)}
-                                            className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 hover:bg-red-400 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                                        >
-                                            <X size={10} />
-                                        </button>
-                                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-sm rounded-b-lg px-1 py-0.5">
-                                            <span className="text-[8px] text-white truncate block">{img.name.slice(0, 10)}</span>
-                                        </div>
-                                    </div>
-                                ))}
-                                {/* Text File Attachments */}
-                                {attachments.map(a => (
-                                    <div key={a.id} className="flex items-center gap-2 bg-slate-800/80 border border-slate-700/50 rounded-lg pl-3 pr-2 py-1.5 text-xs text-slate-200 group hover:border-slate-600 transition-colors">
-                                        <div className="flex flex-col">
-                                            <span className="font-bold truncate max-w-[150px]">{a.name}</span>
-                                            <span className="text-[10px] text-slate-500 font-mono">{(a.content.length / 1024).toFixed(1)} KB</span>
-                                        </div>
-                                        <button
-                                            onClick={() => removeAttachment(a.id)}
-                                            className="p-1 hover:bg-slate-700 rounded-md text-slate-400 hover:text-red-400 transition-colors"
-                                        >
-                                            <X size={12} />
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
+                        <ComposerAttachmentsPanel
+                            attachments={attachments}
+                            imageAttachments={imageAttachments}
+                            onRemoveAttachment={removeAttachment}
+                            onRemoveImageAttachment={removeImageAttachment}
+                        />
+                        <ComposerAuxPanels
+                            showSuggestions={showSuggestions}
+                            history={history}
+                            onSelectSuggestion={handleSelectSuggestion}
+                            onCloseSuggestions={handleCloseSuggestionsPanel}
+                            prefill={prefill}
+                            onPrefillChange={handlePrefillChange}
+                            showUrlInput={showUrlInput}
+                            urlInput={urlInput}
+                            onUrlInputChange={handleUrlInputChange}
+                            onUrlInputKeyDown={handleUrlInputKeyDown}
+                            onExecuteWebFetch={executeWebFetch}
+                            isFetchingWeb={isFetchingWeb}
+                            showGithubInput={showGithubInput}
+                            githubUrl={githubUrl}
+                            onGithubUrlChange={handleGithubUrlChange}
+                            onGithubInputKeyDown={handleGithubInputKeyDown}
+                            onExecuteGithubFetch={executeGithubFetch}
+                            isFetchingGithub={isFetchingGithub}
+                            githubConfigured={githubConfigured}
+                            projectContext={projectContext}
+                            includeContextInMessages={includeContextInMessages}
+                            onToggleIncludeContextInMessages={handleToggleIncludeContextInMessages}
+                            onClearProjectContext={handleClearProjectContext}
+                            onStartWatchingProjectContext={handleStartWatchingProjectContext}
+                            slashMatch={slashMatch}
+                            filteredPrompts={filteredPrompts}
+                            activePromptIndex={activePromptIndex}
+                            onInsertPrompt={insertPrompt}
+                        />
 
-                        {/* Smart Suggestions Panel */}
-                        {showSuggestions && history.length > 0 && (
-                            <div className="px-4">
-                                <React.Suspense fallback={<div className="text-xs text-slate-500 px-2 py-1">Loading suggestions...</div>}>
-                                    <SmartSuggestionsPanel
-                                        conversationHistory={history}
-                                        lastMessage={history[history.length - 1]?.content}
-                                        onSelectSuggestion={(suggestion) => {
-                                            setInput(suggestion);
-                                            setShowSuggestions(false);
-                                            textareaRef.current?.focus();
-                                        }}
-                                        isOpen={showSuggestions}
-                                        onClose={() => setShowSuggestions(false)}
-                                    />
-                                </React.Suspense>
-                            </div>
-                        )}
-
-                        {/* 1. Main User Input */}
                         <div className={`flex items-start p-4 gap-3 bg-slate-950/30 relative min-w-0 max-w-full overflow-x-hidden ${showBottomControls ? 'rounded-t-2xl' : 'rounded-2xl'}`}>
                             {isDragging && (
                                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/80 rounded-t-2xl backdrop-blur-sm pointer-events-none">
@@ -6037,82 +6662,9 @@ const Chat: React.FC = () => {
                             <textarea
                                 ref={textareaRef}
                                 value={input}
-                                onChange={e => {
-                                    const newValue = e.target.value;
-                                    const cursor = e.target.selectionEnd || newValue.length;
-                                    const upToCursor = newValue.slice(0, cursor);
-
-                                    // Detect Slash Command: word boundary followed by slash and optional chars
-                                    const match = /(?:^|\s)\/([a-zA-Z0-9-]*)$/.exec(upToCursor);
-
-                                    if (match) {
-                                        const query = match[1];
-                                        // match[0] includes the space before slash if any, so we find the slash pos
-                                        const slashIndex = match.index + match[0].lastIndexOf('/') + 1;
-                                        setSlashMatch({ query, index: slashIndex });
-                                        setActivePromptIndex(0);
-                                    } else {
-                                        setSlashMatch(null);
-                                    }
-
-                                    setInput(newValue);
-                                    e.target.style.height = 'auto';
-                                    e.target.style.height = Math.min(e.target.scrollHeight, 300) + 'px';
-                                }}
-                                onPaste={async (e) => {
-                                    const items = Array.from(e.clipboardData.items);
-                                    for (const item of items) {
-                                        if (item.type.startsWith('image/')) {
-                                            e.preventDefault();
-                                            const file = item.getAsFile();
-                                            if (file) {
-                                                try {
-                                                    const { base64, thumbnailUrl } = await compressImage(file);
-                                                    addImageAttachment({
-                                                        name: file.name || `pasted-${Date.now()}.png`,
-                                                        mimeType: 'image/webp',
-                                                        base64,
-                                                        thumbnailUrl
-                                                    });
-                                                    toast.success('Image pasted');
-                                                } catch (err) {
-                                                    console.error("Paste failed", err);
-                                                    toast.error("Failed to paste image");
-                                                }
-                                            }
-                                        }
-                                    }
-                                }}
-                                onKeyDown={e => {
-                                    // Handle Slash Menu Navigation
-                                    if (slashMatch && filteredPrompts.length > 0) {
-                                        if (e.key === 'ArrowUp') {
-                                            e.preventDefault();
-                                            setActivePromptIndex(prev => Math.max(0, prev - 1));
-                                            return;
-                                        }
-                                        if (e.key === 'ArrowDown') {
-                                            e.preventDefault();
-                                            setActivePromptIndex(prev => Math.min(filteredPrompts.length - 1, prev + 1));
-                                            return;
-                                        }
-                                        if (e.key === 'Enter' || e.key === 'Tab') {
-                                            e.preventDefault();
-                                            insertPrompt(filteredPrompts[activePromptIndex]);
-                                            return;
-                                        }
-                                        if (e.key === 'Escape') {
-                                            e.preventDefault();
-                                            setSlashMatch(null);
-                                            return;
-                                        }
-                                    }
-
-                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                        e.preventDefault();
-                                        sendMessageWithContext();
-                                    }
-                                }}
+                                onChange={handleComposerInputChange}
+                                onPaste={handleComposerInputPaste}
+                                onKeyDown={handleComposerInputKeyDown}
                                 className={`flex-1 bg-transparent text-white placeholder-slate-400 border-none outline-none resize-none max-h-64 py-2 font-sans text-base leading-relaxed custom-scrollbar min-w-0 overflow-x-hidden break-words ${slashMatch ? 'text-primary' : ''}`}
                                 placeholder="Type your prompt here... (Try '/')"
                                 rows={1}
@@ -6128,189 +6680,6 @@ const Chat: React.FC = () => {
                             />
                         </div>
 
-                        {/* 2. Prefill / Steering Input (Controlled by Toggle) */}
-                        {prefill !== null && (
-                            <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
-                                <div className="relative">
-                                    <div className="absolute left-3 top-3 text-primary">
-                                        <ChevronRight size={16} strokeWidth={3} />
-                                    </div>
-                                    <input
-                                        type="text"
-                                        value={prefill}
-                                        onChange={e => setPrefill(e.target.value)}
-                                        className="w-full bg-slate-950 border-2 border-primary/30 rounded-lg pl-9 pr-4 py-3 text-sm font-mono text-white placeholder-slate-500 focus:outline-none focus:border-primary transition-colors shadow-inner"
-                                        placeholder="Type the response here... (Steer the model)"
-                                    />
-                                </div>
-                                <p className="text-[10px] text-slate-500 mt-2 ml-1 flex items-center gap-1">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-primary inline-block"></span>
-                                    This seeds the model's response, forcing it to continue from your text.
-                                </p>
-                            </div>
-                        )}
-
-                        {/* 2b. Web Fetch Input (Tools Toggle) */}
-                        {showUrlInput && (
-                            <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
-                                <div className="relative flex gap-2 items-center">
-                                    <div className="absolute left-3 top-3 text-primary">
-                                        <Globe size={16} strokeWidth={3} />
-                                    </div>
-                                    <input
-                                        type="text"
-                                        value={urlInput}
-                                        onChange={e => setUrlInput(e.target.value)}
-                                        onKeyDown={e => {
-                                            if (e.key === 'Enter') executeWebFetch();
-                                        }}
-                                        className="flex-1 bg-slate-950 border-2 border-primary/30 rounded-lg pl-9 pr-4 py-3 text-sm font-mono text-white placeholder-slate-500 focus:outline-none focus:border-primary transition-colors shadow-inner"
-                                        placeholder="Enter URL to fetch context from..."
-                                    />
-                                    <button
-                                        onClick={executeWebFetch}
-                                        disabled={isFetchingWeb || !urlInput}
-                                        className="px-4 py-3 bg-primary hover:bg-primary-600 text-white font-bold rounded-lg text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                                    >
-                                        {isFetchingWeb ? <span className="animate-spin inline-block mr-1">⌛</span> : "Fetch"}
-                                    </button>
-                                </div>
-                                <p className="text-[10px] text-slate-500 mt-2 ml-1 flex items-center gap-1">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
-                                    Fetches the text content of the URL and adds it to the chat context.
-                                </p>
-                            </div>
-                        )}
-
-                        {/* 2d. GitHub Fetch Input */}
-                        {showGithubInput && (
-                            <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
-                                <div className="relative flex gap-2 items-center">
-                                    <div className="absolute left-3 top-3 text-primary">
-                                        <Github size={16} strokeWidth={3} />
-                                    </div>
-                                    <input
-                                        type="text"
-                                        value={githubUrl}
-                                        onChange={e => setGithubUrl(e.target.value)}
-                                        onKeyDown={e => {
-                                            if (e.key === 'Enter') executeGithubFetch();
-                                        }}
-                                        className="flex-1 bg-slate-950 border-2 border-primary/30 rounded-lg pl-9 pr-4 py-3 text-sm font-mono text-white placeholder-slate-500 focus:outline-none focus:border-primary transition-colors shadow-inner"
-                                        placeholder="owner/repo/path or full GitHub URL..."
-                                    />
-                                    <button
-                                        onClick={executeGithubFetch}
-                                        disabled={isFetchingGithub || !githubUrl || !githubConfigured}
-                                        className="px-4 py-3 bg-primary hover:bg-primary-600 text-white font-bold rounded-lg text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                                    >
-                                        {isFetchingGithub ? <span className="animate-spin inline-block mr-1">⌛</span> : "Fetch"}
-                                    </button>
-                                </div>
-                                <p className="text-[10px] text-slate-500 mt-2 ml-1 flex items-center gap-1">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block"></span>
-                                    {githubConfigured
-                                        ? "Fetches file contents from GitHub repositories. Format: owner/repo/path/to/file"
-                                        : "Configure GitHub API key in Settings → API Keys to use this feature."
-                                    }
-                                </p>
-                            </div>
-                        )}
-
-                        {/* 2c. Project Context Display */}
-                        {projectContext && (
-                            <div className="px-4 pb-4 animate-in slide-in-from-top-2 duration-200">
-                                <div className="bg-slate-950 border-2 border-blue-500/30 rounded-lg p-3">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <div className="flex items-center gap-2">
-                                            <FolderOpen size={16} className="text-blue-400" />
-                                            <span className="text-xs font-bold text-blue-400">Project Context</span>
-                                            {projectContext.isWatching && (
-                                                <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">Watching</span>
-                                            )}
-                                        </div>
-                                        <div className="flex items-center gap-1">
-                                            <button
-                                                onClick={() => setIncludeContextInMessages(!includeContextInMessages)}
-                                                className="p-1 hover:bg-slate-800 rounded transition-colors"
-                                                title={includeContextInMessages ? "Context is included" : "Context is excluded"}
-                                            >
-                                                {includeContextInMessages ? <Eye size={14} className="text-blue-400" /> : <EyeOff size={14} className="text-slate-500" />}
-                                            </button>
-                                            <button
-                                                onClick={() => {
-                                                    void loadProjectContextService()
-                                                        .then((projectContextService) => {
-                                                            projectContextService.clearContext();
-                                                            toast.success('Project context cleared');
-                                                        })
-                                                        .catch(() => {
-                                                            toast.error('Failed to clear project context');
-                                                        });
-                                                }}
-                                                className="p-1 hover:bg-slate-800 rounded transition-colors"
-                                                title="Clear context"
-                                            >
-                                                <X size={14} className="text-slate-500 hover:text-red-400" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <p className="text-[10px] text-slate-500 font-mono truncate mb-2" title={projectContext.folderPath}>
-                                        {projectContext.folderPath}
-                                    </p>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-[10px] text-slate-400">
-                                            {projectContext.files.length} file{projectContext.files.length !== 1 ? 's' : ''} loaded
-                                        </span>
-                                        {!projectContext.isWatching && (
-                                            <button
-                                                onClick={async () => {
-                                                    enableProjectContextFeature();
-                                                    const projectContextService = await loadProjectContextService();
-                                                    const success = await projectContextService.startWatching();
-                                                    if (success) {
-                                                        toast.success('Started watching folder for changes');
-                                                    } else {
-                                                        toast.error('Failed to start watching');
-                                                    }
-                                                }}
-                                                className="text-[10px] text-blue-400 hover:text-blue-300 underline"
-                                            >
-                                                Start watching
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Slash Command Menu */}
-                        {slashMatch && (
-                            <div className="absolute bottom-full left-4 mb-2 w-64 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl overflow-hidden z-50 animate-in slide-in-from-bottom-2 fade-in duration-200">
-                                <div className="p-2 border-b border-slate-800 text-[10px] font-bold text-slate-500 uppercase tracking-widest flex justify-between items-center">
-                                    <span>Prompt Library</span>
-                                    <span className="bg-slate-800 px-1 rounded text-slate-400">/</span>
-                                </div>
-                                <div className="max-h-48 overflow-y-auto">
-                                    {filteredPrompts.length === 0 ? (
-                                        <div className="p-3 text-xs text-slate-500 italic text-center">No matching prompts</div>
-                                    ) : (
-                                        filteredPrompts.map((p, i) => (
-                                            <button
-                                                key={p.id}
-                                                onClick={() => insertPrompt(p)}
-                                                className={`w-full text-left px-3 py-2 text-xs border-b border-slate-800/50 last:border-0 transition-colors flex flex-col gap-0.5 ${i === activePromptIndex ? 'bg-primary/20 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-                                            >
-                                                <span className="font-bold flex items-center gap-2">/{p.alias} <span className="font-normal opacity-50 text-[10px] ml-auto">↵</span></span>
-                                                <span className="opacity-70 truncate w-full block">{p.title}</span>
-                                            </button>
-                                        ))
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* 3. Control Pills Bar */}
                         {showBottomControls && (
                             <ComposerControlPills
                                 actions={composerControlPillActions}
@@ -6325,7 +6694,7 @@ const Chat: React.FC = () => {
                                 variableContext={composerVariableContext}
                             />
                         )}
-                    </div>
+                    </ComposerDropArea>
                 </div>
             </div>
 
@@ -6405,543 +6774,483 @@ const Chat: React.FC = () => {
                 )}
 
                 {activeTab === 'inspector' && (
-                    <div className="p-6 flex-1 overflow-y-auto custom-scrollbar pr-4">
-                        {selectedToken ? (
-                            <div className="animate-in fade-in zoom-in-95 duration-200">
-                                <div className="bg-white text-slate-900 rounded-xl p-6 text-center shadow-lg mb-6 border-4 border-slate-800 relative">
-                                    <div className="text-3xl font-heading font-bold mb-1">"{selectedToken.logprob.token}"</div>
-                                    <div className="text-xs text-slate-500 uppercase tracking-widest font-bold">Selected Token</div>
-
-                                    {/* Token Editor */}
-                                    <div className="mt-4 pt-4 border-t border-slate-200">
-                                        <div className="flex gap-2">
-                                            <input
-                                                type="text"
-                                                className="flex-1 bg-slate-100 border border-slate-300 rounded px-2 py-1 text-sm font-mono"
-                                                defaultValue={selectedToken.logprob.token}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') {
-                                                        const newVal = e.currentTarget.value;
-                                                        updateMessageToken(selectedToken.messageIndex, selectedToken.tokenIndex, newVal);
-                                                        toast.success("Token updated");
-                                                    }
-                                                }}
-                                            />
-                                            <button className="text-xs bg-slate-900 text-white px-2 py-1 rounded hover:bg-slate-700">Update</button>
-                                        </div>
-                                        <div className="text-[10px] text-slate-400 mt-1">Press Enter to apply changes</div>
-                                    </div>
-                                </div>
-                                <div className="space-y-4 mb-6">
-                                    <div className="bg-slate-900 rounded-lg p-4 border border-slate-800">
-                                        <div className="flex justify-between items-center mb-2"><span className="text-slate-400 text-sm">Logprob</span><span className="font-mono text-emerald-400">{selectedToken.logprob.logprob?.toFixed(4) ?? "N/A"}</span></div>
-                                        <div className="flex justify-between items-center mb-2"><span className="text-slate-400 text-sm">Probability</span><span className="font-mono text-emerald-400">{(Math.exp(selectedToken.logprob.logprob || 0) * 100).toFixed(2)}%</span></div>
-                                        <div className="flex justify-between items-center"><span className="text-slate-400 text-sm">Entropy</span><span className="font-mono text-amber-400">{calculateEntropy(selectedToken.logprob.top_logprobs).toFixed(3)}</span></div>
-                                    </div>
-                                </div>
-                                <details className="mb-6 group"><summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-300 transition-colors list-none flex items-center gap-1"><ChevronRight size={12} className="group-open:rotate-90 transition-transform" /> Debug Data</summary><pre className="mt-2 text-[10px] bg-slate-950 p-2 rounded text-slate-400 overflow-x-auto border border-slate-800 font-mono">{JSON.stringify(selectedToken.logprob, null, 2)}</pre></details>
-                                <h4 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2"><Activity size={14} className="text-primary" /> Top Alternatives</h4>
-                                {(!selectedToken.logprob.top_logprobs || selectedToken.logprob.top_logprobs.length === 0) ? (
-                                    <div className="p-4 bg-amber-900/20 border border-amber-900/50 rounded-lg text-amber-200 text-sm flex items-start gap-3"><AlertCircle size={16} className="mt-0.5 flex-shrink-0" /><div><p className="font-bold">No alternatives found.</p><p className="opacity-80 text-xs mt-1">If you just updated the server, please restart the application.</p></div></div>
-                                ) : (
-                                    <div className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
-                                        {selectedToken.logprob.top_logprobs.map((topLp, idx) => {
-                                            if (!topLp) return null;
-                                            const prob = Math.exp(topLp.logprob);
-                                            const width = Math.min(100, Math.max(1, prob * 100));
-                                            return (
-                                                <div key={`${idx}-${topLp.token}`} className="p-3 border-b border-slate-800 last:border-0 hover:bg-slate-800/50 transition-colors group">
-                                                    <div className="flex justify-between items-center mb-1.5"><span className="font-mono font-bold text-slate-200 bg-slate-950 px-1.5 py-0.5 rounded text-xs">"{topLp.token}"</span><span className="text-xs text-slate-400 group-hover:text-white font-mono">{(prob * 100).toFixed(1)}%</span></div>
-                                                    <div className="h-1.5 bg-slate-950 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full transition-all duration-500" style={{ width: `${width}%` }}></div></div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="flex flex-col items-center justify-center h-full text-slate-500 text-center space-y-4 p-8">
-                                <div className="w-16 h-16 rounded-full bg-slate-900 flex items-center justify-center mb-2 animate-pulse"><Activity size={32} className="text-slate-700" /></div>
-                                <p className="font-medium">Inspect Token Details</p>
-                                <p className="text-sm opacity-70">Select any token in the chat message to view its probabilities and entropy.</p>
-                                <div className="text-xs bg-slate-900/50 p-3 rounded border border-slate-800"><span className="text-amber-500">Note:</span> If tokens are not clickable, logprobs might be disabled on the server.</div>
-                            </div>
-                        )}
-                    </div>
+                    <ChatInspectorTabPanel
+                        selectedToken={selectedToken}
+                        onUpdateToken={updateMessageToken}
+                    />
                 )}
                 </div>
                 </>
             )}
 
             {/* Sidebar Toggle Button (when closed) */}
+            <ChatOverlayPortals>
+                {/* Keyboard Shortcuts Modal */}
+                {showShortcutsModal && (
+                    <React.Suspense fallback={null}>
+                        <KeyboardShortcutsModal
+                            isOpen={showShortcutsModal}
+                            onClose={() => setShowShortcutsModal(false)}
+                        />
+                    </React.Suspense>
+                )}
 
-            {/* Keyboard Shortcuts Modal */}
-            {showShortcutsModal && (
-                <React.Suspense fallback={null}>
-                    <KeyboardShortcutsModal
-                        isOpen={showShortcutsModal}
-                        onClose={() => setShowShortcutsModal(false)}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* Request/Response Log */}
-            {showRequestLog && (
-                <React.Suspense fallback={null}>
-                    <RequestResponseLog
-                        isOpen={showRequestLog}
-                        onClose={() => setShowRequestLog(false)}
-                        logs={apiLogs}
-                        onClear={() => {
-                            void loadActivityLogService()
-                                .then((service) => {
-                                    service.clear();
-                                })
-                                .catch(() => {
-                                    // Keep UI state cleared even if persistent store clear fails.
-                                });
-                            setApiLogs([]);
-                            setApiLogCount(0);
-                            setHasHydratedApiLogs(true);
-                        }}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* Analytics Dashboard */}
-            {showAnalytics && (
-                <React.Suspense fallback={null}>
-                    <AnalyticsDashboard
-                        isOpen={showAnalytics}
-                        onClose={() => setShowAnalytics(false)}
-                        usageHistory={usageStats}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* Conversation Tree View */}
-            {branchingEnabled && showTreeView && treeHook.treeManager && (
-                <React.Suspense fallback={null}>
-                    <ConversationTreeView
-                        isOpen={showTreeView}
-                        onClose={() => setShowTreeView(false)}
-                        treeManager={treeHook.treeManager}
-                        currentPath={treeHook.currentPath}
-                        onNavigateToNode={(nodeId) => {
-                            // Close tree view
-                            // Note: We don't navigate here to prevent truncating the conversation
-                            // Navigation is only useful when switching between actual branches,
-                            // which is handled by Alt+Left/Right keyboard shortcuts
-                            setShowTreeView(false);
-                        }}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* Export Dialog */}
-            {showExportDialog && (
-                <React.Suspense fallback={null}>
-                    <ExportDialog
-                        isOpen={showExportDialog}
-                        onClose={() => setShowExportDialog(false)}
-                        messages={history}
-                        sessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Conversation'}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* Global Search Dialog */}
-            {showGlobalSearch && (
-                <React.Suspense fallback={null}>
-                    <GlobalSearchDialog
-                        isOpen={showGlobalSearch}
-                        onClose={() => setShowGlobalSearch(false)}
-                        currentSessionId={sessionId}
-                        currentSessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Current Conversation'}
-                        onNavigateToMessage={(targetSessionId, messageIndex) => {
-                            // If different session, load it first
-                            if (targetSessionId !== sessionId) {
-                                handleLoadSession(targetSessionId);
-                            }
-                            // Scroll to the message after a short delay to allow session loading
-                            setTimeout(() => {
-                                if (virtuosoRef.current && messageIndex >= 0) {
-                                    virtuosoRef.current.scrollToIndex({
-                                        index: messageIndex,
-                                        align: 'center',
-                                        behavior: 'smooth'
+                {/* Request/Response Log */}
+                {showRequestLog && (
+                    <React.Suspense fallback={null}>
+                        <RequestResponseLog
+                            isOpen={showRequestLog}
+                            onClose={() => setShowRequestLog(false)}
+                            logs={apiLogs}
+                            onClear={() => {
+                                void loadActivityLogService()
+                                    .then((service) => {
+                                        service.clear();
+                                    })
+                                    .catch(() => {
+                                        // Keep UI state cleared even if persistent store clear fails.
                                     });
-                                    toast.success(`Jumped to message #${messageIndex + 1}`);
+                                setApiLogs([]);
+                                setApiLogCount(0);
+                                setHasHydratedApiLogs(true);
+                            }}
+                        />
+                    </React.Suspense>
+                )}
+
+                {/* Analytics Dashboard */}
+                {showAnalytics && (
+                    <React.Suspense fallback={null}>
+                        <AnalyticsDashboard
+                            isOpen={showAnalytics}
+                            onClose={() => setShowAnalytics(false)}
+                            usageHistory={usageStats}
+                        />
+                    </React.Suspense>
+                )}
+
+                {/* Conversation Tree View */}
+                {branchingEnabled && showTreeView && treeHook.treeManager && (
+                    <React.Suspense fallback={null}>
+                        <ConversationTreeView
+                            isOpen={showTreeView}
+                            onClose={() => setShowTreeView(false)}
+                            treeManager={treeHook.treeManager}
+                            currentPath={treeHook.currentPath}
+                            onNavigateToNode={() => {
+                                // Close tree view.
+                                // Navigation between branches is handled by keyboard shortcuts.
+                                setShowTreeView(false);
+                            }}
+                        />
+                    </React.Suspense>
+                )}
+
+                {/* Export Dialog */}
+                {showExportDialog && (
+                    <React.Suspense fallback={null}>
+                        <ExportDialog
+                            isOpen={showExportDialog}
+                            onClose={() => setShowExportDialog(false)}
+                            messages={history}
+                            sessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Conversation'}
+                        />
+                    </React.Suspense>
+                )}
+
+                {/* Global Search Dialog */}
+                {showGlobalSearch && (
+                    <React.Suspense fallback={null}>
+                        <GlobalSearchDialog
+                            isOpen={showGlobalSearch}
+                            onClose={() => setShowGlobalSearch(false)}
+                            currentSessionId={sessionId}
+                            currentSessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Current Conversation'}
+                            onNavigateToMessage={(targetSessionId, messageIndex) => {
+                                // If different session, load it first.
+                                if (targetSessionId !== sessionId) {
+                                    handleLoadSession(targetSessionId);
                                 }
-                            }, 300);
-                        }}
-                    />
-                </React.Suspense>
-            )}
+                                // Scroll to the message after a short delay to allow session loading.
+                                setTimeout(() => {
+                                    if (virtuosoRef.current && messageIndex >= 0) {
+                                        virtuosoRef.current.scrollToIndex({
+                                            index: messageIndex,
+                                            align: 'center',
+                                            behavior: 'smooth'
+                                        });
+                                        toast.success(`Jumped to message #${messageIndex + 1}`);
+                                    }
+                                }, 300);
+                            }}
+                        />
+                    </React.Suspense>
+                )}
 
-            {/* Template Library Dialog */}
-            {showTemplateLibrary && (
-                <React.Suspense fallback={null}>
-                    <TemplateLibraryDialog
-                        isOpen={showTemplateLibrary}
-                        onClose={() => setShowTemplateLibrary(false)}
-                        onUseTemplate={(template: ConversationTemplate) => {
-                            // Create new session with template
-                            createNewSession();
+                {/* Template Library Dialog */}
+                {showTemplateLibrary && (
+                    <React.Suspense fallback={null}>
+                        <TemplateLibraryDialog
+                            isOpen={showTemplateLibrary}
+                            onClose={() => setShowTemplateLibrary(false)}
+                            onUseTemplate={(template: ConversationTemplate) => {
+                                // Create new session with template.
+                                createNewSession();
 
-                            // Apply template settings
-                            if (template.systemPrompt) {
-                                setSystemPrompt(template.systemPrompt);
-                            }
-                            if (template.settings) {
-                                if (template.settings.temperature !== undefined) setTemperature(template.settings.temperature);
-                                if (template.settings.topP !== undefined) setTopP(template.settings.topP);
-                                if (template.settings.maxTokens !== undefined) setMaxTokens(template.settings.maxTokens);
-                                if (template.settings.expertMode !== undefined) setExpertMode(template.settings.expertMode);
-                                if (template.settings.thinkingEnabled !== undefined) setThinkingEnabled(template.settings.thinkingEnabled);
-                            }
+                                // Apply template settings.
+                                if (template.systemPrompt) {
+                                    setSystemPrompt(template.systemPrompt);
+                                }
+                                if (template.settings) {
+                                    if (template.settings.temperature !== undefined) setTemperature(template.settings.temperature);
+                                    if (template.settings.topP !== undefined) setTopP(template.settings.topP);
+                                    if (template.settings.maxTokens !== undefined) setMaxTokens(template.settings.maxTokens);
+                                    if (template.settings.expertMode !== undefined) setExpertMode(template.settings.expertMode);
+                                    if (template.settings.thinkingEnabled !== undefined) setThinkingEnabled(template.settings.thinkingEnabled);
+                                }
 
-                            // Apply initial messages
-                            if (template.initialMessages.length > 0) {
-                                replaceHistory(template.initialMessages.map(m => ({
-                                    ...m,
-                                    isLoading: false
-                                })));
-                            }
-                        }}
-                        currentMessages={history}
-                        currentSystemPrompt={systemPrompt}
-                        currentSettings={{
-                            temperature,
-                            topP,
-                            maxTokens,
-                            expertMode,
-                            thinkingEnabled
-                        }}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* A/B Testing Panel */}
-            {showABTesting && (
-                <React.Suspense fallback={null}>
-                    <ABTestingPanel
-                        isOpen={showABTesting}
-                        onClose={() => setShowABTesting(false)}
-                        onExecutePrompt={async (prompt, systemPrompt, modelId, temperature, topP, maxTokens) => {
-                            return executeChatCompletion({
-                                prompt,
-                                systemPrompt,
-                                modelId,
+                                // Apply initial messages.
+                                if (template.initialMessages.length > 0) {
+                                    replaceHistory(template.initialMessages.map(m => ({
+                                        ...m,
+                                        isLoading: false
+                                    })));
+                                }
+                            }}
+                            currentMessages={history}
+                            currentSystemPrompt={systemPrompt}
+                            currentSettings={{
                                 temperature,
                                 topP,
                                 maxTokens,
-                            });
-                        }}
-                        currentInput={input}
-                        currentContext={history}
-                    />
-                </React.Suspense>
-            )}
+                                expertMode,
+                                thinkingEnabled
+                            }}
+                        />
+                    </React.Suspense>
+                )}
 
-            {/* Prompt Optimization Panel */}
-            {showPromptOptimization && (
-                <React.Suspense fallback={null}>
-                    <PromptOptimizationPanel
-                        isOpen={showPromptOptimization}
-                        onClose={() => setShowPromptOptimization(false)}
-                        initialPrompt={input}
-                        initialSystemPrompt={systemPrompt}
-                        onApplyOptimized={(optimizedPrompt, optimizedSystemPrompt) => {
-                            setInput(optimizedPrompt);
-                            if (optimizedSystemPrompt) {
-                                setSystemPrompt(optimizedSystemPrompt);
-                            }
-                        }}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* Calendar Schedule Dialog */}
-            {showCalendarSchedule && (
-                <React.Suspense fallback={null}>
-                    <CalendarScheduleDialog
-                        isOpen={showCalendarSchedule}
-                        onClose={() => setShowCalendarSchedule(false)}
-                        conversationTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Conversation'}
-                        conversationSummary={history.length > 0 ? `Review conversation with ${history.length} messages` : undefined}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* Conversation Recommendations Panel */}
-            {showRecommendations && (
-                <React.Suspense fallback={null}>
-                    <ConversationRecommendationsPanel
-                        isOpen={showRecommendations}
-                        onClose={() => setShowRecommendations(false)}
-                        currentSessionId={sessionId}
-                        currentMessage={input}
-                        conversationHistory={history}
-                        onSelectConversation={(sessionId) => {
-                            handleLoadSession(sessionId);
-                            setShowRecommendations(false);
-                        }}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* Workflows Manager */}
-            {showWorkflows && (
-                <React.Suspense fallback={null}>
-                    <WorkflowsManager
-                        isOpen={showWorkflows}
-                        onClose={() => setShowWorkflows(false)}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* API Playground */}
-            {showAPIPlayground && (
-                <React.Suspense fallback={null}>
-                    <APIPlayground
-                        isOpen={showAPIPlayground}
-                        onClose={() => setShowAPIPlayground(false)}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* Developer Documentation */}
-            {showDeveloperDocs && (
-                <React.Suspense fallback={null}>
-                    <DeveloperDocumentationPanel
-                        isOpen={showDeveloperDocs}
-                        onClose={() => setShowDeveloperDocs(false)}
-                        onOpenAPIPlayground={() => {
-                            setShowDeveloperDocs(false);
-                            setShowAPIPlayground(true);
-                        }}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* Plugin Manager */}
-            {showPluginManager && (
-                <React.Suspense fallback={null}>
-                    <PluginManager
-                        isOpen={showPluginManager}
-                        onClose={() => setShowPluginManager(false)}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* Code Integration Panel */}
-            {showCodeIntegration && (
-                <React.Suspense fallback={null}>
-                    <CodeIntegrationPanel
-                        isOpen={showCodeIntegration}
-                        onClose={() => {
-                            setShowCodeIntegration(false);
-                            setSelectedCode(null);
-                        }}
-                        code={selectedCode?.code}
-                        language={selectedCode?.language || 'javascript'}
-                        conversationHistory={history}
-                        onExecutePrompt={async (prompt, systemPrompt) => {
-                            const result = await executeChatCompletion({
-                                prompt,
-                                systemPrompt,
-                            });
-                            return { content: result.content };
-                        }}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* Workspace Views */}
-            {showWorkspaceViews && (
-                <React.Suspense fallback={null}>
-                    <WorkspaceViewsPanel
-                        isOpen={showWorkspaceViews}
-                        onClose={() => setShowWorkspaceViews(false)}
-                        conversations={savedSessions.map(s => ({
-                            id: s.id,
-                            title: s.title,
-                            messageCount: s.messageCount || 0,
-                            lastActivity: s.lastMessageTime || s.createdAt,
-                            pinned: s.pinned,
-                            archived: false,
-                            category: undefined,
-                            tags: [],
-                            model: undefined,
-                        }))}
-                        onSelectConversation={(id) => {
-                            handleLoadSession(id);
-                            setShowWorkspaceViews(false);
-                        }}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* Interactive Tutorial */}
-            {showTutorial && currentTutorial && (
-                <React.Suspense fallback={null}>
-                    <InteractiveTutorial
-                        tutorial={currentTutorial}
-                        onComplete={() => {
-                            setShowTutorial(false);
-                            setCurrentTutorial(null);
-                            void loadOnboardingService()
-                                .then((onboardingService) => onboardingService.completeOnboarding())
-                                .catch(() => {
-                                    // Ignore onboarding persistence failures.
+                {/* A/B Testing Panel */}
+                {showABTesting && (
+                    <React.Suspense fallback={null}>
+                        <ABTestingPanel
+                            isOpen={showABTesting}
+                            onClose={() => setShowABTesting(false)}
+                            onExecutePrompt={async (prompt, systemPrompt, modelId, temperature, topP, maxTokens) => {
+                                return executeChatCompletion({
+                                    prompt,
+                                    systemPrompt,
+                                    modelId,
+                                    temperature,
+                                    topP,
+                                    maxTokens,
                                 });
-                        }}
-                        onSkip={() => {
-                            setShowTutorial(false);
-                            setCurrentTutorial(null);
-                        }}
-                    />
-                </React.Suspense>
-            )}
+                            }}
+                            currentInput={input}
+                            currentContext={history}
+                        />
+                    </React.Suspense>
+                )}
 
-            {/* Brain-Computer Interface */}
-            {showBCI && (
-                <React.Suspense fallback={null}>
-                    <BCIPanel
-                        isOpen={showBCI}
-                        onClose={() => setShowBCI(false)}
-                    />
-                </React.Suspense>
-            )}
-
-            {/* Multi-Modal AI */}
-            {showMultiModal && (
-                <React.Suspense fallback={null}>
-                    <MultiModalAIPanel
-                        isOpen={showMultiModal}
-                        onClose={() => setShowMultiModal(false)}
-                        onSend={async (media, text) => {
-                            // Process multi-modal request
-                            const multiModalAIService = await loadMultiModalAIService();
-                            const response = await multiModalAIService.sendMultiModalRequest(
-                                { text, media },
-                                async (prompt, systemPrompt) => {
-                                    const result = await executeChatCompletion({
-                                        prompt,
-                                        systemPrompt,
-                                    });
-                                    return { content: result.content };
+                {/* Prompt Optimization Panel */}
+                {showPromptOptimization && (
+                    <React.Suspense fallback={null}>
+                        <PromptOptimizationPanel
+                            isOpen={showPromptOptimization}
+                            onClose={() => setShowPromptOptimization(false)}
+                            initialPrompt={input}
+                            initialSystemPrompt={systemPrompt}
+                            onApplyOptimized={(optimizedPrompt, optimizedSystemPrompt) => {
+                                setInput(optimizedPrompt);
+                                if (optimizedSystemPrompt) {
+                                    setSystemPrompt(optimizedSystemPrompt);
                                 }
-                            );
-                            // Add response to conversation
-                            appendMessage({
-                                role: 'assistant',
-                                content: response.content,
-                                isLoading: false,
-                            });
-                        }}
-                    />
-                </React.Suspense>
-            )}
+                            }}
+                        />
+                    </React.Suspense>
+                )}
 
-            {/* Real-Time Collaboration */}
-            {showCollaboration && (
-                <React.Suspense fallback={null}>
-                    <RealTimeCollaborationPanel
-                        isOpen={showCollaboration}
-                        onClose={() => setShowCollaboration(false)}
-                    />
-                </React.Suspense>
-            )}
+                {/* Calendar Schedule Dialog */}
+                {showCalendarSchedule && (
+                    <React.Suspense fallback={null}>
+                        <CalendarScheduleDialog
+                            isOpen={showCalendarSchedule}
+                            onClose={() => setShowCalendarSchedule(false)}
+                            conversationTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Conversation'}
+                            conversationSummary={history.length > 0 ? `Review conversation with ${history.length} messages` : undefined}
+                        />
+                    </React.Suspense>
+                )}
 
-            {showCloudSync && (
-                <React.Suspense fallback={null}>
-                    <CloudSyncPanel
-                        isOpen={showCloudSync}
-                        onClose={() => setShowCloudSync(false)}
-                    />
-                </React.Suspense>
-            )}
+                {/* Conversation Recommendations Panel */}
+                {showRecommendations && (
+                    <React.Suspense fallback={null}>
+                        <ConversationRecommendationsPanel
+                            isOpen={showRecommendations}
+                            onClose={() => setShowRecommendations(false)}
+                            currentSessionId={sessionId}
+                            currentMessage={input}
+                            conversationHistory={history}
+                            onSelectConversation={(nextSessionId) => {
+                                handleLoadSession(nextSessionId);
+                                setShowRecommendations(false);
+                            }}
+                        />
+                    </React.Suspense>
+                )}
 
-            {showTeamWorkspaces && (
-                <React.Suspense fallback={null}>
-                    <TeamWorkspacesPanel
-                        isOpen={showTeamWorkspaces}
-                        onClose={() => setShowTeamWorkspaces(false)}
-                        availableModels={availableModels}
-                        conversations={savedSessions}
-                    />
-                </React.Suspense>
-            )}
+                {/* Workflows Manager */}
+                {showWorkflows && (
+                    <React.Suspense fallback={null}>
+                        <WorkflowsManager
+                            isOpen={showWorkflows}
+                            onClose={() => setShowWorkflows(false)}
+                        />
+                    </React.Suspense>
+                )}
 
-            {showEnterpriseCompliance && (
-                <React.Suspense fallback={null}>
-                    <EnterpriseCompliancePanel
-                        isOpen={showEnterpriseCompliance}
-                        onClose={() => setShowEnterpriseCompliance(false)}
-                    />
-                </React.Suspense>
-            )}
+                {/* API Playground */}
+                {showAPIPlayground && (
+                    <React.Suspense fallback={null}>
+                        <APIPlayground
+                            isOpen={showAPIPlayground}
+                            onClose={() => setShowAPIPlayground(false)}
+                        />
+                    </React.Suspense>
+                )}
 
-            {/* Blockchain Integration */}
-            {showBlockchain && (
-                <React.Suspense fallback={null}>
-                    <BlockchainPanel
-                        isOpen={showBlockchain}
-                        onClose={() => setShowBlockchain(false)}
-                        sessionId={sessionId}
-                        conversationData={history}
-                    />
-                </React.Suspense>
-            )}
+                {/* Developer Documentation */}
+                {showDeveloperDocs && (
+                    <React.Suspense fallback={null}>
+                        <DeveloperDocumentationPanel
+                            isOpen={showDeveloperDocs}
+                            onClose={() => setShowDeveloperDocs(false)}
+                            onOpenAPIPlayground={() => {
+                                setShowDeveloperDocs(false);
+                                setShowAPIPlayground(true);
+                            }}
+                        />
+                    </React.Suspense>
+                )}
 
-            {/* AI Agents */}
-            {showAIAgents && (
-                <React.Suspense fallback={null}>
-                    <AIAgentsPanel
-                        isOpen={showAIAgents}
-                        onClose={() => setShowAIAgents(false)}
-                        onExecutePrompt={async (prompt, systemPrompt) => {
-                            const result = await executeChatCompletion({
-                                prompt,
-                                systemPrompt,
-                            });
-                            return { content: result.content };
-                        }}
-                    />
-                </React.Suspense>
-            )}
+                {/* Plugin Manager */}
+                {showPluginManager && (
+                    <React.Suspense fallback={null}>
+                        <PluginManager
+                            isOpen={showPluginManager}
+                            onClose={() => setShowPluginManager(false)}
+                        />
+                    </React.Suspense>
+                )}
 
-            {/* Federated Learning */}
-            {showFederatedLearning && (
-                <React.Suspense fallback={null}>
-                    <FederatedLearningPanel
-                        isOpen={showFederatedLearning}
-                        onClose={() => setShowFederatedLearning(false)}
-                    />
-                </React.Suspense>
-            )}
+                {/* Code Integration Panel */}
+                {showCodeIntegration && (
+                    <React.Suspense fallback={null}>
+                        <CodeIntegrationPanel
+                            isOpen={showCodeIntegration}
+                            onClose={() => {
+                                setShowCodeIntegration(false);
+                                setSelectedCode(null);
+                            }}
+                            code={selectedCode?.code}
+                            language={selectedCode?.language || 'javascript'}
+                            conversationHistory={history}
+                            onExecutePrompt={async (prompt, systemPrompt) => {
+                                const result = await executeChatCompletion({
+                                    prompt,
+                                    systemPrompt,
+                                });
+                                return { content: result.content };
+                            }}
+                        />
+                    </React.Suspense>
+                )}
 
-            {/* Performance Monitor Overlay (dev-only, on demand) */}
-            {devMonitorsEnabled && (
-                <React.Suspense fallback={null}>
-                    <PerformanceMonitorOverlay messageCount={history.length} />
-                </React.Suspense>
-            )}
+                {/* Workspace Views */}
+                {showWorkspaceViews && (
+                    <React.Suspense fallback={null}>
+                        <WorkspaceViewsPanel
+                            isOpen={showWorkspaceViews}
+                            onClose={() => setShowWorkspaceViews(false)}
+                            conversations={savedSessions.map(s => ({
+                                id: s.id,
+                                title: s.title,
+                                messageCount: s.messageCount || 0,
+                                lastActivity: s.lastMessageTime || s.createdAt,
+                                pinned: s.pinned,
+                                archived: false,
+                                category: undefined,
+                                tags: [],
+                                model: undefined,
+                            }))}
+                            onSelectConversation={(id) => {
+                                handleLoadSession(id);
+                                setShowWorkspaceViews(false);
+                            }}
+                        />
+                    </React.Suspense>
+                )}
 
-            {/* Recovery Dialog */}
-            {showRecoveryDialog && (
-                <React.Suspense fallback={null}>
-                    <RecoveryDialog
-                        isOpen={showRecoveryDialog}
-                        onClose={() => setShowRecoveryDialog(false)}
-                        onRestore={handleRestoreSession}
-                        onDismiss={handleDismissRecovery}
-                        recoveryState={recoveryState}
-                    />
-                </React.Suspense>
-            )}
+                {/* Interactive Tutorial */}
+                {showTutorial && currentTutorial && (
+                    <React.Suspense fallback={null}>
+                        <InteractiveTutorial
+                            tutorial={currentTutorial}
+                            onComplete={() => {
+                                setShowTutorial(false);
+                                setCurrentTutorial(null);
+                                void loadOnboardingService()
+                                    .then((onboardingService) => onboardingService.completeOnboarding())
+                                    .catch(() => {
+                                        // Ignore onboarding persistence failures.
+                                    });
+                            }}
+                            onSkip={() => {
+                                setShowTutorial(false);
+                                setCurrentTutorial(null);
+                            }}
+                        />
+                    </React.Suspense>
+                )}
+
+                {/* Brain-Computer Interface */}
+                {showBCI && (
+                    <React.Suspense fallback={null}>
+                        <BCIPanel
+                            isOpen={showBCI}
+                            onClose={() => setShowBCI(false)}
+                        />
+                    </React.Suspense>
+                )}
+
+                {/* Multi-Modal AI */}
+                {showMultiModal && (
+                    <React.Suspense fallback={null}>
+                        <MultiModalAIPanel
+                            isOpen={showMultiModal}
+                            onClose={() => setShowMultiModal(false)}
+                            onSend={async (media, text) => {
+                                // Process multi-modal request.
+                                const multiModalAIService = await loadMultiModalAIService();
+                                const response = await multiModalAIService.sendMultiModalRequest(
+                                    { text, media },
+                                    async (prompt, systemPrompt) => {
+                                        const result = await executeChatCompletion({
+                                            prompt,
+                                            systemPrompt,
+                                        });
+                                        return { content: result.content };
+                                    }
+                                );
+                                // Add response to conversation.
+                                appendMessage({
+                                    role: 'assistant',
+                                    content: response.content,
+                                    isLoading: false,
+                                });
+                            }}
+                        />
+                    </React.Suspense>
+                )}
+
+                {/* Real-Time Collaboration */}
+                {showCollaboration && (
+                    <React.Suspense fallback={null}>
+                        <RealTimeCollaborationPanel
+                            isOpen={showCollaboration}
+                            onClose={() => setShowCollaboration(false)}
+                        />
+                    </React.Suspense>
+                )}
+
+                {showCloudSync && (
+                    <React.Suspense fallback={null}>
+                        <CloudSyncPanel
+                            isOpen={showCloudSync}
+                            onClose={() => setShowCloudSync(false)}
+                        />
+                    </React.Suspense>
+                )}
+
+                {showTeamWorkspaces && (
+                    <React.Suspense fallback={null}>
+                        <TeamWorkspacesPanel
+                            isOpen={showTeamWorkspaces}
+                            onClose={() => setShowTeamWorkspaces(false)}
+                            availableModels={availableModels}
+                            conversations={savedSessions}
+                        />
+                    </React.Suspense>
+                )}
+
+                {showEnterpriseCompliance && (
+                    <React.Suspense fallback={null}>
+                        <EnterpriseCompliancePanel
+                            isOpen={showEnterpriseCompliance}
+                            onClose={() => setShowEnterpriseCompliance(false)}
+                        />
+                    </React.Suspense>
+                )}
+
+                {/* Blockchain Integration */}
+                {showBlockchain && (
+                    <React.Suspense fallback={null}>
+                        <BlockchainPanel
+                            isOpen={showBlockchain}
+                            onClose={() => setShowBlockchain(false)}
+                            sessionId={sessionId}
+                            conversationData={history}
+                        />
+                    </React.Suspense>
+                )}
+
+                {/* AI Agents */}
+                {showAIAgents && (
+                    <React.Suspense fallback={null}>
+                        <AIAgentsPanel
+                            isOpen={showAIAgents}
+                            onClose={() => setShowAIAgents(false)}
+                            onExecutePrompt={async (prompt, systemPrompt) => {
+                                const result = await executeChatCompletion({
+                                    prompt,
+                                    systemPrompt,
+                                });
+                                return { content: result.content };
+                            }}
+                        />
+                    </React.Suspense>
+                )}
+
+                {/* Federated Learning */}
+                {showFederatedLearning && (
+                    <React.Suspense fallback={null}>
+                        <FederatedLearningPanel
+                            isOpen={showFederatedLearning}
+                            onClose={() => setShowFederatedLearning(false)}
+                        />
+                    </React.Suspense>
+                )}
+
+                {/* Performance Monitor Overlay (dev-only, on demand) */}
+                {devMonitorsEnabled && (
+                    <React.Suspense fallback={null}>
+                        <PerformanceMonitorOverlay messageCount={history.length} />
+                    </React.Suspense>
+                )}
+
+                {/* Recovery Dialog */}
+                {showRecoveryDialog && (
+                    <React.Suspense fallback={null}>
+                        <RecoveryDialog
+                            isOpen={showRecoveryDialog}
+                            onClose={() => setShowRecoveryDialog(false)}
+                            onRestore={handleRestoreSession}
+                            onDismiss={handleDismissRecovery}
+                            recoveryState={recoveryState}
+                        />
+                    </React.Suspense>
+                )}
+            </ChatOverlayPortals>
         </div>
     );
 };

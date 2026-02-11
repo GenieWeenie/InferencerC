@@ -1,10 +1,14 @@
 import { getMessageActionCapabilities } from '../src/renderer/lib/chatMessageActions';
 import {
+  applyPromptSnippetAtSlash,
+  buildInspectorAlternativeRows,
   buildContextTrimSuggestionRows,
   buildComposerControlPillDescriptors,
   buildLongPressMenuActionItems,
   buildRecentContextMessageRows,
+  classifyDroppedFile,
   getWrappedSearchResultIndex,
+  getSlashCommandMatch,
   getMaxTokensSliderConfig,
   toggleToolNameInSet,
 } from '../src/renderer/lib/chatUiModels';
@@ -178,5 +182,37 @@ describe('chatUiModels', () => {
       sliderMax: 190000,
       sliderStep: 100,
     });
+  });
+
+  it('classifies dropped files for image/text/unsupported paths', () => {
+    expect(classifyDroppedFile({ type: 'image/png', name: 'photo.png' } as File)).toBe('image');
+    expect(classifyDroppedFile({ type: 'text/plain', name: 'notes.txt' } as File)).toBe('text');
+    expect(classifyDroppedFile({ type: 'application/octet-stream', name: 'index.ts' } as File)).toBe('text');
+    expect(classifyDroppedFile({ type: 'application/pdf', name: 'report.pdf' } as File)).toBe('unsupported');
+  });
+
+  it('detects slash-command matches and applies snippets at cursor', () => {
+    const value = 'Please /sum';
+    const match = getSlashCommandMatch(value, value.length);
+    expect(match).toEqual({ query: 'sum', index: 8 });
+    expect(getSlashCommandMatch('No command here', 5)).toBeNull();
+
+    const next = applyPromptSnippetAtSlash('Please /sum now', 11, 8, 'summarize this');
+    expect(next).toBe('Please summarize this now');
+  });
+
+  it('builds deterministic inspector alternative rows with clamped widths', () => {
+    const rows = buildInspectorAlternativeRows([
+      { token: 'a', logprob: Math.log(0.84) },
+      { token: 'b', logprob: Math.log(0.1) },
+      null,
+      { token: 'tiny', logprob: Math.log(0.001) },
+    ]);
+
+    expect(rows.map((row) => row.key)).toEqual(['0-a', '1-b', '3-tiny']);
+    expect(rows[0].probabilityPercent).toBeCloseTo(84, 5);
+    expect(rows[0].widthPercent).toBeCloseTo(84, 5);
+    expect(rows[2].probabilityPercent).toBeCloseTo(0.1, 5);
+    expect(rows[2].widthPercent).toBe(1);
   });
 });
