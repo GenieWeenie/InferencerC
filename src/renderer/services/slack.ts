@@ -10,9 +10,45 @@ export interface SlackConfig {
     defaultChannel?: string; // Default channel ID or name
 }
 
+type SlackTextObject = {
+    type: 'plain_text' | 'mrkdwn';
+    text: string;
+};
+
+type SlackBlock =
+    | {
+        type: 'header';
+        text: SlackTextObject;
+    }
+    | {
+        type: 'section';
+        text: SlackTextObject;
+    }
+    | {
+        type: 'divider';
+    }
+    | Record<string, unknown>;
+
+interface SlackWebhookPayload {
+    text: string;
+    blocks?: SlackBlock[];
+    channel?: string;
+}
+
+interface SlackApiPayload extends SlackWebhookPayload {
+    channel?: string;
+    thread_ts?: string;
+}
+
+interface SlackApiResponse {
+    ok: boolean;
+    error?: string;
+    ts?: string;
+}
+
 export interface SlackMessage {
     text: string;
-    blocks?: any[]; // Slack Block Kit blocks
+    blocks?: SlackBlock[]; // Slack Block Kit blocks
     channel?: string;
     thread_ts?: string; // Reply to thread
 }
@@ -91,7 +127,7 @@ class SlackService {
         }
 
         try {
-            const payload: any = {
+            const payload: SlackWebhookPayload = {
                 text: message.text,
             };
 
@@ -117,7 +153,7 @@ class SlackService {
             }
 
             // Webhooks don't return message timestamp, but we can try to parse response
-            const responseText = await response.text();
+            await response.text();
             return { success: true };
         } catch (error) {
             return {
@@ -146,7 +182,7 @@ class SlackService {
         }).join('\n\n---\n\n')}`;
 
         // Create blocks for better formatting
-        const blocks: any[] = [
+        const blocks: SlackBlock[] = [
             {
                 type: 'header',
                 text: {
@@ -196,7 +232,7 @@ class SlackService {
         }
 
         try {
-            const payload: any = {
+            const payload: SlackApiPayload = {
                 channel: message.channel || this.config.defaultChannel,
                 text: message.text,
             };
@@ -218,15 +254,16 @@ class SlackService {
                 body: JSON.stringify(payload),
             });
 
-            const data = await response.json();
+            const data: unknown = await response.json();
+            const parsed = (data && typeof data === 'object') ? (data as SlackApiResponse) : null;
 
-            if (!data.ok) {
-                return { success: false, error: data.error || 'Slack API error' };
+            if (!parsed?.ok) {
+                return { success: false, error: parsed?.error || 'Slack API error' };
             }
 
             return {
                 success: true,
-                messageTs: data.ts,
+                messageTs: parsed.ts,
             };
         } catch (error) {
             return {

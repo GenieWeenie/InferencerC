@@ -34,7 +34,15 @@ export const CodeIntegrationPanel: React.FC<CodeIntegrationPanelProps> = ({
     conversationHistory = [],
     onExecutePrompt,
 }) => {
-    const [activeTab, setActiveTab] = useState<'git' | 'review' | 'refactor' | 'docs' | 'tests'>('review');
+    type IntegrationTabId = 'git' | 'review' | 'refactor' | 'docs' | 'tests';
+    const integrationTabs: Array<{ id: IntegrationTabId; label: string; icon: typeof Eye }> = [
+        { id: 'review', label: 'Code Review', icon: Eye },
+        { id: 'refactor', label: 'Refactor', icon: RefreshCw },
+        { id: 'docs', label: 'Documentation', icon: FileText },
+        { id: 'tests', label: 'Tests', icon: TestTube },
+        { id: 'git', label: 'Git', icon: GitBranch },
+    ];
+    const [activeTab, setActiveTab] = useState<IntegrationTabId>('review');
     const [reviewResult, setReviewResult] = useState<CodeReviewResult | null>(null);
     const [refactoringSuggestions, setRefactoringSuggestions] = useState<RefactoringSuggestion[]>([]);
     const [documentationResult, setDocumentationResult] = useState<DocumentationResult | null>(null);
@@ -169,16 +177,10 @@ export const CodeIntegrationPanel: React.FC<CodeIntegrationPanelProps> = ({
 
                     {/* Tabs */}
                     <div className="flex border-b border-slate-700">
-                        {[
-                            { id: 'review', label: 'Code Review', icon: Eye },
-                            { id: 'refactor', label: 'Refactor', icon: RefreshCw },
-                            { id: 'docs', label: 'Documentation', icon: FileText },
-                            { id: 'tests', label: 'Tests', icon: TestTube },
-                            { id: 'git', label: 'Git', icon: GitBranch },
-                        ].map(({ id, label, icon: Icon }) => (
+                        {integrationTabs.map(({ id, label, icon: Icon }) => (
                             <button
                                 key={id}
-                                onClick={() => setActiveTab(id as any)}
+                                onClick={() => setActiveTab(id)}
                                 className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${
                                     activeTab === id
                                         ? 'text-primary border-primary bg-slate-900/50'
@@ -565,7 +567,11 @@ const TestGenerationView: React.FC<{
     language: string;
     onExecutePrompt: (prompt: string, systemPrompt?: string) => Promise<{ content: string }>;
 }> = ({ code, language, onExecutePrompt }) => {
-    const [framework, setFramework] = useState<'jest' | 'mocha' | 'pytest' | 'junit' | 'vitest'>('jest');
+    type TestFramework = 'jest' | 'mocha' | 'pytest' | 'junit' | 'vitest';
+    const isTestFramework = (value: string): value is TestFramework => {
+        return value === 'jest' || value === 'mocha' || value === 'pytest' || value === 'junit' || value === 'vitest';
+    };
+    const [framework, setFramework] = useState<TestFramework>('jest');
     const [testResult, setTestResult] = useState<string>('');
     const [isGenerating, setIsGenerating] = useState(false);
 
@@ -603,7 +609,12 @@ const TestGenerationView: React.FC<{
                 <label className="block text-sm font-medium text-slate-300 mb-2">Test Framework</label>
                 <select
                     value={framework}
-                    onChange={(e) => setFramework(e.target.value as any)}
+                    onChange={(e) => {
+                        const { value } = e.target;
+                        if (isTestFramework(value)) {
+                            setFramework(value);
+                        }
+                    }}
                     className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded text-white"
                 >
                     <option value="jest">Jest</option>

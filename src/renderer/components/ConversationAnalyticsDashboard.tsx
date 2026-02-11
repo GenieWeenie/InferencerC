@@ -31,6 +31,15 @@ interface ConversationAnalyticsDashboardProps {
 
 type ViewMode = 'overview' | 'models' | 'patterns' | 'trends' | 'conversations';
 
+interface OverviewStats {
+    totalConversations: number;
+    totalMessages: number;
+    totalTokens: number;
+    avgEngagement: number;
+    avgResponseTime: number;
+    topModel: string;
+}
+
 export const ConversationAnalyticsDashboard: React.FC<ConversationAnalyticsDashboardProps> = ({
     isOpen,
     onClose,
@@ -72,7 +81,7 @@ export const ConversationAnalyticsDashboard: React.FC<ConversationAnalyticsDashb
     };
 
     // Calculate overview stats
-    const overviewStats = useMemo(() => {
+    const overviewStats = useMemo<OverviewStats>(() => {
         if (metrics.length === 0) {
             return {
                 totalConversations: 0,
@@ -200,7 +209,7 @@ export const ConversationAnalyticsDashboard: React.FC<ConversationAnalyticsDashb
 };
 
 // Overview View
-const OverviewView: React.FC<{ stats: any }> = ({ stats }) => {
+const OverviewView: React.FC<{ stats: OverviewStats }> = ({ stats }) => {
     return (
         <div className="space-y-6">
             <h3 className="text-xl font-semibold text-white mb-4">Overview</h3>

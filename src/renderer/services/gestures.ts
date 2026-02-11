@@ -133,12 +133,30 @@ export class GestureService {
         };
     }
 
+    on(type: 'pinch', listener: GestureListener<'pinch'>): () => void;
+    on(type: 'swipe', listener: GestureListener<'swipe'>): () => void;
+    on(type: 'longpress', listener: GestureListener<'longpress'>): () => void;
     on<T extends GestureType>(type: T, listener: GestureListener<T>): () => void {
-        const typedListener = listener as GestureListener<any>;
-        this.listeners[type].add(typedListener);
+        if (type === 'pinch') {
+            const pinchListener = listener as GestureListener<'pinch'>;
+            this.listeners.pinch.add(pinchListener);
+            return () => {
+                this.listeners.pinch.delete(pinchListener);
+            };
+        }
 
+        if (type === 'swipe') {
+            const swipeListener = listener as GestureListener<'swipe'>;
+            this.listeners.swipe.add(swipeListener);
+            return () => {
+                this.listeners.swipe.delete(swipeListener);
+            };
+        }
+
+        const longPressListener = listener as GestureListener<'longpress'>;
+        this.listeners.longpress.add(longPressListener);
         return () => {
-            this.listeners[type].delete(typedListener);
+            this.listeners.longpress.delete(longPressListener);
         };
     }
 

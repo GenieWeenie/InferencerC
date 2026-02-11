@@ -16,6 +16,7 @@ import {
     ABTestVariant,
     ABTestVariantResult,
 } from '../services/abTesting';
+import { ChatMessage } from '../../shared/types';
 import { toast } from 'sonner';
 
 interface ABTestingPanelProps {
@@ -30,7 +31,7 @@ interface ABTestingPanelProps {
         maxTokens?: number
     ) => Promise<{ content: string; tokensUsed?: number }>;
     currentInput?: string; // Pre-fill with current chat input
-    currentContext?: any[]; // Current conversation context
+    currentContext?: ChatMessage[]; // Current conversation context
 }
 
 export const ABTestingPanel: React.FC<ABTestingPanelProps> = ({

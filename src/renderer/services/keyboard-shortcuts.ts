@@ -11,6 +11,15 @@ export interface Shortcut {
   description?: string;
 }
 
+interface ThemeState {
+  type?: 'light' | 'dark' | string;
+}
+
+interface ThemeService {
+  getCurrentTheme: () => ThemeState;
+  setTheme: (theme: 'light' | 'dark') => void;
+}
+
 /**
  * Keyboard shortcut service for managing application shortcuts
  */
@@ -144,7 +153,8 @@ export class KeyboardShortcutService {
       ctrl: true,
       handler: () => {
         // Toggle theme
-        const themeService = (window as any).themeService; // Access global theme service
+        const themedWindow = window as Window & { themeService?: ThemeService };
+        const themeService = themedWindow.themeService;
         if (themeService) {
           const currentTheme = themeService.getCurrentTheme();
           const newTheme = currentTheme.type === 'dark' ? 'light' : 'dark';

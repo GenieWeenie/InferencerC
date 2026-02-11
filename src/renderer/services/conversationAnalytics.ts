@@ -85,6 +85,10 @@ export interface TrendData {
     topModel: string;
 }
 
+type ConversationBranchTree = {
+    branches?: unknown[];
+};
+
 export class ConversationAnalyticsService {
     private static instance: ConversationAnalyticsService;
     private cache: Map<string, ConversationMetrics> = new Map();
@@ -392,9 +396,10 @@ export class ConversationAnalyticsService {
         return 0; // Placeholder
     }
 
-    private countBranches(tree: any): number {
-        if (!tree || !tree.branches) return 0;
-        return tree.branches.length || 0;
+    private countBranches(tree: unknown): number {
+        if (!tree || typeof tree !== 'object') return 0;
+        const maybeTree = tree as ConversationBranchTree;
+        return Array.isArray(maybeTree.branches) ? maybeTree.branches.length : 0;
     }
 
     private calculateCompletionRate(messages: ChatMessage[]): number {

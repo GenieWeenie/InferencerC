@@ -238,7 +238,7 @@ export class ExportService {
         options: ExportOptions
     ): Promise<Blob> {
         const { Document, Paragraph, TextRun, HeadingLevel, Packer } = await import('docx');
-        const children: any[] = [];
+        const children: Array<InstanceType<typeof Paragraph>> = [];
 
         // Title
         children.push(

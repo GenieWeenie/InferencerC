@@ -448,7 +448,7 @@ const extractSessionTerms = (session: ChatSession): Set<string> => {
         terms.add(titleTerms[i]);
     }
 
-    const messages = session.messages as any[];
+    const messages = session.messages;
     for (let i = 0; i < messages.length; i++) {
         const content = messages[i]?.content;
         if (typeof content !== 'string') {

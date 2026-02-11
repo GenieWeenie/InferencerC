@@ -42,6 +42,29 @@ type SessionDataCacheEntry = {
   parsed: ChatSession;
   chunkedMessageIndexes: number[];
 };
+type ChunkedChatMessage = ChatMessage & { _contentChunked?: boolean };
+type StructuredMessagePart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
+const isStructuredMessagePart = (value: unknown): value is StructuredMessagePart => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const part = value as Partial<StructuredMessagePart>;
+  if (part.type === 'text') {
+    return typeof part.text === 'string';
+  }
+  if (part.type === 'image_url') {
+    const image = part.image_url as { url?: unknown } | undefined;
+    return !!image && typeof image.url === 'string';
+  }
+  return false;
+};
+
+const isStructuredMessageParts = (value: unknown): value is StructuredMessagePart[] => {
+  return Array.isArray(value) && value.every(isStructuredMessagePart);
+};
 const sessionDataCache = new Map<string, SessionDataCacheEntry>();
 
 const loadEncryptionService = async (): Promise<EncryptionServiceType> => {
@@ -238,7 +261,7 @@ const patchStoredSessionMetadata = (
 const getChunkedMessageIndexes = (messages: ChatMessage[]): number[] => {
   const chunkedIndexes: number[] = [];
   for (let i = 0; i < messages.length; i++) {
-    const chatMsg = messages[i] as any;
+    const chatMsg = messages[i] as ChunkedChatMessage;
     if (chatMsg._contentChunked) {
       chunkedIndexes.push(i);
     }
@@ -315,7 +338,7 @@ const shouldChunkMessage = (message: ChatMessage): boolean => {
 /**
  * Store message content separately
  */
-const storeMessageContent = (sessionId: string, messageIndex: number, content: string | any): void => {
+const storeMessageContent = (sessionId: string, messageIndex: number, content: unknown): void => {
   const key = getChunkContentKey(sessionId, messageIndex);
   registerChunkKey(sessionId, key);
   const isPlainContent = typeof content === 'string';
@@ -338,7 +361,7 @@ const storeMessageContent = (sessionId: string, messageIndex: number, content: s
   messageContentWriteCache.set(key, contentStr);
 };
 
-const decodeStoredMessageContent = (key: string, content: string): string | any => {
+const decodeStoredMessageContent = (key: string, content: string): unknown => {
   const knownKind = messageContentKindCache.get(key);
   if (knownKind === 'plain') {
     return content;
@@ -368,7 +391,7 @@ const decodeStoredMessageContent = (key: string, content: string): string | any 
 /**
  * Load message content from separate storage
  */
-const loadMessageContent = (sessionId: string, messageIndex: number): string | any | null => {
+const loadMessageContent = (sessionId: string, messageIndex: number): unknown | null => {
   const key = getChunkContentKey(sessionId, messageIndex);
   registerChunkKey(sessionId, key);
 
@@ -470,7 +493,7 @@ const migrateToChunkedStorage = () => {
 
       // Check if any messages need chunking
       session.messages.forEach((msg, index) => {
-        const chatMsg = msg as any;
+        const chatMsg = msg as ChunkedChatMessage;
         // Skip if already chunked
         if (chatMsg._contentChunked) return;
 
@@ -597,7 +620,7 @@ export const HistoryService = {
       const messagesWithContent = [...session.messages] as ChatMessage[];
       for (let i = 0; i < chunkedMessageIndexes.length; i++) {
         const index = chunkedMessageIndexes[i];
-        const chatMsg = messagesWithContent[index] as any;
+        const chatMsg = messagesWithContent[index] as ChunkedChatMessage;
         const content = loadMessageContent(id, index);
         if (content !== null) {
           // Remove the chunked marker and restore content.
@@ -736,7 +759,7 @@ export const HistoryService = {
           ...chatMsg,
           content: '', // Clear content to save space
           _contentChunked: true // Marker for lazy loading
-        } as any;
+        } as ChunkedChatMessage;
       }
 
       return chatMsg;
@@ -881,8 +904,8 @@ export const HistoryService = {
       markdown += `## ${role} (Message ${index + 1})\n\n`;
 
       // Handle multimodal content
-      if (Array.isArray(msg.content)) {
-        msg.content.forEach((part: any) => {
+      if (isStructuredMessageParts(msg.content)) {
+        msg.content.forEach((part) => {
           if (part.type === 'text') {
             markdown += `${part.text}\n\n`;
           } else if (part.type === 'image_url') {

@@ -39,6 +39,12 @@ export interface DiscordResult {
     error?: string;
 }
 
+interface DiscordWebhookPayload extends DiscordMessage {}
+
+interface DiscordWebhookResponse {
+    id?: string;
+}
+
 class DiscordService {
     private config: DiscordConfig | null = null;
     private readonly STORAGE_KEY = 'discord_config';
@@ -107,7 +113,7 @@ class DiscordService {
         }
 
         try {
-            const payload: any = {
+            const payload: DiscordWebhookPayload = {
                 ...message,
             };
 
@@ -132,10 +138,11 @@ class DiscordService {
                 return { success: false, error: `Discord API error: ${errorText}` };
             }
 
-            const data = await response.json();
+            const data: unknown = await response.json();
+            const parsed = (data && typeof data === 'object') ? (data as DiscordWebhookResponse) : null;
             return {
                 success: true,
-                messageId: data.id,
+                messageId: parsed?.id,
             };
         } catch (error) {
             return {

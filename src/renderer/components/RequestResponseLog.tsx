@@ -24,7 +24,7 @@ const RequestResponseLog: React.FC<RequestResponseLogProps> = ({ isOpen, onClose
         setTimeout(() => setCopiedId(null), 2000);
     };
 
-    const formatJson = (obj: any) => {
+    const formatJson = (obj: unknown) => {
         try {
             return JSON.stringify(obj, null, 2);
         } catch {

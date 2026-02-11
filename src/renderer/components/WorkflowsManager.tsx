@@ -18,6 +18,31 @@ import {
 } from '../services/workflows';
 import { toast } from 'sonner';
 
+const CONDITION_TYPES: WorkflowCondition['type'][] = ['intent', 'keyword', 'message-count', 'topic', 'category', 'model'];
+const CONDITION_OPERATORS: WorkflowCondition['operator'][] = [
+    'equals',
+    'contains',
+    'starts-with',
+    'ends-with',
+    'greater-than',
+    'less-than',
+];
+const ACTION_TYPES: WorkflowAction['type'][] = [
+    'set-model',
+    'set-temperature',
+    'set-system-prompt',
+    'add-context',
+    'trigger-webhook',
+    'send-notification',
+];
+
+const isConditionType = (value: string): value is WorkflowCondition['type'] =>
+    CONDITION_TYPES.includes(value as WorkflowCondition['type']);
+const isConditionOperator = (value: string): value is WorkflowCondition['operator'] =>
+    CONDITION_OPERATORS.includes(value as WorkflowCondition['operator']);
+const isActionType = (value: string): value is WorkflowAction['type'] =>
+    ACTION_TYPES.includes(value as WorkflowAction['type']);
+
 interface WorkflowsManagerProps {
     isOpen: boolean;
     onClose: () => void;
@@ -282,7 +307,9 @@ const WorkflowEditor: React.FC<{
                                         value={condition.type}
                                         onChange={(e) => {
                                             const updated = [...edited.conditions];
-                                            updated[i] = { ...condition, type: e.target.value as any };
+                                            if (isConditionType(e.target.value)) {
+                                                updated[i] = { ...condition, type: e.target.value };
+                                            }
                                             setEdited({ ...edited, conditions: updated });
                                         }}
                                         className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-white text-sm"
@@ -296,7 +323,9 @@ const WorkflowEditor: React.FC<{
                                         value={condition.operator}
                                         onChange={(e) => {
                                             const updated = [...edited.conditions];
-                                            updated[i] = { ...condition, operator: e.target.value as any };
+                                            if (isConditionOperator(e.target.value)) {
+                                                updated[i] = { ...condition, operator: e.target.value };
+                                            }
                                             setEdited({ ...edited, conditions: updated });
                                         }}
                                         className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-white text-sm"
@@ -351,7 +380,9 @@ const WorkflowEditor: React.FC<{
                                         value={action.type}
                                         onChange={(e) => {
                                             const updated = [...edited.actions];
-                                            updated[i] = { ...action, type: e.target.value as any };
+                                            if (isActionType(e.target.value)) {
+                                                updated[i] = { ...action, type: e.target.value };
+                                            }
                                             setEdited({ ...edited, actions: updated });
                                         }}
                                         className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-white text-sm"

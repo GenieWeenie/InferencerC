@@ -161,9 +161,14 @@ class EnterpriseComplianceService {
         return `ent-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     }
 
+    private resolveLocalStorage(): Storage | undefined {
+        const globalWithStorage = globalThis as typeof globalThis & { localStorage?: Storage };
+        return globalWithStorage.localStorage;
+    }
+
     private getStorageValue(key: string): string | null {
         try {
-            const storage = (globalThis as any).localStorage as Storage | undefined;
+            const storage = this.resolveLocalStorage();
             if (storage && typeof storage.getItem === 'function') {
                 return storage.getItem(key);
             }
@@ -175,7 +180,7 @@ class EnterpriseComplianceService {
 
     private setStorageValue(key: string, value: string): void {
         try {
-            const storage = (globalThis as any).localStorage as Storage | undefined;
+            const storage = this.resolveLocalStorage();
             if (storage && typeof storage.setItem === 'function') {
                 storage.setItem(key, value);
                 return;
@@ -188,7 +193,7 @@ class EnterpriseComplianceService {
 
     private removeStorageValue(key: string): void {
         try {
-            const storage = (globalThis as any).localStorage as Storage | undefined;
+            const storage = this.resolveLocalStorage();
             if (storage && typeof storage.removeItem === 'function') {
                 storage.removeItem(key);
                 return;
