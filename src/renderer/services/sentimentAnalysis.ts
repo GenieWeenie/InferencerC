@@ -75,7 +75,7 @@ const SENTIMENT_LABELS = new Set<SentimentResult['sentimentLabel']>([
 const SENTIMENT_TRENDS = new Set<SentimentResult['sentimentTrend']>(['improving', 'declining', 'stable']);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -89,6 +89,14 @@ const parseJson = (raw: string): unknown => {
 const toFiniteNumber = (value: unknown): number | null => (
     typeof value === 'number' && Number.isFinite(value) ? value : null
 );
+
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
 
 const sanitizeEmotionScores = (value: unknown): EmotionScores | null => {
     if (!isRecord(value)) {
@@ -117,12 +125,17 @@ const sanitizeEmotionScores = (value: unknown): EmotionScores | null => {
 };
 
 const sanitizeMessageSentiment = (value: unknown): MessageSentiment | null => {
-    if (!isRecord(value)
-        || typeof value.messageIndex !== 'number'
-        || !Number.isInteger(value.messageIndex)
-        || value.messageIndex < 0
-        || typeof value.sentiment !== 'number'
-        || typeof value.confidence !== 'number'
+    if (!isRecord(value)) {
+        return null;
+    }
+    const messageIndex = toFiniteNumber(value.messageIndex);
+    const sentiment = toFiniteNumber(value.sentiment);
+    const confidence = toFiniteNumber(value.confidence);
+    if (messageIndex === null
+        || !Number.isInteger(messageIndex)
+        || messageIndex < 0
+        || sentiment === null
+        || confidence === null
         || !SENTIMENT_LABELS.has(value.label as SentimentResult['sentimentLabel'])) {
         return null;
     }
@@ -133,23 +146,30 @@ const sanitizeMessageSentiment = (value: unknown): MessageSentiment | null => {
     }
 
     return {
-        messageIndex: value.messageIndex,
-        sentiment: value.sentiment,
+        messageIndex,
+        sentiment,
         label: value.label as SentimentResult['sentimentLabel'],
-        confidence: value.confidence,
+        confidence,
         emotions,
     };
 };
 
 const sanitizeStoredSentiment = (value: unknown): SentimentResult | null => {
-    if (!isRecord(value)
-        || typeof value.sessionId !== 'string'
-        || typeof value.overallSentiment !== 'number'
+    if (!isRecord(value)) {
+        return null;
+    }
+    const sessionId = sanitizeNonEmptyString(value.sessionId);
+    const overallSentiment = toFiniteNumber(value.overallSentiment);
+    const userSentiment = toFiniteNumber(value.userSentiment);
+    const assistantSentiment = toFiniteNumber(value.assistantSentiment);
+    const analyzedAt = toFiniteNumber(value.analyzedAt);
+    if (!sessionId
+        || overallSentiment === null
         || !SENTIMENT_LABELS.has(value.sentimentLabel as SentimentResult['sentimentLabel'])
-        || typeof value.userSentiment !== 'number'
-        || typeof value.assistantSentiment !== 'number'
+        || userSentiment === null
+        || assistantSentiment === null
         || !SENTIMENT_TRENDS.has(value.sentimentTrend as SentimentResult['sentimentTrend'])
-        || typeof value.analyzedAt !== 'number'
+        || analyzedAt === null
         || !Array.isArray(value.messageSentiments)) {
         return null;
     }
@@ -164,15 +184,15 @@ const sanitizeStoredSentiment = (value: unknown): SentimentResult | null => {
     }
 
     return {
-        sessionId: value.sessionId,
-        overallSentiment: value.overallSentiment,
+        sessionId,
+        overallSentiment,
         sentimentLabel: value.sentimentLabel as SentimentResult['sentimentLabel'],
         messageSentiments,
-        userSentiment: value.userSentiment,
-        assistantSentiment: value.assistantSentiment,
+        userSentiment,
+        assistantSentiment,
         sentimentTrend: value.sentimentTrend as SentimentResult['sentimentTrend'],
         emotions,
-        analyzedAt: value.analyzedAt,
+        analyzedAt,
     };
 };
 
@@ -182,9 +202,17 @@ const parseStoredSentiments = (raw: string): SentimentResult[] => {
         return [];
     }
 
-    return parsed
+    const sentiments = parsed
         .map((entry) => sanitizeStoredSentiment(entry))
         .filter((entry): entry is SentimentResult => entry !== null);
+    const seenSessionIds = new Set<string>();
+    return sentiments.filter((entry) => {
+        if (seenSessionIds.has(entry.sessionId)) {
+            return false;
+        }
+        seenSessionIds.add(entry.sessionId);
+        return true;
+    });
 };
 
 export class SentimentAnalysisService {
@@ -417,15 +445,30 @@ export class SentimentAnalysisService {
      */
     private saveSentiment(result: SentimentResult): void {
         try {
+            const sanitizedResult = sanitizeStoredSentiment(result);
+            if (!sanitizedResult) {
+                return;
+            }
             const stored = localStorage.getItem(this.STORAGE_KEY);
             const sentiments = stored ? parseStoredSentiments(stored) : [];
-            const index = sentiments.findIndex(s => s.sessionId === result.sessionId);
+            const index = sentiments.findIndex(s => s.sessionId === sanitizedResult.sessionId);
             if (index >= 0) {
-                sentiments[index] = result;
+                sentiments[index] = sanitizedResult;
             } else {
-                sentiments.push(result);
+                sentiments.push(sanitizedResult);
             }
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(sentiments));
+            const deduped: SentimentResult[] = [];
+            const seenSessionIds = new Set<string>();
+            for (let currentIndex = sentiments.length - 1; currentIndex >= 0; currentIndex--) {
+                const entry = sentiments[currentIndex];
+                if (seenSessionIds.has(entry.sessionId)) {
+                    continue;
+                }
+                seenSessionIds.add(entry.sessionId);
+                deduped.push(entry);
+            }
+            deduped.reverse();
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(deduped));
         } catch (error) {
             console.error('Failed to save sentiment analysis:', error);
         }
@@ -436,10 +479,14 @@ export class SentimentAnalysisService {
      */
     getSentiment(sessionId: string): SentimentResult | null {
         try {
+            const normalizedSessionId = sanitizeNonEmptyString(sessionId);
+            if (!normalizedSessionId) {
+                return null;
+            }
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return null;
             const sentiments = parseStoredSentiments(stored);
-            return sentiments.find(s => s.sessionId === sessionId) || null;
+            return sentiments.find(s => s.sessionId === normalizedSessionId) || null;
         } catch (error) {
             console.error('Failed to load sentiment:', error);
             return null;

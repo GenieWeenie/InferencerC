@@ -25,7 +25,7 @@ export interface CodeGenerationResult {
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -61,6 +61,14 @@ const sanitizeStringArray = (value: unknown): string[] => {
     return result;
 };
 
+const sanitizePositiveInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return null;
+    }
+    const rounded = Math.floor(value);
+    return rounded > 0 ? rounded : null;
+};
+
 const sanitizeStoredGeneration = (value: unknown): CodeGenerationResult | null => {
     if (!isRecord(value)) {
         return null;
@@ -92,9 +100,18 @@ const parseStoredGenerations = (raw: string): CodeGenerationResult[] => {
         return [];
     }
 
-    return parsed
+    const generations = parsed
         .map((entry) => sanitizeStoredGeneration(entry))
         .filter((entry): entry is CodeGenerationResult => entry !== null);
+    const seenKeys = new Set<string>();
+    return generations.filter((entry) => {
+        const key = `${entry.generatedAt}:${entry.language}:${entry.code}`;
+        if (seenKeys.has(key)) {
+            return false;
+        }
+        seenKeys.add(key);
+        return true;
+    });
 };
 
 export class CodeGenerationService {
@@ -256,14 +273,30 @@ export class CodeGenerationService {
      */
     private saveGeneration(generation: CodeGenerationResult): void {
         try {
+            const sanitizedGeneration = sanitizeStoredGeneration(generation);
+            if (!sanitizedGeneration) {
+                return;
+            }
             const stored = localStorage.getItem(this.STORAGE_KEY);
             const generations = stored ? parseStoredGenerations(stored) : [];
-            generations.push(generation);
-            // Keep only last 50
-            if (generations.length > 50) {
-                generations.shift();
+            generations.push(sanitizedGeneration);
+            const deduped: CodeGenerationResult[] = [];
+            const seenKeys = new Set<string>();
+            for (let index = generations.length - 1; index >= 0; index--) {
+                const entry = generations[index];
+                const key = `${entry.generatedAt}:${entry.language}:${entry.code}`;
+                if (seenKeys.has(key)) {
+                    continue;
+                }
+                seenKeys.add(key);
+                deduped.push(entry);
             }
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(generations));
+            deduped.reverse();
+            // Keep only last 50
+            if (deduped.length > 50) {
+                deduped.splice(0, deduped.length - 50);
+            }
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(deduped));
         } catch (error) {
             console.error('Failed to save generation:', error);
         }
@@ -276,8 +309,9 @@ export class CodeGenerationService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
+            const sanitizedLimit = sanitizePositiveInteger(limit) ?? 20;
             const generations = parseStoredGenerations(stored);
-            return generations.slice(-limit).reverse();
+            return generations.slice(-sanitizedLimit).reverse();
         } catch (error) {
             console.error('Failed to load generation history:', error);
             return [];

@@ -1618,6 +1618,278 @@ describe('storage hydration guards', () => {
     });
   });
 
+  test('sanitizes codegen/refactor/testcase/review/sentiment/categorization mutation paths', () => {
+    jest.isolateModules(() => {
+      const { codeGenerationService } = require('../src/renderer/services/codeGeneration') as typeof import('../src/renderer/services/codeGeneration');
+      const { refactoringAssistantService } = require('../src/renderer/services/refactoringAssistant') as typeof import('../src/renderer/services/refactoringAssistant');
+      const { testCaseGenerationService } = require('../src/renderer/services/testCaseGeneration') as typeof import('../src/renderer/services/testCaseGeneration');
+      const { codeReviewService } = require('../src/renderer/services/codeReview') as typeof import('../src/renderer/services/codeReview');
+      const { sentimentAnalysisService } = require('../src/renderer/services/sentimentAnalysis') as typeof import('../src/renderer/services/sentimentAnalysis');
+      const { autoCategorizationService } = require('../src/renderer/services/autoCategorization') as typeof import('../src/renderer/services/autoCategorization');
+
+      (codeGenerationService as any).saveGeneration({
+        code: '  export const value = 1;  ',
+        language: ' typescript ',
+        explanation: '  Initial explanation  ',
+        dependencies: [' react ', 'react', '  '],
+        usage: '  import { value }  ',
+        generatedAt: 10,
+      });
+      (codeGenerationService as any).saveGeneration({
+        code: 'export const value = 1;',
+        language: 'typescript',
+        explanation: 'Latest explanation',
+        dependencies: ['react'],
+        usage: 'import { value }',
+        generatedAt: 10,
+      });
+      (codeGenerationService as any).saveGeneration({ code: 'bad', language: 'typescript', generatedAt: 'x' });
+      expect(codeGenerationService.getGenerationHistory(-5)).toHaveLength(1);
+      expect(codeGenerationService.getGenerationHistory()[0]).toMatchObject({
+        code: 'export const value = 1;',
+        language: 'typescript',
+        explanation: 'Latest explanation',
+        dependencies: ['react'],
+      });
+
+      (refactoringAssistantService as any).saveResult({
+        originalCode: '  const count = 1;  ',
+        refactoredCode: '  const totalCount = 1;  ',
+        suggestions: [{
+          id: '  s-1  ',
+          type: 'rename',
+          description: '  Rename variable  ',
+          code: '  count  ',
+          refactoredCode: '  totalCount  ',
+          confidence: 0.8,
+          impact: 'medium',
+          explanation: '  Improves readability  ',
+        }],
+        appliedSuggestions: [' s-1 ', 's-1'],
+        language: ' typescript ',
+        refactoredAt: 11,
+      });
+      (refactoringAssistantService as any).saveResult({
+        originalCode: 'const count = 1;',
+        refactoredCode: 'const totalCount = 1;',
+        suggestions: [{
+          id: 's-1',
+          type: 'rename',
+          description: 'Rename variable',
+          code: 'count',
+          refactoredCode: 'totalCount',
+          confidence: 0.8,
+          impact: 'medium',
+          explanation: 'Latest explanation',
+        }],
+        appliedSuggestions: ['s-1'],
+        language: 'typescript',
+        refactoredAt: 11,
+      });
+      (refactoringAssistantService as any).saveResult({ originalCode: 1 });
+      expect(refactoringAssistantService.getHistory(0)).toHaveLength(1);
+      expect(refactoringAssistantService.getHistory()[0]).toMatchObject({
+        originalCode: 'const count = 1;',
+        refactoredCode: 'const totalCount = 1;',
+        appliedSuggestions: ['s-1'],
+      });
+
+      (testCaseGenerationService as any).saveTestCases({
+        testCode: '  it(\"works\", () => {});  ',
+        language: ' typescript ',
+        framework: ' vitest ',
+        testCases: [
+          { name: ' works ', description: ' basic ', code: ' it(\"works\") ' },
+        ],
+        setupCode: '  beforeEach(() => {})  ',
+        teardownCode: '  afterEach(() => {})  ',
+        generatedAt: 12,
+      });
+      (testCaseGenerationService as any).saveTestCases({
+        testCode: 'it(\"works\", () => {});',
+        language: 'typescript',
+        framework: 'vitest',
+        testCases: [
+          { name: 'works', description: 'basic', code: 'it(\"works\")' },
+        ],
+        generatedAt: 12,
+      });
+      (testCaseGenerationService as any).saveTestCases({ testCode: 4 });
+      expect(testCaseGenerationService.getTestCaseHistory(-2)).toHaveLength(1);
+      expect(testCaseGenerationService.getTestCaseHistory()[0]).toMatchObject({
+        testCode: 'it(\"works\", () => {});',
+        language: 'typescript',
+        framework: 'vitest',
+      });
+
+      (codeReviewService as any).saveReview({
+        code: '  eval(foo)  ',
+        language: ' javascript ',
+        issues: [{
+          type: 'error',
+          severity: 'critical',
+          message: '  Dangerous call  ',
+          category: 'security',
+          suggestion: '  Remove eval  ',
+        }],
+        score: 20,
+        summary: '  Initial summary  ',
+        reviewedAt: 13,
+      });
+      (codeReviewService as any).saveReview({
+        code: 'eval(foo)',
+        language: 'javascript',
+        issues: [{
+          type: 'error',
+          severity: 'critical',
+          message: 'Dangerous call',
+          category: 'security',
+        }],
+        score: 15,
+        summary: 'Latest summary',
+        reviewedAt: 13,
+      });
+      (codeReviewService as any).saveReview({ code: 'bad', language: 'javascript', issues: [], score: 1, summary: '', reviewedAt: 1 });
+      expect(codeReviewService.getReviewHistory(-1)).toHaveLength(1);
+      expect(codeReviewService.getReviewHistory()[0]).toMatchObject({
+        code: 'eval(foo)',
+        language: 'javascript',
+        summary: 'Latest summary',
+      });
+
+      (sentimentAnalysisService as any).saveSentiment({
+        sessionId: '  session-sentiment  ',
+        overallSentiment: 0.4,
+        sentimentLabel: 'positive',
+        messageSentiments: [
+          {
+            messageIndex: 0,
+            sentiment: 0.4,
+            label: 'positive',
+            confidence: 0.7,
+            emotions: {
+              joy: 0.4,
+              sadness: 0.1,
+              anger: 0.1,
+              fear: 0.1,
+              surprise: 0.1,
+              disgust: 0.1,
+              neutral: 0.1,
+            },
+          },
+        ],
+        userSentiment: 0.5,
+        assistantSentiment: 0.3,
+        sentimentTrend: 'stable',
+        emotions: {
+          joy: 0.4,
+          sadness: 0.1,
+          anger: 0.1,
+          fear: 0.1,
+          surprise: 0.1,
+          disgust: 0.1,
+          neutral: 0.1,
+        },
+        analyzedAt: 14,
+      });
+      (sentimentAnalysisService as any).saveSentiment({
+        sessionId: 'session-sentiment',
+        overallSentiment: 0.6,
+        sentimentLabel: 'positive',
+        messageSentiments: [
+          {
+            messageIndex: 0,
+            sentiment: 0.6,
+            label: 'positive',
+            confidence: 0.8,
+            emotions: {
+              joy: 0.5,
+              sadness: 0.1,
+              anger: 0.1,
+              fear: 0.1,
+              surprise: 0.1,
+              disgust: 0.05,
+              neutral: 0.05,
+            },
+          },
+        ],
+        userSentiment: 0.7,
+        assistantSentiment: 0.5,
+        sentimentTrend: 'improving',
+        emotions: {
+          joy: 0.5,
+          sadness: 0.1,
+          anger: 0.1,
+          fear: 0.1,
+          surprise: 0.1,
+          disgust: 0.05,
+          neutral: 0.05,
+        },
+        analyzedAt: 15,
+      });
+      (sentimentAnalysisService as any).saveSentiment({ sessionId: 'bad' });
+      expect(sentimentAnalysisService.getSentiment('  session-sentiment  ')).toMatchObject({
+        sessionId: 'session-sentiment',
+        overallSentiment: 0.6,
+        sentimentTrend: 'improving',
+      });
+      expect(JSON.parse(localStorage.getItem('sentiment_analysis') ?? '[]')).toHaveLength(1);
+
+      autoCategorizationService.addCategory({
+        id: '   ',
+        name: 'Bad',
+        keywords: ['bad'],
+      } as any);
+      autoCategorizationService.addCategory({
+        id: ' custom-a ',
+        name: ' Custom A ',
+        description: '  Custom category  ',
+        keywords: ['alpha', ' alpha ', '  '],
+        color: ' #123456 ',
+      });
+      autoCategorizationService.addCategory({
+        id: 'custom-a',
+        name: 'Custom A Updated',
+        keywords: ['beta', 'beta'],
+      });
+      (autoCategorizationService as any).saveCategorization({
+        sessionId: ' session-cat ',
+        primaryCategory: ' custom-a ',
+        secondaryCategories: [' coding ', 'custom-a', 'coding'],
+        confidence: 1.5,
+        autoTagged: true,
+        taggedAt: 16.8,
+      });
+      (autoCategorizationService as any).saveCategorization({
+        sessionId: 'session-cat',
+        primaryCategory: 'custom-a',
+        secondaryCategories: ['learning', 'learning'],
+        confidence: 0.3,
+        autoTagged: true,
+        taggedAt: 17,
+      });
+      (autoCategorizationService as any).saveCategorization({ sessionId: 'bad' });
+
+      const category = autoCategorizationService.getCategorization(' session-cat ');
+      expect(category).toMatchObject({
+        sessionId: 'session-cat',
+        primaryCategory: 'custom-a',
+        secondaryCategories: ['learning'],
+        confidence: 0.3,
+      });
+      expect(autoCategorizationService.getConversationsByCategory(' custom-a ')).toEqual(['session-cat']);
+
+      const customCategories = JSON.parse(localStorage.getItem('custom_categories') ?? '[]');
+      expect(customCategories).toHaveLength(1);
+      expect(customCategories[0]).toMatchObject({
+        id: 'custom-a',
+        name: 'Custom A Updated',
+        keywords: ['beta'],
+      });
+      expect(JSON.parse(localStorage.getItem('conversation_categories') ?? '[]')).toHaveLength(1);
+    });
+  });
+
   test('sanitizes ai/trigger/macro/layout/prompt/template/chaining mutation paths', () => {
     jest.isolateModules(() => {
       const { aiAgentsService } = require('../src/renderer/services/aiAgents') as typeof import('../src/renderer/services/aiAgents');

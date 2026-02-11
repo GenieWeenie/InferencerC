@@ -79,7 +79,7 @@ export const DEFAULT_CATEGORIES: Category[] = [
 ];
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -90,26 +90,47 @@ const parseJson = (raw: string): unknown => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 const sanitizeStringArray = (value: unknown): string[] => {
     if (!Array.isArray(value)) {
         return [];
     }
-    return value.filter((entry): entry is string => typeof entry === 'string');
+    const result: string[] = [];
+    const seen = new Set<string>();
+    for (let index = 0; index < value.length; index++) {
+        const normalized = sanitizeNonEmptyString(value[index]);
+        if (!normalized || seen.has(normalized)) {
+            continue;
+        }
+        seen.add(normalized);
+        result.push(normalized);
+    }
+    return result;
 };
 
 const sanitizeCategory = (value: unknown): Category | null => {
-    if (!isRecord(value)
-        || typeof value.id !== 'string'
-        || typeof value.name !== 'string') {
+    if (!isRecord(value)) {
+        return null;
+    }
+    const id = sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    if (!id || !name) {
         return null;
     }
 
     return {
-        id: value.id,
-        name: value.name,
-        description: typeof value.description === 'string' ? value.description : undefined,
+        id,
+        name,
+        description: sanitizeNonEmptyString(value.description) || undefined,
         keywords: sanitizeStringArray(value.keywords),
-        color: typeof value.color === 'string' ? value.color : undefined,
+        color: sanitizeNonEmptyString(value.color) || undefined,
     };
 };
 
@@ -118,28 +139,44 @@ const parseStoredCategories = (raw: string): Category[] => {
     if (!Array.isArray(parsed)) {
         return [];
     }
-    return parsed
+    const categories = parsed
         .map((entry) => sanitizeCategory(entry))
         .filter((entry): entry is Category => entry !== null);
+    const seenIds = new Set<string>();
+    return categories.filter((entry) => {
+        if (seenIds.has(entry.id)) {
+            return false;
+        }
+        seenIds.add(entry.id);
+        return true;
+    });
 };
 
 const sanitizeConversationCategory = (value: unknown): ConversationCategory | null => {
-    if (!isRecord(value)
-        || typeof value.sessionId !== 'string'
-        || typeof value.primaryCategory !== 'string'
-        || typeof value.confidence !== 'number'
-        || typeof value.autoTagged !== 'boolean'
-        || typeof value.taggedAt !== 'number') {
+    if (!isRecord(value) || typeof value.autoTagged !== 'boolean') {
         return null;
     }
+    const sessionId = sanitizeNonEmptyString(value.sessionId);
+    const primaryCategory = sanitizeNonEmptyString(value.primaryCategory);
+    if (!sessionId || !primaryCategory
+        || typeof value.confidence !== 'number'
+        || !Number.isFinite(value.confidence)
+        || typeof value.taggedAt !== 'number'
+        || !Number.isFinite(value.taggedAt)) {
+        return null;
+    }
+    const secondaryCategories = sanitizeStringArray(value.secondaryCategories)
+        .filter((entry) => entry !== primaryCategory);
+    const confidence = Math.max(0, Math.min(1, value.confidence));
+    const taggedAt = Math.max(0, Math.floor(value.taggedAt));
 
     return {
-        sessionId: value.sessionId,
-        primaryCategory: value.primaryCategory,
-        secondaryCategories: sanitizeStringArray(value.secondaryCategories),
-        confidence: value.confidence,
+        sessionId,
+        primaryCategory,
+        secondaryCategories,
+        confidence,
         autoTagged: value.autoTagged,
-        taggedAt: value.taggedAt,
+        taggedAt,
     };
 };
 
@@ -149,9 +186,17 @@ const parseStoredCategorizations = (raw: string): ConversationCategory[] => {
         return [];
     }
 
-    return parsed
+    const categorizations = parsed
         .map((entry) => sanitizeConversationCategory(entry))
         .filter((entry): entry is ConversationCategory => entry !== null);
+    const seenSessionIds = new Set<string>();
+    return categorizations.filter((entry) => {
+        if (seenSessionIds.has(entry.sessionId)) {
+            return false;
+        }
+        seenSessionIds.add(entry.sessionId);
+        return true;
+    });
 };
 
 export class AutoCategorizationService {
@@ -176,8 +221,13 @@ export class AutoCategorizationService {
      */
     private loadCategories(): void {
         // Load default categories
-        DEFAULT_CATEGORIES.forEach(cat => {
-            this.categories.set(cat.id, cat);
+        this.categories.clear();
+        DEFAULT_CATEGORIES.forEach((cat) => {
+            const sanitizedDefault = sanitizeCategory(cat);
+            if (!sanitizedDefault) {
+                return;
+            }
+            this.categories.set(sanitizedDefault.id, sanitizedDefault);
         });
 
         // Load custom categories
@@ -185,7 +235,7 @@ export class AutoCategorizationService {
             const stored = localStorage.getItem(this.CATEGORIES_KEY);
             if (stored) {
                 const custom = parseStoredCategories(stored);
-                custom.forEach(cat => {
+                custom.forEach((cat) => {
                     this.categories.set(cat.id, cat);
                 });
             }
@@ -199,9 +249,33 @@ export class AutoCategorizationService {
      */
     private saveCategories(): void {
         try {
+            const defaultIds = new Set(DEFAULT_CATEGORIES.map((category) => category.id));
             const custom = Array.from(this.categories.values())
-                .filter(cat => !DEFAULT_CATEGORIES.find(d => d.id === cat.id));
-            localStorage.setItem(this.CATEGORIES_KEY, JSON.stringify(custom));
+                .filter((cat) => !defaultIds.has(cat.id))
+                .map((cat) => sanitizeCategory(cat))
+                .filter((cat): cat is Category => cat !== null);
+            const seenIds = new Set<string>();
+            const dedupedCustom = custom.filter((cat) => {
+                if (seenIds.has(cat.id)) {
+                    return false;
+                }
+                seenIds.add(cat.id);
+                return true;
+            });
+            localStorage.setItem(this.CATEGORIES_KEY, JSON.stringify(dedupedCustom));
+
+            const nextCategories = new Map<string, Category>();
+            DEFAULT_CATEGORIES.forEach((category) => {
+                const sanitizedDefault = sanitizeCategory(category);
+                if (!sanitizedDefault) {
+                    return;
+                }
+                nextCategories.set(sanitizedDefault.id, sanitizedDefault);
+            });
+            dedupedCustom.forEach((category) => {
+                nextCategories.set(category.id, category);
+            });
+            this.categories = nextCategories;
         } catch (error) {
             console.error('Failed to save categories:', error);
         }
@@ -273,15 +347,30 @@ export class AutoCategorizationService {
      */
     private saveCategorization(category: ConversationCategory): void {
         try {
+            const sanitizedCategory = sanitizeConversationCategory(category);
+            if (!sanitizedCategory) {
+                return;
+            }
             const stored = localStorage.getItem(this.STORAGE_KEY);
             const categorizations = stored ? parseStoredCategorizations(stored) : [];
-            const index = categorizations.findIndex(c => c.sessionId === category.sessionId);
+            const index = categorizations.findIndex((entry) => entry.sessionId === sanitizedCategory.sessionId);
             if (index >= 0) {
-                categorizations[index] = category;
+                categorizations[index] = sanitizedCategory;
             } else {
-                categorizations.push(category);
+                categorizations.push(sanitizedCategory);
             }
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(categorizations));
+            const deduped: ConversationCategory[] = [];
+            const seenSessionIds = new Set<string>();
+            for (let currentIndex = categorizations.length - 1; currentIndex >= 0; currentIndex--) {
+                const entry = categorizations[currentIndex];
+                if (seenSessionIds.has(entry.sessionId)) {
+                    continue;
+                }
+                seenSessionIds.add(entry.sessionId);
+                deduped.push(entry);
+            }
+            deduped.reverse();
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(deduped));
         } catch (error) {
             console.error('Failed to save categorization:', error);
         }
@@ -292,10 +381,14 @@ export class AutoCategorizationService {
      */
     getCategorization(sessionId: string): ConversationCategory | null {
         try {
+            const normalizedSessionId = sanitizeNonEmptyString(sessionId);
+            if (!normalizedSessionId) {
+                return null;
+            }
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return null;
             const categorizations = parseStoredCategorizations(stored);
-            return categorizations.find(c => c.sessionId === sessionId) || null;
+            return categorizations.find((entry) => entry.sessionId === normalizedSessionId) || null;
         } catch (error) {
             console.error('Failed to load categorization:', error);
             return null;
@@ -313,7 +406,14 @@ export class AutoCategorizationService {
      * Add a custom category
      */
     addCategory(category: Category): void {
-        this.categories.set(category.id, category);
+        const sanitizedCategory = sanitizeCategory(category);
+        if (!sanitizedCategory) {
+            return;
+        }
+        if (DEFAULT_CATEGORIES.some((entry) => entry.id === sanitizedCategory.id)) {
+            return;
+        }
+        this.categories.set(sanitizedCategory.id, sanitizedCategory);
         this.saveCategories();
     }
 
@@ -353,12 +453,28 @@ export class AutoCategorizationService {
      */
     getConversationsByCategory(categoryId: string): string[] {
         try {
+            const normalizedCategoryId = sanitizeNonEmptyString(categoryId);
+            if (!normalizedCategoryId) {
+                return [];
+            }
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
             const categorizations = parseStoredCategorizations(stored);
-            return categorizations
-                .filter(c => c.primaryCategory === categoryId || c.secondaryCategories.includes(categoryId))
-                .map(c => c.sessionId);
+            const result: string[] = [];
+            const seenSessions = new Set<string>();
+            for (let index = 0; index < categorizations.length; index++) {
+                const entry = categorizations[index];
+                if (entry.primaryCategory !== normalizedCategoryId
+                    && !entry.secondaryCategories.includes(normalizedCategoryId)) {
+                    continue;
+                }
+                if (seenSessions.has(entry.sessionId)) {
+                    continue;
+                }
+                seenSessions.add(entry.sessionId);
+                result.push(entry.sessionId);
+            }
+            return result;
         } catch (error) {
             console.error('Failed to load categorizations:', error);
             return [];

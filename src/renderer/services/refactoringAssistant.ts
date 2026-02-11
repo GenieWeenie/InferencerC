@@ -48,7 +48,7 @@ const REFACTORING_TYPES = new Set<RefactoringType>([
 const REFACTORING_IMPACTS = new Set<RefactoringSuggestion['impact']>(['low', 'medium', 'high']);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -59,45 +59,79 @@ const parseJson = (raw: string): unknown => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 const sanitizeStringArray = (value: unknown): string[] => {
     if (!Array.isArray(value)) {
         return [];
     }
-    return value.filter((entry): entry is string => typeof entry === 'string');
+    const result: string[] = [];
+    const seen = new Set<string>();
+    for (let index = 0; index < value.length; index++) {
+        const normalized = sanitizeNonEmptyString(value[index]);
+        if (!normalized || seen.has(normalized)) {
+            continue;
+        }
+        seen.add(normalized);
+        result.push(normalized);
+    }
+    return result;
+};
+
+const sanitizePositiveInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return null;
+    }
+    const rounded = Math.floor(value);
+    return rounded > 0 ? rounded : null;
 };
 
 const sanitizeStoredSuggestion = (value: unknown): RefactoringSuggestion | null => {
     if (!isRecord(value)
-        || typeof value.id !== 'string'
-        || typeof value.description !== 'string'
-        || typeof value.code !== 'string'
-        || typeof value.refactoredCode !== 'string'
-        || typeof value.confidence !== 'number'
         || !REFACTORING_TYPES.has(value.type as RefactoringType)
         || !REFACTORING_IMPACTS.has(value.impact as RefactoringSuggestion['impact'])
-        || typeof value.explanation !== 'string') {
+        || typeof value.confidence !== 'number'
+        || !Number.isFinite(value.confidence)) {
+        return null;
+    }
+    const id = sanitizeNonEmptyString(value.id);
+    const description = sanitizeNonEmptyString(value.description);
+    const code = sanitizeNonEmptyString(value.code);
+    const refactoredCode = sanitizeNonEmptyString(value.refactoredCode);
+    const explanation = sanitizeNonEmptyString(value.explanation);
+    if (!id || !description || !code || !refactoredCode || !explanation) {
         return null;
     }
 
     return {
-        id: value.id,
+        id,
         type: value.type as RefactoringType,
-        description: value.description,
-        code: value.code,
-        refactoredCode: value.refactoredCode,
+        description,
+        code,
+        refactoredCode,
         confidence: value.confidence,
         impact: value.impact as RefactoringSuggestion['impact'],
-        explanation: value.explanation,
+        explanation,
     };
 };
 
 const sanitizeStoredResult = (value: unknown): RefactoringResult | null => {
     if (!isRecord(value)
-        || typeof value.originalCode !== 'string'
-        || typeof value.refactoredCode !== 'string'
         || !Array.isArray(value.suggestions)
-        || typeof value.language !== 'string'
-        || typeof value.refactoredAt !== 'number') {
+        || typeof value.refactoredAt !== 'number'
+        || !Number.isFinite(value.refactoredAt)) {
+        return null;
+    }
+    const originalCode = sanitizeNonEmptyString(value.originalCode);
+    const refactoredCode = sanitizeNonEmptyString(value.refactoredCode);
+    const language = sanitizeNonEmptyString(value.language);
+    if (!originalCode || !refactoredCode || !language) {
         return null;
     }
 
@@ -106,11 +140,11 @@ const sanitizeStoredResult = (value: unknown): RefactoringResult | null => {
         .filter((entry): entry is RefactoringSuggestion => entry !== null);
 
     return {
-        originalCode: value.originalCode,
-        refactoredCode: value.refactoredCode,
+        originalCode,
+        refactoredCode,
         suggestions,
         appliedSuggestions: sanitizeStringArray(value.appliedSuggestions),
-        language: value.language,
+        language,
         refactoredAt: value.refactoredAt,
     };
 };
@@ -121,9 +155,18 @@ const parseStoredResults = (raw: string): RefactoringResult[] => {
         return [];
     }
 
-    return parsed
+    const results = parsed
         .map((entry) => sanitizeStoredResult(entry))
         .filter((entry): entry is RefactoringResult => entry !== null);
+    const seenKeys = new Set<string>();
+    return results.filter((entry) => {
+        const key = `${entry.refactoredAt}:${entry.originalCode}:${entry.refactoredCode}`;
+        if (seenKeys.has(key)) {
+            return false;
+        }
+        seenKeys.add(key);
+        return true;
+    });
 };
 
 export class RefactoringAssistantService {
@@ -288,14 +331,30 @@ Return a JSON array of suggestions:
      */
     private saveResult(result: RefactoringResult): void {
         try {
+            const sanitizedResult = sanitizeStoredResult(result);
+            if (!sanitizedResult) {
+                return;
+            }
             const stored = localStorage.getItem(this.STORAGE_KEY);
             const results = stored ? parseStoredResults(stored) : [];
-            results.push(result);
-            // Keep only last 50
-            if (results.length > 50) {
-                results.shift();
+            results.push(sanitizedResult);
+            const deduped: RefactoringResult[] = [];
+            const seenKeys = new Set<string>();
+            for (let index = results.length - 1; index >= 0; index--) {
+                const entry = results[index];
+                const key = `${entry.refactoredAt}:${entry.originalCode}:${entry.refactoredCode}`;
+                if (seenKeys.has(key)) {
+                    continue;
+                }
+                seenKeys.add(key);
+                deduped.push(entry);
             }
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(results));
+            deduped.reverse();
+            // Keep only last 50
+            if (deduped.length > 50) {
+                deduped.splice(0, deduped.length - 50);
+            }
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(deduped));
         } catch (error) {
             console.error('Failed to save refactoring result:', error);
         }
@@ -308,8 +367,9 @@ Return a JSON array of suggestions:
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
+            const sanitizedLimit = sanitizePositiveInteger(limit) ?? 20;
             const results = parseStoredResults(stored);
-            return results.slice(-limit).reverse();
+            return results.slice(-sanitizedLimit).reverse();
         } catch (error) {
             console.error('Failed to load refactoring history:', error);
             return [];

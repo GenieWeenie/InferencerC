@@ -47,7 +47,7 @@ const REVIEW_CATEGORIES = new Set<CodeReviewCategory>([
 ]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -62,12 +62,31 @@ const toFiniteNumber = (value: unknown): number | undefined => (
     typeof value === 'number' && Number.isFinite(value) ? value : undefined
 );
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizePositiveInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return null;
+    }
+    const rounded = Math.floor(value);
+    return rounded > 0 ? rounded : null;
+};
+
 const sanitizeReviewIssue = (value: unknown): CodeReviewIssue | null => {
     if (!isRecord(value)
-        || typeof value.message !== 'string'
         || !REVIEW_ISSUE_TYPES.has(value.type as CodeReviewIssue['type'])
         || !REVIEW_SEVERITIES.has(value.severity as CodeReviewIssue['severity'])
         || !REVIEW_CATEGORIES.has(value.category as CodeReviewCategory)) {
+        return null;
+    }
+    const message = sanitizeNonEmptyString(value.message);
+    if (!message) {
         return null;
     }
 
@@ -79,31 +98,36 @@ const sanitizeReviewIssue = (value: unknown): CodeReviewIssue | null => {
         severity: value.severity as CodeReviewIssue['severity'],
         line,
         column,
-        message: value.message,
-        suggestion: typeof value.suggestion === 'string' ? value.suggestion : undefined,
+        message,
+        suggestion: sanitizeNonEmptyString(value.suggestion) || undefined,
         category: value.category as CodeReviewCategory,
     };
 };
 
 const sanitizeStoredReview = (value: unknown): CodeReviewResult | null => {
     if (!isRecord(value)
-        || typeof value.code !== 'string'
-        || typeof value.language !== 'string'
         || typeof value.score !== 'number'
-        || typeof value.summary !== 'string'
         || typeof value.reviewedAt !== 'number'
+        || !Number.isFinite(value.score)
+        || !Number.isFinite(value.reviewedAt)
         || !Array.isArray(value.issues)) {
+        return null;
+    }
+    const code = sanitizeNonEmptyString(value.code);
+    const language = sanitizeNonEmptyString(value.language);
+    const summary = sanitizeNonEmptyString(value.summary);
+    if (!code || !language || !summary) {
         return null;
     }
 
     return {
-        code: value.code,
-        language: value.language,
+        code,
+        language,
         issues: value.issues
             .map((entry) => sanitizeReviewIssue(entry))
             .filter((entry): entry is CodeReviewIssue => entry !== null),
         score: value.score,
-        summary: value.summary,
+        summary,
         reviewedAt: value.reviewedAt,
     };
 };
@@ -114,9 +138,18 @@ const parseStoredReviews = (raw: string): CodeReviewResult[] => {
         return [];
     }
 
-    return parsed
+    const reviews = parsed
         .map((entry) => sanitizeStoredReview(entry))
         .filter((entry): entry is CodeReviewResult => entry !== null);
+    const seenKeys = new Set<string>();
+    return reviews.filter((entry) => {
+        const key = `${entry.reviewedAt}:${entry.language}:${entry.code}`;
+        if (seenKeys.has(key)) {
+            return false;
+        }
+        seenKeys.add(key);
+        return true;
+    });
 };
 
 export class CodeReviewService {
@@ -266,14 +299,30 @@ Return a JSON object with this structure:
      */
     private saveReview(review: CodeReviewResult): void {
         try {
+            const sanitizedReview = sanitizeStoredReview(review);
+            if (!sanitizedReview) {
+                return;
+            }
             const stored = localStorage.getItem(this.STORAGE_KEY);
             const reviews = stored ? parseStoredReviews(stored) : [];
-            reviews.push(review);
-            // Keep only last 50 reviews
-            if (reviews.length > 50) {
-                reviews.shift();
+            reviews.push(sanitizedReview);
+            const deduped: CodeReviewResult[] = [];
+            const seenKeys = new Set<string>();
+            for (let index = reviews.length - 1; index >= 0; index--) {
+                const entry = reviews[index];
+                const key = `${entry.reviewedAt}:${entry.language}:${entry.code}`;
+                if (seenKeys.has(key)) {
+                    continue;
+                }
+                seenKeys.add(key);
+                deduped.push(entry);
             }
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(reviews));
+            deduped.reverse();
+            // Keep only last 50 reviews
+            if (deduped.length > 50) {
+                deduped.splice(0, deduped.length - 50);
+            }
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(deduped));
         } catch (error) {
             console.error('Failed to save review:', error);
         }
@@ -286,8 +335,9 @@ Return a JSON object with this structure:
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
+            const sanitizedLimit = sanitizePositiveInteger(limit) ?? 20;
             const reviews = parseStoredReviews(stored);
-            return reviews.slice(-limit).reverse();
+            return reviews.slice(-sanitizedLimit).reverse();
         } catch (error) {
             console.error('Failed to load review history:', error);
             return [];
