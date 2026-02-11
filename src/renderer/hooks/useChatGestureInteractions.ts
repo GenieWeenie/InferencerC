@@ -30,18 +30,46 @@ interface UseChatGestureInteractionsParams {
     onDeleteMessage: (index: number) => void;
 }
 
-export const parseBookmarkedMessageIndices = (raw: string): Set<number> => {
+const MIN_CHAT_FONT_SIZE = 12;
+const MAX_CHAT_FONT_SIZE = 28;
+const DEFAULT_CHAT_FONT_SIZE = 16;
+
+const parseJson = (raw: string): unknown | null => {
     try {
-        const parsed: unknown = JSON.parse(raw);
-        if (!Array.isArray(parsed)) {
-            return new Set();
-        }
-        return new Set(
-            parsed.filter((entry): entry is number => Number.isInteger(entry) && entry >= 0)
-        );
+        return JSON.parse(raw);
     } catch {
+        return null;
+    }
+};
+
+const clampConversationFontSize = (value: number): number => {
+    return Math.max(MIN_CHAT_FONT_SIZE, Math.min(MAX_CHAT_FONT_SIZE, value));
+};
+
+const readStoredConversationFontSize = (): number => {
+    try {
+        const raw = localStorage.getItem('chat_font_size');
+        if (raw === null) {
+            return DEFAULT_CHAT_FONT_SIZE;
+        }
+        const parsed = Number(raw);
+        if (!Number.isFinite(parsed)) {
+            return DEFAULT_CHAT_FONT_SIZE;
+        }
+        return clampConversationFontSize(parsed);
+    } catch {
+        return DEFAULT_CHAT_FONT_SIZE;
+    }
+};
+
+export const parseBookmarkedMessageIndices = (raw: string): Set<number> => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
         return new Set();
     }
+    return new Set(
+        parsed.filter((entry): entry is number => Number.isInteger(entry) && entry >= 0)
+    );
 };
 
 export const useChatGestureInteractions = ({
@@ -57,10 +85,7 @@ export const useChatGestureInteractions = ({
     onDeleteMessage,
 }: UseChatGestureInteractionsParams) => {
     const [bookmarkedMessages, setBookmarkedMessages] = React.useState<Set<number>>(new Set());
-    const [conversationFontSize, setConversationFontSize] = React.useState<number>(() => {
-        const stored = Number(localStorage.getItem('chat_font_size'));
-        return Number.isFinite(stored) && stored > 0 ? stored : 16;
-    });
+    const [conversationFontSize, setConversationFontSize] = React.useState<number>(() => readStoredConversationFontSize());
     const [longPressMenu, setLongPressMenu] = React.useState<{ messageIndex: number; x: number; y: number } | null>(null);
     const [swipeSessionIndicator, setSwipeSessionIndicator] = React.useState<'previous' | 'next' | null>(null);
     const swipeSessionTimerRef = React.useRef<number | null>(null);
@@ -139,7 +164,7 @@ export const useChatGestureInteractions = ({
         }
 
         setConversationFontSize((prev) => {
-            const next = Math.max(12, Math.min(28, prev + (event.delta * 8)));
+            const next = clampConversationFontSize(prev + (event.delta * 8));
             return Number(next.toFixed(2));
         });
     }, history.length > 0);
@@ -173,7 +198,11 @@ export const useChatGestureInteractions = ({
     }, history.length > 0);
 
     React.useEffect(() => {
-        localStorage.setItem('chat_font_size', String(conversationFontSize));
+        try {
+            localStorage.setItem('chat_font_size', String(conversationFontSize));
+        } catch {
+            // Ignore persistence failures for optional gesture preferences.
+        }
     }, [conversationFontSize]);
 
     React.useEffect(() => {

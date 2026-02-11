@@ -71,4 +71,15 @@ describe('useChatGestureInteractions', () => {
         rerender({ sessionId: 'session-b' });
         expect(Array.from(result.current.bookmarkedMessages)).toEqual([1, 4]);
     });
+
+    it('clamps invalid or extreme stored font size values on hydration', () => {
+        localStorage.setItem('chat_font_size', '999');
+        const { result, unmount } = renderHook(() => useChatGestureInteractions(createParams()));
+        expect(result.current.conversationFontSize).toBe(28);
+        unmount();
+
+        localStorage.setItem('chat_font_size', '-5');
+        const { result: second } = renderHook(() => useChatGestureInteractions(createParams()));
+        expect(second.current.conversationFontSize).toBe(12);
+    });
 });

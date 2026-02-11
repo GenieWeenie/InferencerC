@@ -66,6 +66,22 @@ describe('persisted data parse guards', () => {
         });
     });
 
+    it('accepts valid JSON scalar responses for structure scoring', () => {
+        jest.isolateModules(() => {
+            const { abTestingService } = require('../abTesting') as typeof import('../abTesting');
+            const metrics = abTestingService.calculateMetrics([
+                {
+                    variantId: 'variant-json-null',
+                    variantName: 'JSON Null',
+                    response: 'null',
+                    responseTime: 10,
+                },
+            ], { structure: 'json' });
+
+            expect(metrics.qualityScores?.['variant-json-null']).toBe(1);
+        });
+    });
+
     it('sanitizes workspace storage and ignores invalid records', () => {
         localStorage.setItem('team_workspaces_v1', JSON.stringify([
             {

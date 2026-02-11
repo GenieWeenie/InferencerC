@@ -8,6 +8,14 @@ const isFiniteNumber = (value: unknown): value is number => (
   typeof value === 'number' && Number.isFinite(value)
 );
 
+const parseJson = (raw: string): unknown | null => {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
 export const sanitizeRecoveryState = (value: unknown): RecoveryState | null => {
   if (!isRecord(value) || typeof value.sessionId !== 'string' || !isFiniteNumber(value.timestamp)) {
     return null;
@@ -34,10 +42,5 @@ export const parseRecoveryStateFromRaw = (raw: string | null): RecoveryState | n
   if (!raw) {
     return null;
   }
-  try {
-    return sanitizeRecoveryState(JSON.parse(raw));
-  } catch {
-    return null;
-  }
+  return sanitizeRecoveryState(parseJson(raw));
 };
-

@@ -87,11 +87,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 };
 
-const parseJson = (raw: string): unknown | null => {
+const parseJson = (raw: string): { ok: true; value: unknown } | { ok: false } => {
     try {
-        return JSON.parse(raw);
+        return { ok: true, value: JSON.parse(raw) };
     } catch {
-        return null;
+        return { ok: false };
     }
 };
 
@@ -253,10 +253,10 @@ export class ABTestingService {
             const stored = localStorage.getItem(ABTestingService.STORAGE_KEY);
             if (stored) {
                 const parsed = parseJson(stored);
-                if (!Array.isArray(parsed)) {
+                if (!parsed.ok || !Array.isArray(parsed.value)) {
                     return;
                 }
-                parsed.forEach((entry) => {
+                parsed.value.forEach((entry) => {
                     const test = sanitizeABTest(entry);
                     if (!test) {
                         return;
@@ -522,12 +522,7 @@ export class ABTestingService {
     private checkStructure(response: string, structure: 'json' | 'markdown' | 'plain'): boolean {
         switch (structure) {
             case 'json':
-                try {
-                    JSON.parse(response);
-                    return true;
-                } catch {
-                    return false;
-                }
+                return parseJson(response).ok;
             case 'markdown':
                 // Simple check: has markdown syntax
                 return /[#*`\[\]]/.test(response);
@@ -597,7 +592,7 @@ export class ABTestingService {
      */
     importTest(json: string): ABTest {
         const parsed = parseJson(json);
-        const test = sanitizeABTest(parsed);
+        const test = sanitizeABTest(parsed.ok ? parsed.value : null);
         if (!test) {
             throw new Error('Invalid test format');
         }

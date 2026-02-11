@@ -48,6 +48,22 @@ const createSession = (id: string, title: string, content: string): ChatSession 
   messages: [{ role: 'user', content }],
 });
 
+const createStorage = () => {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    setItem: (key: string, value: string) => {
+      store.set(key, value);
+    },
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+    clear: () => {
+      store.clear();
+    },
+  };
+};
+
 describe('SearchService.searchAsync', () => {
   const getAllSessionsMock = HistoryService.getAllSessions as jest.MockedFunction<typeof HistoryService.getAllSessions>;
   const getSessionMock = HistoryService.getSession as jest.MockedFunction<typeof HistoryService.getSession>;
@@ -59,6 +75,16 @@ describe('SearchService.searchAsync', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    if (typeof localStorage === 'undefined' || typeof localStorage.setItem !== 'function') {
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: createStorage(),
+        configurable: true,
+        writable: true,
+      });
+    }
+    if (typeof localStorage.removeItem === 'function') {
+      localStorage.removeItem('recent_searches');
+    }
   });
 
   it('prefilters async search sessions with SearchIndexService candidates', async () => {
@@ -313,5 +339,35 @@ describe('SearchService.searchAsync', () => {
     expect(getSessionMock).toHaveBeenCalledTimes(20);
     const sessionsArg = workerSearchMock.mock.calls[0][0] as ChatSession[];
     expect(sessionsArg).toHaveLength(20);
+  });
+
+  it('normalizes malformed recent-search storage entries', () => {
+    localStorage.setItem('recent_searches', JSON.stringify([
+      ' alpha ',
+      '',
+      'beta',
+      'alpha',
+      'beta',
+      null,
+      42,
+      'gamma',
+    ]));
+
+    expect(SearchService.getRecentSearches()).toEqual(['alpha', 'beta', 'gamma']);
+  });
+
+  it('trims, dedupes, and caps recent searches when saving', () => {
+    localStorage.setItem(
+      'recent_searches',
+      JSON.stringify(Array.from({ length: 25 }, (_, index) => `query-${index}`))
+    );
+
+    SearchService.saveRecentSearch(' query-5 ');
+    SearchService.saveRecentSearch('   ');
+
+    const recent = SearchService.getRecentSearches();
+    expect(recent[0]).toBe('query-5');
+    expect(recent.filter((entry) => entry === 'query-5')).toHaveLength(1);
+    expect(recent).toHaveLength(20);
   });
 });

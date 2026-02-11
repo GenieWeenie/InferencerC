@@ -15,6 +15,7 @@ import { parseStoredPromptSnippets } from '../src/renderer/hooks/usePrompts';
 import { parseStoredExcludedIndices } from '../src/renderer/hooks/useChatContextOptimizer';
 import { parseStoredBenchmarks } from '../src/renderer/hooks/useChatPerfBenchmarks';
 import { parseBookmarkedMessageIndices } from '../src/renderer/hooks/useChatGestureInteractions';
+import { parseRecoveryStateFromRaw } from '../src/renderer/lib/recoveryStateStorage';
 
 class MockLocalStorage {
   private store = new Map<string, string>();
@@ -296,6 +297,14 @@ describe('storage hydration guards', () => {
       },
       {
         timestamp: 2,
+        modelId: 'model-2',
+        mode: 'single',
+        inputChars: 10,
+        inputToRenderMs: 100,
+        inputToFirstTokenMs: 'invalid',
+      },
+      {
+        timestamp: 3,
         modelId: 'bad',
         mode: 'invalid',
         inputChars: 20,
@@ -303,11 +312,25 @@ describe('storage hydration guards', () => {
       },
     ]));
     const benchmarks = parseStoredBenchmarks('benchmarks');
-    expect(benchmarks).toHaveLength(1);
+    expect(benchmarks).toHaveLength(2);
     expect(benchmarks[0].mode).toBe('single');
+    expect(benchmarks[1].inputToFirstTokenMs).toBeNull();
 
-    expect(Array.from(parseBookmarkedMessageIndices('[1,2,-1,"x"]'))).toEqual([1, 2]);
+    expect(Array.from(parseBookmarkedMessageIndices('[1,2,-1,2,2.5,"x"]'))).toEqual([1, 2]);
     expect(Array.from(parseBookmarkedMessageIndices('{bad}'))).toEqual([]);
+
+    expect(parseRecoveryStateFromRaw(JSON.stringify({
+      sessionId: ' session-1 ',
+      timestamp: 5.9,
+      draftMessage: '',
+      pendingResponse: true,
+    }))).toEqual({
+      sessionId: 'session-1',
+      timestamp: 5,
+      pendingResponse: true,
+    });
+    expect(parseRecoveryStateFromRaw('{"sessionId":"","timestamp":5}')).toBeNull();
+    expect(parseRecoveryStateFromRaw('{bad}')).toBeNull();
   });
 
   test('guards mcp, webhook, onboarding, and secondary ux service storage payloads', () => {

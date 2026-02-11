@@ -62,17 +62,39 @@ export interface SearchStats {
 }
 
 const RECENT_SEARCHES_KEY = 'recent_searches';
+const MAX_RECENT_SEARCHES = 20;
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
 
 const readRecentSearchesFromStorage = (): string[] => {
     try {
         const raw = localStorage.getItem(RECENT_SEARCHES_KEY);
         if (!raw) return [];
-        const parsed: unknown = JSON.parse(raw);
+
+        const parsed = parseJson(raw);
         if (!Array.isArray(parsed)) return [];
+
         const searches: string[] = [];
+        const seen = new Set<string>();
         for (let i = 0; i < parsed.length; i++) {
-            if (typeof parsed[i] === 'string') {
-                searches.push(parsed[i]);
+            const entry = parsed[i];
+            if (typeof entry !== 'string') {
+                continue;
+            }
+            const normalized = entry.trim();
+            if (!normalized || seen.has(normalized)) {
+                continue;
+            }
+            seen.add(normalized);
+            searches.push(normalized);
+            if (searches.length >= MAX_RECENT_SEARCHES) {
+                break;
             }
         }
         return searches;
@@ -498,16 +520,20 @@ export class SearchService {
      */
     static saveRecentSearch(query: string): void {
         try {
+            const normalizedQuery = query.trim();
+            if (!normalizedQuery) {
+                return;
+            }
             const recentSearches = readRecentSearchesFromStorage();
 
             // Remove if already exists
-            const filtered = recentSearches.filter(s => s !== query);
+            const filtered = recentSearches.filter(s => s !== normalizedQuery);
 
             // Add to front
-            filtered.unshift(query);
+            filtered.unshift(normalizedQuery);
 
             // Keep only last 20
-            const trimmed = filtered.slice(0, 20);
+            const trimmed = filtered.slice(0, MAX_RECENT_SEARCHES);
 
             localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(trimmed));
         } catch {
@@ -519,7 +545,7 @@ export class SearchService {
      * Clear recent searches
      */
     static clearRecentSearches(): void {
-        localStorage.removeItem('recent_searches');
+        localStorage.removeItem(RECENT_SEARCHES_KEY);
     }
 
     /**

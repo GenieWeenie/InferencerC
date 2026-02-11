@@ -34,38 +34,62 @@ interface UseChatPerfBenchmarksParams {
     currentModel: string;
 }
 
+const MAX_STORED_BENCHMARKS = 5;
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeStoredBenchmark = (entry: unknown): ChatPerfSample | null => {
+    if (!entry || typeof entry !== 'object') {
+        return null;
+    }
+
+    const candidate = entry as Partial<ChatPerfSample>;
+    if (
+        !Number.isFinite(candidate.timestamp)
+        || typeof candidate.modelId !== 'string'
+        || (candidate.mode !== 'single' && candidate.mode !== 'battle')
+        || !Number.isFinite(candidate.inputChars)
+        || !Number.isFinite(candidate.inputToRenderMs)
+    ) {
+        return null;
+    }
+
+    return {
+        timestamp: Math.max(0, candidate.timestamp),
+        modelId: candidate.modelId,
+        mode: candidate.mode,
+        inputChars: Math.max(0, candidate.inputChars),
+        inputToRenderMs: Math.max(0, candidate.inputToRenderMs),
+        inputToFirstTokenMs: (
+            typeof candidate.inputToFirstTokenMs === 'number'
+            && Number.isFinite(candidate.inputToFirstTokenMs)
+            && candidate.inputToFirstTokenMs >= 0
+        )
+            ? candidate.inputToFirstTokenMs
+            : null,
+    };
+};
+
 export const parseStoredBenchmarks = (storageKey: string): ChatPerfSample[] => {
     try {
         const raw = localStorage.getItem(storageKey);
         if (!raw) return [];
-        const parsedUnknown: unknown = JSON.parse(raw);
+
+        const parsedUnknown = parseJson(raw);
         if (!Array.isArray(parsedUnknown)) return [];
-        const parsed: ChatPerfSample[] = [];
-        parsedUnknown.forEach((entry) => {
-            if (!entry || typeof entry !== 'object') return;
-            const candidate = entry as Partial<ChatPerfSample>;
-            if (
-                !Number.isFinite(candidate.timestamp)
-                || typeof candidate.modelId !== 'string'
-                || (candidate.mode !== 'single' && candidate.mode !== 'battle')
-                || !Number.isFinite(candidate.inputChars)
-                || !Number.isFinite(candidate.inputToRenderMs)
-            ) {
-                return;
-            }
-            parsed.push({
-                timestamp: candidate.timestamp,
-                modelId: candidate.modelId,
-                mode: candidate.mode,
-                inputChars: candidate.inputChars,
-                inputToRenderMs: candidate.inputToRenderMs,
-                inputToFirstTokenMs: typeof candidate.inputToFirstTokenMs === 'number'
-                    ? candidate.inputToFirstTokenMs
-                    : null,
-            });
-        });
+
+        const parsed = parsedUnknown
+            .map((entry) => sanitizeStoredBenchmark(entry))
+            .filter((entry): entry is ChatPerfSample => entry !== null);
+
         return parsed
-            .slice(0, 5);
+            .slice(0, MAX_STORED_BENCHMARKS);
     } catch {
         return [];
     }
@@ -103,7 +127,7 @@ export const useChatPerfBenchmarks = ({
 
     React.useEffect(() => {
         try {
-            localStorage.setItem(storageKey, JSON.stringify(recentPerfBenchmarks.slice(0, 5)));
+            localStorage.setItem(storageKey, JSON.stringify(recentPerfBenchmarks.slice(0, MAX_STORED_BENCHMARKS)));
         } catch {
             // Ignore persistence failures for perf diagnostics.
         }
@@ -121,7 +145,7 @@ export const useChatPerfBenchmarks = ({
             inputToFirstTokenMs: pending.inputToFirstTokenMs ?? null,
         };
 
-        setRecentPerfBenchmarks((prev) => [sample, ...prev].slice(0, 5));
+        setRecentPerfBenchmarks((prev) => [sample, ...prev].slice(0, MAX_STORED_BENCHMARKS));
         pendingPerfBenchmarkRef.current = null;
         setActivePerfBenchmark(null);
     }, []);

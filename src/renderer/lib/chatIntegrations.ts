@@ -7,11 +7,19 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 };
 
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 const parseStorageConfig = (key: string): StorageConfig | null => {
     try {
         const raw = localStorage.getItem(key);
         if (!raw) return null;
-        const parsed: unknown = JSON.parse(raw);
+        const parsed = parseJson(raw);
         if (!isRecord(parsed)) {
             return null;
         }
