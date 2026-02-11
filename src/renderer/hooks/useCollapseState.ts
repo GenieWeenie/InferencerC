@@ -14,11 +14,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
 
-export const parseStoredCollapseState = (raw: string): CollapseState => {
+const parseStoredCollapseStateWithStatus = (raw: string): { state: CollapseState; hadParseError: boolean } => {
     try {
         const parsed: unknown = JSON.parse(raw);
         if (!isRecord(parsed)) {
-            return {};
+            return { state: {}, hadParseError: false };
         }
         const state: CollapseState = {};
         Object.entries(parsed).forEach(([key, value]) => {
@@ -26,10 +26,14 @@ export const parseStoredCollapseState = (raw: string): CollapseState => {
                 state[key] = value;
             }
         });
-        return state;
+        return { state, hadParseError: false };
     } catch {
-        return {};
+        return { state: {}, hadParseError: true };
     }
+};
+
+export const parseStoredCollapseState = (raw: string): CollapseState => {
+    return parseStoredCollapseStateWithStatus(raw).state;
 };
 
 export const useCollapseState = (sessionId: string) => {
@@ -45,7 +49,11 @@ export const useCollapseState = (sessionId: string) => {
         try {
             const stored = sessionStorage.getItem(storageKey);
             if (stored) {
-                setCollapseState(parseStoredCollapseState(stored));
+                const parsed = parseStoredCollapseStateWithStatus(stored);
+                setCollapseState(parsed.state);
+                if (parsed.hadParseError) {
+                    console.error('Failed to load collapse state from sessionStorage', new Error('Invalid JSON'));
+                }
             }
         } catch (e) {
             console.error('Failed to load collapse state from sessionStorage', e);
