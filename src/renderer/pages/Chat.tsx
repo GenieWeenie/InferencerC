@@ -1,7 +1,11 @@
 import React from 'react';
-import { Send, Clock, Plus, Trash2, X, Globe, Settings, Activity, AlertTriangle, ChevronRight, Check, AlertCircle, Brain, Users, ImageIcon, Plug, Wrench, Copy, Eraser, Download, Edit2, Search, ChevronUp, ChevronDown, Star, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, GitBranch, Network, HelpCircle, Maximize2, Minimize2, RefreshCw, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
+import { Send, Clock, Plus, Trash2, X, Globe, Settings, Activity, AlertTriangle, ChevronRight, Check, AlertCircle, Brain, Users, Plug, Wrench, Copy, Eraser, Download, Edit2, Search, ChevronUp, ChevronDown, Star, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, GitBranch, Network, HelpCircle, Maximize2, Minimize2, RefreshCw, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ChatComposerShell } from '../components/chat/ChatComposerShell';
+import { ChatOverlays } from '../components/chat/ChatOverlays';
+import { ChatSidebar, type ChatSidebarPanels } from '../components/chat/ChatSidebar';
+import { ChatWorkspaceShell } from '../components/chat/ChatWorkspaceShell';
 import type { LaunchReadinessStep } from '../components/ChatEmptyState';
 import type { LogEntry } from '../components/RequestResponseLog';
 import type { Tutorial } from '../services/onboarding';
@@ -39,15 +43,19 @@ import {
     buildComposerControlPillDescriptors,
     buildLongPressMenuActionItems,
     buildRecentContextMessageRows,
-    classifyDroppedFile,
     type ComposerControlPillDescriptor,
     type ComposerControlPillKey,
-    getSlashCommandMatch,
     getMaxTokensSliderConfig,
     getWrappedSearchResultIndex,
     type RecentContextMessageRow,
     toggleToolNameInSet,
 } from '../lib/chatUiModels';
+import {
+    analyzeComposerInput,
+    collectPastedImageFiles,
+    describeDroppedFiles,
+    resolveComposerKeyAction,
+} from '../lib/chatComposerHandlers';
 import {
     dispatchChatShortcutAction,
     isTypingShortcutTarget,
@@ -2814,37 +2822,6 @@ const ComposerAttachmentsPanel: React.FC<ComposerAttachmentsPanelProps> = React.
     prev.onRemoveAttachment === next.onRemoveAttachment
 ));
 
-interface ComposerDropAreaProps {
-    isDragging: boolean;
-    onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
-    onDragLeave: (event: React.DragEvent<HTMLDivElement>) => void;
-    onDrop: (event: React.DragEvent<HTMLDivElement>) => void;
-    children: React.ReactNode;
-}
-
-const ComposerDropArea: React.FC<ComposerDropAreaProps> = React.memo(({
-    isDragging,
-    onDragOver,
-    onDragLeave,
-    onDrop,
-    children,
-}) => (
-    <div
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
-        className={`bg-slate-900/90 border backdrop-blur-xl rounded-2xl shadow-2xl flex flex-col transition-all duration-300 min-w-0 max-w-full overflow-x-hidden ${isDragging ? 'border-primary ring-2 ring-primary/50 bg-slate-800/90' : 'border-slate-700/50'}`}
-    >
-        {children}
-    </div>
-), (prev, next) => (
-    prev.isDragging === next.isDragging &&
-    prev.onDragOver === next.onDragOver &&
-    prev.onDragLeave === next.onDragLeave &&
-    prev.onDrop === next.onDrop &&
-    prev.children === next.children
-));
-
 interface ComposerAuxPanelsProps {
     showSuggestions: boolean;
     history: any[];
@@ -3105,12 +3082,6 @@ const ComposerAuxPanels: React.FC<ComposerAuxPanelsProps> = React.memo(({
     prev.activePromptIndex === next.activePromptIndex &&
     prev.onInsertPrompt === next.onInsertPrompt
 ));
-
-interface ChatOverlayPortalsProps {
-    children: React.ReactNode;
-}
-
-const ChatOverlayPortals: React.FC<ChatOverlayPortalsProps> = React.memo(({ children }) => <>{children}</>, (prev, next) => prev.children === next.children);
 
 const readPersistedApiLogCount = (): number => {
     try {
@@ -5895,8 +5866,7 @@ const Chat: React.FC = () => {
         const files = Array.from(event.dataTransfer.files);
         if (files.length === 0) return;
 
-        for (const file of files) {
-            const kind = classifyDroppedFile(file);
+        for (const { file, kind } of describeDroppedFiles(files)) {
             if (kind === 'image') {
                 try {
                     const { base64, thumbnailUrl } = await compressImage(file);
@@ -5925,11 +5895,14 @@ const Chat: React.FC = () => {
     }, [addAttachment, addImageAttachment]);
     const handleComposerInputChange = React.useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
         const newValue = event.target.value;
-        const cursor = event.target.selectionEnd ?? newValue.length;
-        const nextSlashMatch = getSlashCommandMatch(newValue, cursor);
+        const analysis = analyzeComposerInput(
+            newValue,
+            event.target.selectionEnd ?? newValue.length,
+            event.target.scrollHeight
+        );
 
-        if (nextSlashMatch) {
-            setSlashMatch(nextSlashMatch);
+        if (analysis.slashMatch) {
+            setSlashMatch(analysis.slashMatch);
             setActivePromptIndex(0);
         } else {
             setSlashMatch(null);
@@ -5937,17 +5910,12 @@ const Chat: React.FC = () => {
 
         setInput(newValue);
         event.target.style.height = 'auto';
-        event.target.style.height = `${Math.min(event.target.scrollHeight, 300)}px`;
+        event.target.style.height = `${analysis.autoHeightPx}px`;
     }, [setInput]);
     const handleComposerInputPaste = React.useCallback(async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-        const items = Array.from(event.clipboardData.items);
-        for (const item of items) {
-            if (!item.type.startsWith('image/')) continue;
-
+        const imageFiles = collectPastedImageFiles(Array.from(event.clipboardData.items));
+        for (const file of imageFiles) {
             event.preventDefault();
-            const file = item.getAsFile();
-            if (!file) continue;
-
             try {
                 const { base64, thumbnailUrl } = await compressImage(file);
                 addImageAttachment({
@@ -5964,32 +5932,36 @@ const Chat: React.FC = () => {
         }
     }, [addImageAttachment]);
     const handleComposerInputKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (slashMatch && filteredPrompts.length > 0) {
-            if (event.key === 'ArrowUp') {
+        const action = resolveComposerKeyAction({
+            key: event.key,
+            shiftKey: event.shiftKey,
+            slashMenuOpen: Boolean(slashMatch),
+            filteredPromptCount: filteredPrompts.length,
+        });
+
+        switch (action) {
+            case 'navigate-up':
                 event.preventDefault();
                 setActivePromptIndex((prev) => Math.max(0, prev - 1));
                 return;
-            }
-            if (event.key === 'ArrowDown') {
+            case 'navigate-down':
                 event.preventDefault();
                 setActivePromptIndex((prev) => Math.min(filteredPrompts.length - 1, prev + 1));
                 return;
-            }
-            if (event.key === 'Enter' || event.key === 'Tab') {
+            case 'insert-prompt':
                 event.preventDefault();
                 insertPrompt(filteredPrompts[activePromptIndex]);
                 return;
-            }
-            if (event.key === 'Escape') {
+            case 'dismiss-slash':
                 event.preventDefault();
                 setSlashMatch(null);
                 return;
-            }
-        }
-
-        if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault();
-            sendMessageWithContext();
+            case 'send-message':
+                event.preventDefault();
+                sendMessageWithContext();
+                return;
+            default:
+                return;
         }
     }, [activePromptIndex, filteredPrompts, insertPrompt, sendMessageWithContext, slashMatch]);
     const handleSelectSuggestion = React.useCallback((suggestion: string) => {
@@ -6398,10 +6370,11 @@ const Chat: React.FC = () => {
     const messageListFooterHeight = Math.max(132, composerOverlayHeight + composerBottomInset + 16);
 
     return (
-        <div className="flex h-full flex-row relative bg-background text-text font-body overflow-hidden min-w-0 max-w-full">
-            {/* History Sidebar */}
-            {showHistory && (
-                <div className={`${isCompactViewport ? 'w-[min(88vw,320px)]' : 'w-64'} border-r border-slate-800 bg-slate-900/95 flex flex-col h-full absolute left-0 z-20 backdrop-blur-md shadow-2xl transition-all duration-300`}>
+        <ChatWorkspaceShell
+            showHistory={showHistory}
+            isCompactViewport={isCompactViewport}
+            historySidebar={(
+                <>
                     <div className="p-4 border-b border-slate-800 font-bold flex justify-between items-center text-slate-200">
                         <span className="flex items-center gap-2"><Clock size={16} /> Recent Chats</span>
                         <button onClick={() => setShowHistory(false)} className="touch-target hover:text-white text-slate-400 transition-colors"><X size={18} /></button>
@@ -6417,12 +6390,9 @@ const Chat: React.FC = () => {
                             isLoading={isLoadingSessions}
                         />
                     </React.Suspense>
-                </div>
+                </>
             )}
-
-            {/* Main Chat Area */}
-            <div className={`flex-1 flex flex-col h-full relative transition-[margin] duration-300 min-w-0 overflow-hidden ${showHistory && !isCompactViewport ? 'ml-64' : 'ml-0'}`}>
-                {/* Top Header */}
+            header={(
                 <div className="px-4 py-2 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2 backdrop-blur-sm shadow-sm z-10 flex-wrap">
                     <TopHeaderPrimaryActions
                         isCompactViewport={isCompactViewport}
@@ -6481,7 +6451,8 @@ const Chat: React.FC = () => {
                         remoteStatus={connectionStatus.remote}
                     />
                 </div>
-
+            )}
+            searchPanel={(
                 <ChatSearchPanel
                     showSearch={showSearch}
                     searchQuery={searchQuery}
@@ -6497,129 +6468,128 @@ const Chat: React.FC = () => {
                     virtuosoComponent={VirtuosoComponent}
                     renderSearchResultItem={renderSearchResultItem}
                 />
-
-                {/* AI Summary Panel */}
-                {history.length >= 5 && (
-                    <div className="px-6 py-2">
-                        <React.Suspense fallback={<div className="text-xs text-slate-500">Loading summary...</div>}>
-                            <ConversationSummaryPanel
-                                sessionId={sessionId}
-                                messages={history}
-                                modelId={currentModel}
-                            />
-                        </React.Suspense>
-                    </div>
-                )}
-
-                {/* Context Window Usage */}
-                {history.length > 0 && (
-                    <div className="px-6 pb-2">
-                        <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2">
-                            <div className="flex items-center justify-between text-[11px] mb-2">
-                                <span className="text-slate-400 uppercase tracking-wider font-semibold">Context Window</span>
-                                <span className={`${contextUsage.warning ? 'text-amber-300' : 'text-slate-500'}`}>
-                                    {Math.min(100, Math.round(contextUsage.fillRatio * 100))}% • {contextUsage.totalTokens.toLocaleString()} / {contextUsage.maxContextTokens.toLocaleString()} tokens
-                                </span>
-                            </div>
-                            <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
-                                <div
-                                    className={`h-full transition-all duration-500 ${contextUsage.fillRatio >= 0.9 ? 'bg-red-500' : contextUsage.fillRatio >= 0.8 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                                    style={{ width: `${Math.min(100, contextUsage.fillRatio * 100)}%` }}
-                                />
-                            </div>
-                            {contextUsage.warning && (
-                                <div className="mt-2 text-[11px] text-amber-300">
-                                    Context is above 80%. Open Controls and use Context Optimizer to trim or auto-summarize.
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
-
-                {/* Messages List */}
-                <div ref={messageListRef} className="flex-1 overflow-hidden bg-background relative min-w-0 max-w-full">
-                    {swipeSessionIndicator && (
-                        <div className="absolute top-3 right-3 z-20 px-2 py-1 rounded bg-primary/20 border border-primary/40 text-primary text-xs font-semibold">
-                            {swipeSessionIndicator === 'next' ? 'Swiped to next chat' : 'Swiped to previous chat'}
-                        </div>
-                    )}
-                    {history.length === 0 ? (
-                        <React.Suspense fallback={<div className="h-full flex items-center justify-center text-sm text-slate-500">Loading starter workspace...</div>}>
-                            <ChatEmptyState
-                                showBottomControls={showBottomControls}
-                                isReady={launchChecklistComplete || hasCompletedLaunchChecklist}
-                                showLaunchChecklist={shouldShowLaunchChecklist}
-                                readinessCompletedCount={readinessCompletedCount}
-                                readinessSteps={readinessSteps}
-                                onSelectPrompt={setInput}
-                            />
-                        </React.Suspense>
-                    ) : VirtuosoComponent ? (
-                        <VirtuosoComponent
-                            ref={virtuosoRef}
-                            style={{ height: '100%', width: '100%' }}
-                            data={isLoadingMessages ? Array(6).fill(null) : history}
-                            followOutput={(isAtBottom: boolean) => {
-                                // If we are streaming (last message is loading), force scroll to bottom
-                                const lastMsg = history[history.length - 1];
-                                if (lastMsg?.isLoading) return 'smooth';
-                                // Otherwise maintain stickiness if already at bottom
-                                return isAtBottom ? 'auto' : false;
-                            }}
-                            overscan={{
-                                main: 300,
-                                reverse: 300
-                            }}
-                            increaseViewportBy={{
-                                top: 200,
-                                bottom: Math.max(220, messageListFooterHeight)
-                            }}
-                            defaultItemHeight={150}
-                            atBottomThreshold={Math.max(100, Math.floor(messageListFooterHeight * 0.45))}
-                            alignToBottom
-                            className="custom-scrollbar px-6"
-                            totalCount={isLoadingMessages ? 6 : history.length}
-                            initialTopMostItemIndex={isLoadingMessages ? 0 : history.length - 1}
-                            computeItemKey={(index: number, item: any) => isLoadingMessages ? `skeleton-${index}` : `${index}-${item.role}`}
-                            itemContent={renderItemContent}
-                            components={{
-                                Footer: () => <div style={{ height: `${messageListFooterHeight}px` }} />
-                            }}
+            )}
+            summaryPanel={history.length >= 5 ? (
+                <div className="px-6 py-2">
+                    <React.Suspense fallback={<div className="text-xs text-slate-500">Loading summary...</div>}>
+                        <ConversationSummaryPanel
+                            sessionId={sessionId}
+                            messages={history}
+                            modelId={currentModel}
                         />
-                    ) : (
-                        <div className="h-full flex items-center justify-center text-sm text-slate-500">
-                            Loading conversation...
-                        </div>
-                    )}
+                    </React.Suspense>
                 </div>
+            ) : null}
+            contextWindowPanel={history.length > 0 ? (
+                <div className="px-6 pb-2">
+                    <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2">
+                        <div className="flex items-center justify-between text-[11px] mb-2">
+                            <span className="text-slate-400 uppercase tracking-wider font-semibold">Context Window</span>
+                            <span className={`${contextUsage.warning ? 'text-amber-300' : 'text-slate-500'}`}>
+                                {Math.min(100, Math.round(contextUsage.fillRatio * 100))}% • {contextUsage.totalTokens.toLocaleString()} / {contextUsage.maxContextTokens.toLocaleString()} tokens
+                            </span>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                            <div
+                                className={`h-full transition-all duration-500 ${contextUsage.fillRatio >= 0.9 ? 'bg-red-500' : contextUsage.fillRatio >= 0.8 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                                style={{ width: `${Math.min(100, contextUsage.fillRatio * 100)}%` }}
+                            />
+                        </div>
+                        {contextUsage.warning && (
+                            <div className="mt-2 text-[11px] text-amber-300">
+                                Context is above 80%. Open Controls and use Context Optimizer to trim or auto-summarize.
+                            </div>
+                        )}
+                    </div>
+                </div>
+            ) : null}
+            messagesArea={(
+                <>
+                    <div ref={messageListRef} className="flex-1 overflow-hidden bg-background relative min-w-0 max-w-full">
+                        {swipeSessionIndicator && (
+                            <div className="absolute top-3 right-3 z-20 px-2 py-1 rounded bg-primary/20 border border-primary/40 text-primary text-xs font-semibold">
+                                {swipeSessionIndicator === 'next' ? 'Swiped to next chat' : 'Swiped to previous chat'}
+                            </div>
+                        )}
+                        {history.length === 0 ? (
+                            <React.Suspense fallback={<div className="h-full flex items-center justify-center text-sm text-slate-500">Loading starter workspace...</div>}>
+                                <ChatEmptyState
+                                    showBottomControls={showBottomControls}
+                                    isReady={launchChecklistComplete || hasCompletedLaunchChecklist}
+                                    showLaunchChecklist={shouldShowLaunchChecklist}
+                                    readinessCompletedCount={readinessCompletedCount}
+                                    readinessSteps={readinessSteps}
+                                    onSelectPrompt={setInput}
+                                />
+                            </React.Suspense>
+                        ) : VirtuosoComponent ? (
+                            <VirtuosoComponent
+                                ref={virtuosoRef}
+                                style={{ height: '100%', width: '100%' }}
+                                data={isLoadingMessages ? Array(6).fill(null) : history}
+                                followOutput={(isAtBottom: boolean) => {
+                                    const lastMsg = history[history.length - 1];
+                                    if (lastMsg?.isLoading) return 'smooth';
+                                    return isAtBottom ? 'auto' : false;
+                                }}
+                                overscan={{
+                                    main: 300,
+                                    reverse: 300
+                                }}
+                                increaseViewportBy={{
+                                    top: 200,
+                                    bottom: Math.max(220, messageListFooterHeight)
+                                }}
+                                defaultItemHeight={150}
+                                atBottomThreshold={Math.max(100, Math.floor(messageListFooterHeight * 0.45))}
+                                alignToBottom
+                                className="custom-scrollbar px-6"
+                                totalCount={isLoadingMessages ? 6 : history.length}
+                                initialTopMostItemIndex={isLoadingMessages ? 0 : history.length - 1}
+                                computeItemKey={(index: number, item: any) => isLoadingMessages ? `skeleton-${index}` : `${index}-${item.role}`}
+                                itemContent={renderItemContent}
+                                components={{
+                                    Footer: () => <div style={{ height: `${messageListFooterHeight}px` }} />
+                                }}
+                            />
+                        ) : (
+                            <div className="h-full flex items-center justify-center text-sm text-slate-500">
+                                Loading conversation...
+                            </div>
+                        )}
+                    </div>
 
-                <AnimatePresence>
-                    {longPressMenu && longPressMessage && (
-                        <LongPressActionMenu
-                            menuRef={longPressMenuRef}
-                            menuPosition={longPressMenu}
-                            messageIndex={longPressMenu.messageIndex}
-                            isBookmarked={isLongPressMessageBookmarked}
-                            capabilities={longPressMessageCapabilities}
-                            onAction={handleLongPressAction}
-                        />
-                    )}
-                </AnimatePresence>
-
-                {/* Floating Input Area with Control Bar */}
-                <div ref={composerContainerRef} className={`absolute bottom-6 left-1/2 -translate-x-1/2 w-full ${isCompactViewport ? 'max-w-full' : 'max-w-4xl'} px-4 z-20 min-w-0 overflow-x-hidden`}>
-                    <ComposerDropArea
-                        isDragging={isDragging}
-                        onDragOver={handleComposerDragOver}
-                        onDragLeave={handleComposerDragLeave}
-                        onDrop={handleComposerDrop}
-                    >
+                    <AnimatePresence>
+                        {longPressMenu && longPressMessage && (
+                            <LongPressActionMenu
+                                menuRef={longPressMenuRef}
+                                menuPosition={longPressMenu}
+                                messageIndex={longPressMenu.messageIndex}
+                                isBookmarked={isLongPressMessageBookmarked}
+                                capabilities={longPressMessageCapabilities}
+                                onAction={handleLongPressAction}
+                            />
+                        )}
+                    </AnimatePresence>
+                </>
+            )}
+            composer={(
+                <ChatComposerShell
+                    composerContainerRef={composerContainerRef}
+                    isCompactViewport={isCompactViewport}
+                    isDragging={isDragging}
+                    onDragOver={handleComposerDragOver}
+                    onDragLeave={handleComposerDragLeave}
+                    onDrop={handleComposerDrop}
+                    attachmentsPanel={(
                         <ComposerAttachmentsPanel
                             attachments={attachments}
                             imageAttachments={imageAttachments}
                             onRemoveAttachment={removeAttachment}
                             onRemoveImageAttachment={removeImageAttachment}
                         />
+                    )}
+                    auxPanels={(
                         <ComposerAuxPanels
                             showSuggestions={showSuggestions}
                             history={history}
@@ -6650,608 +6620,529 @@ const Chat: React.FC = () => {
                             activePromptIndex={activePromptIndex}
                             onInsertPrompt={insertPrompt}
                         />
-
-                        <div className={`flex items-start p-4 gap-3 bg-slate-950/30 relative min-w-0 max-w-full overflow-x-hidden ${showBottomControls ? 'rounded-t-2xl' : 'rounded-2xl'}`}>
-                            {isDragging && (
-                                <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/80 rounded-t-2xl backdrop-blur-sm pointer-events-none">
-                                    <div className="text-primary font-bold text-lg animate-bounce flex items-center gap-2">
-                                        <ImageIcon size={24} /> Drop files or images
-                                    </div>
-                                </div>
-                            )}
-                            <textarea
-                                ref={textareaRef}
-                                value={input}
-                                onChange={handleComposerInputChange}
-                                onPaste={handleComposerInputPaste}
-                                onKeyDown={handleComposerInputKeyDown}
-                                className={`flex-1 bg-transparent text-white placeholder-slate-400 border-none outline-none resize-none max-h-64 py-2 font-sans text-base leading-relaxed custom-scrollbar min-w-0 overflow-x-hidden break-words ${slashMatch ? 'text-primary' : ''}`}
-                                placeholder="Type your prompt here... (Try '/')"
-                                rows={1}
-                            />
-                            <ComposerActionButtons
-                                showBottomControls={showBottomControls}
-                                showSuggestions={showSuggestions}
-                                canToggleSuggestions={history.length > 0}
-                                canSend={Boolean(input.trim())}
-                                onToggleBottomControls={handleToggleBottomControls}
-                                onToggleSuggestions={handleToggleSuggestions}
-                                onSend={handleSendComposerMessage}
-                            />
-                        </div>
-
-                        {showBottomControls && (
-                            <ComposerControlPills
-                                actions={composerControlPillActions}
-                                mcpAvailable={mcpAvailable}
-                                mcpConnectedCount={mcpConnectedCount}
-                                mcpToolCount={mcpTools.length}
-                                showExpertMenu={showExpertMenu}
-                                onSelectExpert={handleExpertSelect}
-                                showVariableMenu={showVariableMenu}
-                                onCloseVariableMenu={handleCloseVariableMenu}
-                                onInsertVariable={handleInsertVariable}
-                                variableContext={composerVariableContext}
-                            />
-                        )}
-                    </ComposerDropArea>
-                </div>
-            </div>
-
-            {/* Inspector / Sidebar */}
-            {sidebarOpen && (
-                <>
-                {isCompactViewport && (
-                    <div
-                        className="absolute inset-0 bg-black/40 z-20"
-                        onClick={handleCloseSidebar}
-                    />
-                )}
-                <div className={`${isCompactViewport ? 'absolute inset-y-0 right-0 z-30 w-[92vw] max-w-[420px]' : 'w-[420px] min-w-[420px]'} bg-slate-950/50 border-1 border-slate-800 flex flex-col h-full border-l backdrop-blur-xl relative`}>
-                <SidebarTabsHeader
-                    activeTab={activeTab}
-                    onSelectInspectorTab={handleSelectInspectorTab}
-                    onSelectControlsTab={handleSelectControlsTab}
-                    onSelectPromptsTab={handleSelectPromptsTab}
-                    onSelectDocumentsTab={handleSelectDocumentsTab}
-                    onCloseSidebar={handleCloseSidebar}
+                    )}
+                    textareaRef={textareaRef}
+                    input={input}
+                    slashMatchActive={Boolean(slashMatch)}
+                    onInputChange={handleComposerInputChange}
+                    onInputPaste={handleComposerInputPaste}
+                    onInputKeyDown={handleComposerInputKeyDown}
+                    showBottomControls={showBottomControls}
+                    actionButtons={(
+                        <ComposerActionButtons
+                            showBottomControls={showBottomControls}
+                            showSuggestions={showSuggestions}
+                            canToggleSuggestions={history.length > 0}
+                            canSend={Boolean(input.trim())}
+                            onToggleBottomControls={handleToggleBottomControls}
+                            onToggleSuggestions={handleToggleSuggestions}
+                            onSend={handleSendComposerMessage}
+                        />
+                    )}
+                    bottomControls={(
+                        <ComposerControlPills
+                            actions={composerControlPillActions}
+                            mcpAvailable={mcpAvailable}
+                            mcpConnectedCount={mcpConnectedCount}
+                            mcpToolCount={mcpTools.length}
+                            showExpertMenu={showExpertMenu}
+                            onSelectExpert={handleExpertSelect}
+                            showVariableMenu={showVariableMenu}
+                            onCloseVariableMenu={handleCloseVariableMenu}
+                            onInsertVariable={handleInsertVariable}
+                            variableContext={composerVariableContext}
+                        />
+                    )}
                 />
-
-                {activeTab === 'controls' && (
-                    <ChatControlsTabPanel
-                        systemPrompt={systemPrompt}
-                        isEditingSystemPrompt={isEditingSystemPrompt}
-                        onStartEditingSystemPrompt={handleStartEditingSystemPrompt}
-                        onStopEditingSystemPrompt={handleStopEditingSystemPrompt}
-                        onSystemPromptChange={handleSystemPromptChange}
-                        battleMode={battleMode}
-                        onToggleBattleMode={handleToggleBattleModeWithSecondaryFallback}
-                        secondaryModel={secondaryModel}
-                        secondaryModelDisplayName={secondaryModelDisplayName}
-                        nonCurrentModelOptionElements={nonCurrentModelOptionElements}
-                        onSecondaryModelChange={handleSecondaryModelChange}
-                        thinkingEnabled={thinkingEnabled}
-                        onToggleThinkingEnabled={handleToggleThinking}
-                        autoRouting={autoRouting}
-                        onToggleAutoRouting={handleToggleAutoRouting}
-                        enabledTools={enabledTools}
-                        onToggleTool={handleToggleToolByName}
-                        jsonModeEnabled={responseFormat === 'json_object'}
-                        onToggleJsonMode={handleToggleResponseFormat}
-                        contextUsage={contextUsage}
-                        autoSummarizeContext={autoSummarizeContext}
-                        onToggleAutoSummarizeContext={handleToggleAutoSummarizeContext}
-                        onApplySuggestedTrim={handleApplySuggestedTrim}
-                        onIncludeAllContext={handleIncludeAllContext}
-                        trimSuggestionRows={trimSuggestionRows}
-                        onExcludeTrimSuggestion={handleExcludeTrimSuggestion}
-                        recentContextRows={recentContextRows}
-                        onToggleContextMessage={toggleMessageContextInclusion}
-                        batchSize={batchSize}
-                        onBatchSizeChange={handleBatchSizeChange}
-                        temperature={temperature}
-                        onTemperatureChange={handleTemperatureChange}
-                        topP={topP}
-                        onTopPChange={handleTopPChange}
-                        maxTokens={maxTokens}
-                        onMaxTokensChange={handleMaxTokensChange}
-                        maxTokenSliderMax={maxTokensSliderConfig.sliderMax}
-                        maxTokenSliderStep={maxTokensSliderConfig.sliderStep}
-                        modelContextLength={currentModelObj?.contextLength}
-                    />
-                )}
-
-                {activeTab === 'prompts' && (
-                    <React.Suspense fallback={<div className="p-6 text-slate-500 animate-pulse">Loading Library...</div>}>
-                        <PromptManager />
-                    </React.Suspense>
-                )}
-
-                {activeTab === 'documents' && (
-                    <React.Suspense fallback={<div className="p-6 text-slate-500 animate-pulse">Loading Documents...</div>}>
-                        <DocumentChatPanel />
-                    </React.Suspense>
-                )}
-
-                {activeTab === 'inspector' && (
-                    <ChatInspectorTabPanel
-                        selectedToken={selectedToken}
-                        onUpdateToken={updateMessageToken}
-                    />
-                )}
-                </div>
-                </>
             )}
-
-            {/* Sidebar Toggle Button (when closed) */}
-            <ChatOverlayPortals>
-                {/* Keyboard Shortcuts Modal */}
-                {showShortcutsModal && (
-                    <React.Suspense fallback={null}>
-                        <KeyboardShortcutsModal
-                            isOpen={showShortcutsModal}
-                            onClose={() => setShowShortcutsModal(false)}
+            sidebar={(
+                <ChatSidebar
+                    sidebarOpen={sidebarOpen}
+                    isCompactViewport={isCompactViewport}
+                    activeTab={activeTab}
+                    onCloseSidebar={handleCloseSidebar}
+                    tabsHeader={(
+                        <SidebarTabsHeader
+                            activeTab={activeTab}
+                            onSelectInspectorTab={handleSelectInspectorTab}
+                            onSelectControlsTab={handleSelectControlsTab}
+                            onSelectPromptsTab={handleSelectPromptsTab}
+                            onSelectDocumentsTab={handleSelectDocumentsTab}
+                            onCloseSidebar={handleCloseSidebar}
                         />
-                    </React.Suspense>
-                )}
+                    )}
+                    panels={{
+                        controls: (
+                            <ChatControlsTabPanel
+                                systemPrompt={systemPrompt}
+                                isEditingSystemPrompt={isEditingSystemPrompt}
+                                onStartEditingSystemPrompt={handleStartEditingSystemPrompt}
+                                onStopEditingSystemPrompt={handleStopEditingSystemPrompt}
+                                onSystemPromptChange={handleSystemPromptChange}
+                                battleMode={battleMode}
+                                onToggleBattleMode={handleToggleBattleModeWithSecondaryFallback}
+                                secondaryModel={secondaryModel}
+                                secondaryModelDisplayName={secondaryModelDisplayName}
+                                nonCurrentModelOptionElements={nonCurrentModelOptionElements}
+                                onSecondaryModelChange={handleSecondaryModelChange}
+                                thinkingEnabled={thinkingEnabled}
+                                onToggleThinkingEnabled={handleToggleThinking}
+                                autoRouting={autoRouting}
+                                onToggleAutoRouting={handleToggleAutoRouting}
+                                enabledTools={enabledTools}
+                                onToggleTool={handleToggleToolByName}
+                                jsonModeEnabled={responseFormat === 'json_object'}
+                                onToggleJsonMode={handleToggleResponseFormat}
+                                contextUsage={contextUsage}
+                                autoSummarizeContext={autoSummarizeContext}
+                                onToggleAutoSummarizeContext={handleToggleAutoSummarizeContext}
+                                onApplySuggestedTrim={handleApplySuggestedTrim}
+                                onIncludeAllContext={handleIncludeAllContext}
+                                trimSuggestionRows={trimSuggestionRows}
+                                onExcludeTrimSuggestion={handleExcludeTrimSuggestion}
+                                recentContextRows={recentContextRows}
+                                onToggleContextMessage={toggleMessageContextInclusion}
+                                batchSize={batchSize}
+                                onBatchSizeChange={handleBatchSizeChange}
+                                temperature={temperature}
+                                onTemperatureChange={handleTemperatureChange}
+                                topP={topP}
+                                onTopPChange={handleTopPChange}
+                                maxTokens={maxTokens}
+                                onMaxTokensChange={handleMaxTokensChange}
+                                maxTokenSliderMax={maxTokensSliderConfig.sliderMax}
+                                maxTokenSliderStep={maxTokensSliderConfig.sliderStep}
+                                modelContextLength={currentModelObj?.contextLength}
+                            />
+                        ),
+                        prompts: (
+                            <React.Suspense fallback={<div className="p-6 text-slate-500 animate-pulse">Loading Library...</div>}>
+                                <PromptManager />
+                            </React.Suspense>
+                        ),
+                        documents: (
+                            <React.Suspense fallback={<div className="p-6 text-slate-500 animate-pulse">Loading Documents...</div>}>
+                                <DocumentChatPanel />
+                            </React.Suspense>
+                        ),
+                        inspector: (
+                            <ChatInspectorTabPanel
+                                selectedToken={selectedToken}
+                                onUpdateToken={updateMessageToken}
+                            />
+                        ),
+                    } satisfies ChatSidebarPanels}
+                />
+            )}
+            overlays={(
+                <ChatOverlays
+                    slots={{
+                        keyboardShortcutsModal: showShortcutsModal ? (
+                            <React.Suspense fallback={null}>
+                                <KeyboardShortcutsModal
+                                    isOpen={showShortcutsModal}
+                                    onClose={() => setShowShortcutsModal(false)}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        requestResponseLog: showRequestLog ? (
+                            <React.Suspense fallback={null}>
+                                <RequestResponseLog
+                                    isOpen={showRequestLog}
+                                    onClose={() => setShowRequestLog(false)}
+                                    logs={apiLogs}
+                                    onClear={() => {
+                                        void loadActivityLogService()
+                                            .then((service) => {
+                                                service.clear();
+                                            })
+                                            .catch(() => {
+                                                // Keep UI state cleared even if persistent store clear fails.
+                                            });
+                                        setApiLogs([]);
+                                        setApiLogCount(0);
+                                        setHasHydratedApiLogs(true);
+                                    }}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        analyticsDashboard: showAnalytics ? (
+                            <React.Suspense fallback={null}>
+                                <AnalyticsDashboard
+                                    isOpen={showAnalytics}
+                                    onClose={() => setShowAnalytics(false)}
+                                    usageHistory={usageStats}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        conversationTreeView: branchingEnabled && showTreeView && treeHook.treeManager ? (
+                            <React.Suspense fallback={null}>
+                                <ConversationTreeView
+                                    isOpen={showTreeView}
+                                    onClose={() => setShowTreeView(false)}
+                                    treeManager={treeHook.treeManager}
+                                    currentPath={treeHook.currentPath}
+                                    onNavigateToNode={() => {
+                                        setShowTreeView(false);
+                                    }}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        exportDialog: showExportDialog ? (
+                            <React.Suspense fallback={null}>
+                                <ExportDialog
+                                    isOpen={showExportDialog}
+                                    onClose={() => setShowExportDialog(false)}
+                                    messages={history}
+                                    sessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Conversation'}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        globalSearchDialog: showGlobalSearch ? (
+                            <React.Suspense fallback={null}>
+                                <GlobalSearchDialog
+                                    isOpen={showGlobalSearch}
+                                    onClose={() => setShowGlobalSearch(false)}
+                                    currentSessionId={sessionId}
+                                    currentSessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Current Conversation'}
+                                    onNavigateToMessage={(targetSessionId, messageIndex) => {
+                                        if (targetSessionId !== sessionId) {
+                                            handleLoadSession(targetSessionId);
+                                        }
+                                        setTimeout(() => {
+                                            if (virtuosoRef.current && messageIndex >= 0) {
+                                                virtuosoRef.current.scrollToIndex({
+                                                    index: messageIndex,
+                                                    align: 'center',
+                                                    behavior: 'smooth'
+                                                });
+                                                toast.success(`Jumped to message #${messageIndex + 1}`);
+                                            }
+                                        }, 300);
+                                    }}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        templateLibraryDialog: showTemplateLibrary ? (
+                            <React.Suspense fallback={null}>
+                                <TemplateLibraryDialog
+                                    isOpen={showTemplateLibrary}
+                                    onClose={() => setShowTemplateLibrary(false)}
+                                    onUseTemplate={(template: ConversationTemplate) => {
+                                        createNewSession();
 
-                {/* Request/Response Log */}
-                {showRequestLog && (
-                    <React.Suspense fallback={null}>
-                        <RequestResponseLog
-                            isOpen={showRequestLog}
-                            onClose={() => setShowRequestLog(false)}
-                            logs={apiLogs}
-                            onClear={() => {
-                                void loadActivityLogService()
-                                    .then((service) => {
-                                        service.clear();
-                                    })
-                                    .catch(() => {
-                                        // Keep UI state cleared even if persistent store clear fails.
-                                    });
-                                setApiLogs([]);
-                                setApiLogCount(0);
-                                setHasHydratedApiLogs(true);
-                            }}
-                        />
-                    </React.Suspense>
-                )}
+                                        if (template.systemPrompt) {
+                                            setSystemPrompt(template.systemPrompt);
+                                        }
+                                        if (template.settings) {
+                                            if (template.settings.temperature !== undefined) setTemperature(template.settings.temperature);
+                                            if (template.settings.topP !== undefined) setTopP(template.settings.topP);
+                                            if (template.settings.maxTokens !== undefined) setMaxTokens(template.settings.maxTokens);
+                                            if (template.settings.expertMode !== undefined) setExpertMode(template.settings.expertMode);
+                                            if (template.settings.thinkingEnabled !== undefined) setThinkingEnabled(template.settings.thinkingEnabled);
+                                        }
 
-                {/* Analytics Dashboard */}
-                {showAnalytics && (
-                    <React.Suspense fallback={null}>
-                        <AnalyticsDashboard
-                            isOpen={showAnalytics}
-                            onClose={() => setShowAnalytics(false)}
-                            usageHistory={usageStats}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Conversation Tree View */}
-                {branchingEnabled && showTreeView && treeHook.treeManager && (
-                    <React.Suspense fallback={null}>
-                        <ConversationTreeView
-                            isOpen={showTreeView}
-                            onClose={() => setShowTreeView(false)}
-                            treeManager={treeHook.treeManager}
-                            currentPath={treeHook.currentPath}
-                            onNavigateToNode={() => {
-                                // Close tree view.
-                                // Navigation between branches is handled by keyboard shortcuts.
-                                setShowTreeView(false);
-                            }}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Export Dialog */}
-                {showExportDialog && (
-                    <React.Suspense fallback={null}>
-                        <ExportDialog
-                            isOpen={showExportDialog}
-                            onClose={() => setShowExportDialog(false)}
-                            messages={history}
-                            sessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Conversation'}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Global Search Dialog */}
-                {showGlobalSearch && (
-                    <React.Suspense fallback={null}>
-                        <GlobalSearchDialog
-                            isOpen={showGlobalSearch}
-                            onClose={() => setShowGlobalSearch(false)}
-                            currentSessionId={sessionId}
-                            currentSessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Current Conversation'}
-                            onNavigateToMessage={(targetSessionId, messageIndex) => {
-                                // If different session, load it first.
-                                if (targetSessionId !== sessionId) {
-                                    handleLoadSession(targetSessionId);
-                                }
-                                // Scroll to the message after a short delay to allow session loading.
-                                setTimeout(() => {
-                                    if (virtuosoRef.current && messageIndex >= 0) {
-                                        virtuosoRef.current.scrollToIndex({
-                                            index: messageIndex,
-                                            align: 'center',
-                                            behavior: 'smooth'
+                                        if (template.initialMessages.length > 0) {
+                                            replaceHistory(template.initialMessages.map(m => ({
+                                                ...m,
+                                                isLoading: false
+                                            })));
+                                        }
+                                    }}
+                                    currentMessages={history}
+                                    currentSystemPrompt={systemPrompt}
+                                    currentSettings={{
+                                        temperature,
+                                        topP,
+                                        maxTokens,
+                                        expertMode,
+                                        thinkingEnabled
+                                    }}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        abTestingPanel: showABTesting ? (
+                            <React.Suspense fallback={null}>
+                                <ABTestingPanel
+                                    isOpen={showABTesting}
+                                    onClose={() => setShowABTesting(false)}
+                                    onExecutePrompt={async (prompt, dialogSystemPrompt, modelId, dialogTemperature, dialogTopP, dialogMaxTokens) => {
+                                        return executeChatCompletion({
+                                            prompt,
+                                            systemPrompt: dialogSystemPrompt,
+                                            modelId,
+                                            temperature: dialogTemperature,
+                                            topP: dialogTopP,
+                                            maxTokens: dialogMaxTokens,
                                         });
-                                        toast.success(`Jumped to message #${messageIndex + 1}`);
-                                    }
-                                }, 300);
-                            }}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Template Library Dialog */}
-                {showTemplateLibrary && (
-                    <React.Suspense fallback={null}>
-                        <TemplateLibraryDialog
-                            isOpen={showTemplateLibrary}
-                            onClose={() => setShowTemplateLibrary(false)}
-                            onUseTemplate={(template: ConversationTemplate) => {
-                                // Create new session with template.
-                                createNewSession();
-
-                                // Apply template settings.
-                                if (template.systemPrompt) {
-                                    setSystemPrompt(template.systemPrompt);
-                                }
-                                if (template.settings) {
-                                    if (template.settings.temperature !== undefined) setTemperature(template.settings.temperature);
-                                    if (template.settings.topP !== undefined) setTopP(template.settings.topP);
-                                    if (template.settings.maxTokens !== undefined) setMaxTokens(template.settings.maxTokens);
-                                    if (template.settings.expertMode !== undefined) setExpertMode(template.settings.expertMode);
-                                    if (template.settings.thinkingEnabled !== undefined) setThinkingEnabled(template.settings.thinkingEnabled);
-                                }
-
-                                // Apply initial messages.
-                                if (template.initialMessages.length > 0) {
-                                    replaceHistory(template.initialMessages.map(m => ({
-                                        ...m,
-                                        isLoading: false
-                                    })));
-                                }
-                            }}
-                            currentMessages={history}
-                            currentSystemPrompt={systemPrompt}
-                            currentSettings={{
-                                temperature,
-                                topP,
-                                maxTokens,
-                                expertMode,
-                                thinkingEnabled
-                            }}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* A/B Testing Panel */}
-                {showABTesting && (
-                    <React.Suspense fallback={null}>
-                        <ABTestingPanel
-                            isOpen={showABTesting}
-                            onClose={() => setShowABTesting(false)}
-                            onExecutePrompt={async (prompt, systemPrompt, modelId, temperature, topP, maxTokens) => {
-                                return executeChatCompletion({
-                                    prompt,
-                                    systemPrompt,
-                                    modelId,
-                                    temperature,
-                                    topP,
-                                    maxTokens,
-                                });
-                            }}
-                            currentInput={input}
-                            currentContext={history}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Prompt Optimization Panel */}
-                {showPromptOptimization && (
-                    <React.Suspense fallback={null}>
-                        <PromptOptimizationPanel
-                            isOpen={showPromptOptimization}
-                            onClose={() => setShowPromptOptimization(false)}
-                            initialPrompt={input}
-                            initialSystemPrompt={systemPrompt}
-                            onApplyOptimized={(optimizedPrompt, optimizedSystemPrompt) => {
-                                setInput(optimizedPrompt);
-                                if (optimizedSystemPrompt) {
-                                    setSystemPrompt(optimizedSystemPrompt);
-                                }
-                            }}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Calendar Schedule Dialog */}
-                {showCalendarSchedule && (
-                    <React.Suspense fallback={null}>
-                        <CalendarScheduleDialog
-                            isOpen={showCalendarSchedule}
-                            onClose={() => setShowCalendarSchedule(false)}
-                            conversationTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Conversation'}
-                            conversationSummary={history.length > 0 ? `Review conversation with ${history.length} messages` : undefined}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Conversation Recommendations Panel */}
-                {showRecommendations && (
-                    <React.Suspense fallback={null}>
-                        <ConversationRecommendationsPanel
-                            isOpen={showRecommendations}
-                            onClose={() => setShowRecommendations(false)}
-                            currentSessionId={sessionId}
-                            currentMessage={input}
-                            conversationHistory={history}
-                            onSelectConversation={(nextSessionId) => {
-                                handleLoadSession(nextSessionId);
-                                setShowRecommendations(false);
-                            }}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Workflows Manager */}
-                {showWorkflows && (
-                    <React.Suspense fallback={null}>
-                        <WorkflowsManager
-                            isOpen={showWorkflows}
-                            onClose={() => setShowWorkflows(false)}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* API Playground */}
-                {showAPIPlayground && (
-                    <React.Suspense fallback={null}>
-                        <APIPlayground
-                            isOpen={showAPIPlayground}
-                            onClose={() => setShowAPIPlayground(false)}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Developer Documentation */}
-                {showDeveloperDocs && (
-                    <React.Suspense fallback={null}>
-                        <DeveloperDocumentationPanel
-                            isOpen={showDeveloperDocs}
-                            onClose={() => setShowDeveloperDocs(false)}
-                            onOpenAPIPlayground={() => {
-                                setShowDeveloperDocs(false);
-                                setShowAPIPlayground(true);
-                            }}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Plugin Manager */}
-                {showPluginManager && (
-                    <React.Suspense fallback={null}>
-                        <PluginManager
-                            isOpen={showPluginManager}
-                            onClose={() => setShowPluginManager(false)}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Code Integration Panel */}
-                {showCodeIntegration && (
-                    <React.Suspense fallback={null}>
-                        <CodeIntegrationPanel
-                            isOpen={showCodeIntegration}
-                            onClose={() => {
-                                setShowCodeIntegration(false);
-                                setSelectedCode(null);
-                            }}
-                            code={selectedCode?.code}
-                            language={selectedCode?.language || 'javascript'}
-                            conversationHistory={history}
-                            onExecutePrompt={async (prompt, systemPrompt) => {
-                                const result = await executeChatCompletion({
-                                    prompt,
-                                    systemPrompt,
-                                });
-                                return { content: result.content };
-                            }}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Workspace Views */}
-                {showWorkspaceViews && (
-                    <React.Suspense fallback={null}>
-                        <WorkspaceViewsPanel
-                            isOpen={showWorkspaceViews}
-                            onClose={() => setShowWorkspaceViews(false)}
-                            conversations={savedSessions.map(s => ({
-                                id: s.id,
-                                title: s.title,
-                                messageCount: s.messageCount || 0,
-                                lastActivity: s.lastMessageTime || s.createdAt,
-                                pinned: s.pinned,
-                                archived: false,
-                                category: undefined,
-                                tags: [],
-                                model: undefined,
-                            }))}
-                            onSelectConversation={(id) => {
-                                handleLoadSession(id);
-                                setShowWorkspaceViews(false);
-                            }}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Interactive Tutorial */}
-                {showTutorial && currentTutorial && (
-                    <React.Suspense fallback={null}>
-                        <InteractiveTutorial
-                            tutorial={currentTutorial}
-                            onComplete={() => {
-                                setShowTutorial(false);
-                                setCurrentTutorial(null);
-                                void loadOnboardingService()
-                                    .then((onboardingService) => onboardingService.completeOnboarding())
-                                    .catch(() => {
-                                        // Ignore onboarding persistence failures.
-                                    });
-                            }}
-                            onSkip={() => {
-                                setShowTutorial(false);
-                                setCurrentTutorial(null);
-                            }}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Brain-Computer Interface */}
-                {showBCI && (
-                    <React.Suspense fallback={null}>
-                        <BCIPanel
-                            isOpen={showBCI}
-                            onClose={() => setShowBCI(false)}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Multi-Modal AI */}
-                {showMultiModal && (
-                    <React.Suspense fallback={null}>
-                        <MultiModalAIPanel
-                            isOpen={showMultiModal}
-                            onClose={() => setShowMultiModal(false)}
-                            onSend={async (media, text) => {
-                                // Process multi-modal request.
-                                const multiModalAIService = await loadMultiModalAIService();
-                                const response = await multiModalAIService.sendMultiModalRequest(
-                                    { text, media },
-                                    async (prompt, systemPrompt) => {
+                                    }}
+                                    currentInput={input}
+                                    currentContext={history}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        promptOptimizationPanel: showPromptOptimization ? (
+                            <React.Suspense fallback={null}>
+                                <PromptOptimizationPanel
+                                    isOpen={showPromptOptimization}
+                                    onClose={() => setShowPromptOptimization(false)}
+                                    initialPrompt={input}
+                                    initialSystemPrompt={systemPrompt}
+                                    onApplyOptimized={(optimizedPrompt, optimizedSystemPrompt) => {
+                                        setInput(optimizedPrompt);
+                                        if (optimizedSystemPrompt) {
+                                            setSystemPrompt(optimizedSystemPrompt);
+                                        }
+                                    }}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        calendarScheduleDialog: showCalendarSchedule ? (
+                            <React.Suspense fallback={null}>
+                                <CalendarScheduleDialog
+                                    isOpen={showCalendarSchedule}
+                                    onClose={() => setShowCalendarSchedule(false)}
+                                    conversationTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Conversation'}
+                                    conversationSummary={history.length > 0 ? `Review conversation with ${history.length} messages` : undefined}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        recommendationsPanel: showRecommendations ? (
+                            <React.Suspense fallback={null}>
+                                <ConversationRecommendationsPanel
+                                    isOpen={showRecommendations}
+                                    onClose={() => setShowRecommendations(false)}
+                                    currentSessionId={sessionId}
+                                    currentMessage={input}
+                                    conversationHistory={history}
+                                    onSelectConversation={(nextSessionId) => {
+                                        handleLoadSession(nextSessionId);
+                                        setShowRecommendations(false);
+                                    }}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        workflowsManager: showWorkflows ? (
+                            <React.Suspense fallback={null}>
+                                <WorkflowsManager
+                                    isOpen={showWorkflows}
+                                    onClose={() => setShowWorkflows(false)}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        apiPlayground: showAPIPlayground ? (
+                            <React.Suspense fallback={null}>
+                                <APIPlayground
+                                    isOpen={showAPIPlayground}
+                                    onClose={() => setShowAPIPlayground(false)}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        developerDocs: showDeveloperDocs ? (
+                            <React.Suspense fallback={null}>
+                                <DeveloperDocumentationPanel
+                                    isOpen={showDeveloperDocs}
+                                    onClose={() => setShowDeveloperDocs(false)}
+                                    onOpenAPIPlayground={() => {
+                                        setShowDeveloperDocs(false);
+                                        setShowAPIPlayground(true);
+                                    }}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        pluginManager: showPluginManager ? (
+                            <React.Suspense fallback={null}>
+                                <PluginManager
+                                    isOpen={showPluginManager}
+                                    onClose={() => setShowPluginManager(false)}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        codeIntegrationPanel: showCodeIntegration ? (
+                            <React.Suspense fallback={null}>
+                                <CodeIntegrationPanel
+                                    isOpen={showCodeIntegration}
+                                    onClose={() => {
+                                        setShowCodeIntegration(false);
+                                        setSelectedCode(null);
+                                    }}
+                                    code={selectedCode?.code}
+                                    language={selectedCode?.language || 'javascript'}
+                                    conversationHistory={history}
+                                    onExecutePrompt={async (prompt, promptSystem) => {
                                         const result = await executeChatCompletion({
                                             prompt,
-                                            systemPrompt,
+                                            systemPrompt: promptSystem,
                                         });
                                         return { content: result.content };
-                                    }
-                                );
-                                // Add response to conversation.
-                                appendMessage({
-                                    role: 'assistant',
-                                    content: response.content,
-                                    isLoading: false,
-                                });
-                            }}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Real-Time Collaboration */}
-                {showCollaboration && (
-                    <React.Suspense fallback={null}>
-                        <RealTimeCollaborationPanel
-                            isOpen={showCollaboration}
-                            onClose={() => setShowCollaboration(false)}
-                        />
-                    </React.Suspense>
-                )}
-
-                {showCloudSync && (
-                    <React.Suspense fallback={null}>
-                        <CloudSyncPanel
-                            isOpen={showCloudSync}
-                            onClose={() => setShowCloudSync(false)}
-                        />
-                    </React.Suspense>
-                )}
-
-                {showTeamWorkspaces && (
-                    <React.Suspense fallback={null}>
-                        <TeamWorkspacesPanel
-                            isOpen={showTeamWorkspaces}
-                            onClose={() => setShowTeamWorkspaces(false)}
-                            availableModels={availableModels}
-                            conversations={savedSessions}
-                        />
-                    </React.Suspense>
-                )}
-
-                {showEnterpriseCompliance && (
-                    <React.Suspense fallback={null}>
-                        <EnterpriseCompliancePanel
-                            isOpen={showEnterpriseCompliance}
-                            onClose={() => setShowEnterpriseCompliance(false)}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Blockchain Integration */}
-                {showBlockchain && (
-                    <React.Suspense fallback={null}>
-                        <BlockchainPanel
-                            isOpen={showBlockchain}
-                            onClose={() => setShowBlockchain(false)}
-                            sessionId={sessionId}
-                            conversationData={history}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* AI Agents */}
-                {showAIAgents && (
-                    <React.Suspense fallback={null}>
-                        <AIAgentsPanel
-                            isOpen={showAIAgents}
-                            onClose={() => setShowAIAgents(false)}
-                            onExecutePrompt={async (prompt, systemPrompt) => {
-                                const result = await executeChatCompletion({
-                                    prompt,
-                                    systemPrompt,
-                                });
-                                return { content: result.content };
-                            }}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Federated Learning */}
-                {showFederatedLearning && (
-                    <React.Suspense fallback={null}>
-                        <FederatedLearningPanel
-                            isOpen={showFederatedLearning}
-                            onClose={() => setShowFederatedLearning(false)}
-                        />
-                    </React.Suspense>
-                )}
-
-                {/* Performance Monitor Overlay (dev-only, on demand) */}
-                {devMonitorsEnabled && (
-                    <React.Suspense fallback={null}>
-                        <PerformanceMonitorOverlay messageCount={history.length} />
-                    </React.Suspense>
-                )}
-
-                {/* Recovery Dialog */}
-                {showRecoveryDialog && (
-                    <React.Suspense fallback={null}>
-                        <RecoveryDialog
-                            isOpen={showRecoveryDialog}
-                            onClose={() => setShowRecoveryDialog(false)}
-                            onRestore={handleRestoreSession}
-                            onDismiss={handleDismissRecovery}
-                            recoveryState={recoveryState}
-                        />
-                    </React.Suspense>
-                )}
-            </ChatOverlayPortals>
-        </div>
+                                    }}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        workspaceViews: showWorkspaceViews ? (
+                            <React.Suspense fallback={null}>
+                                <WorkspaceViewsPanel
+                                    isOpen={showWorkspaceViews}
+                                    onClose={() => setShowWorkspaceViews(false)}
+                                    conversations={savedSessions.map(s => ({
+                                        id: s.id,
+                                        title: s.title,
+                                        messageCount: s.messageCount || 0,
+                                        lastActivity: s.lastMessageTime || s.createdAt,
+                                        pinned: s.pinned,
+                                        archived: false,
+                                        category: undefined,
+                                        tags: [],
+                                        model: undefined,
+                                    }))}
+                                    onSelectConversation={(id) => {
+                                        handleLoadSession(id);
+                                        setShowWorkspaceViews(false);
+                                    }}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        interactiveTutorial: showTutorial && currentTutorial ? (
+                            <React.Suspense fallback={null}>
+                                <InteractiveTutorial
+                                    tutorial={currentTutorial}
+                                    onComplete={() => {
+                                        setShowTutorial(false);
+                                        setCurrentTutorial(null);
+                                        void loadOnboardingService()
+                                            .then((onboardingService) => onboardingService.completeOnboarding())
+                                            .catch(() => {
+                                                // Ignore onboarding persistence failures.
+                                            });
+                                    }}
+                                    onSkip={() => {
+                                        setShowTutorial(false);
+                                        setCurrentTutorial(null);
+                                    }}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        bciPanel: showBCI ? (
+                            <React.Suspense fallback={null}>
+                                <BCIPanel
+                                    isOpen={showBCI}
+                                    onClose={() => setShowBCI(false)}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        multiModalPanel: showMultiModal ? (
+                            <React.Suspense fallback={null}>
+                                <MultiModalAIPanel
+                                    isOpen={showMultiModal}
+                                    onClose={() => setShowMultiModal(false)}
+                                    onSend={async (media, text) => {
+                                        const multiModalAIService = await loadMultiModalAIService();
+                                        const response = await multiModalAIService.sendMultiModalRequest(
+                                            { text, media },
+                                            async (prompt, promptSystem) => {
+                                                const result = await executeChatCompletion({
+                                                    prompt,
+                                                    systemPrompt: promptSystem,
+                                                });
+                                                return { content: result.content };
+                                            }
+                                        );
+                                        appendMessage({
+                                            role: 'assistant',
+                                            content: response.content,
+                                            isLoading: false,
+                                        });
+                                    }}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        collaborationPanel: showCollaboration ? (
+                            <React.Suspense fallback={null}>
+                                <RealTimeCollaborationPanel
+                                    isOpen={showCollaboration}
+                                    onClose={() => setShowCollaboration(false)}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        cloudSyncPanel: showCloudSync ? (
+                            <React.Suspense fallback={null}>
+                                <CloudSyncPanel
+                                    isOpen={showCloudSync}
+                                    onClose={() => setShowCloudSync(false)}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        teamWorkspacesPanel: showTeamWorkspaces ? (
+                            <React.Suspense fallback={null}>
+                                <TeamWorkspacesPanel
+                                    isOpen={showTeamWorkspaces}
+                                    onClose={() => setShowTeamWorkspaces(false)}
+                                    availableModels={availableModels}
+                                    conversations={savedSessions}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        enterpriseCompliancePanel: showEnterpriseCompliance ? (
+                            <React.Suspense fallback={null}>
+                                <EnterpriseCompliancePanel
+                                    isOpen={showEnterpriseCompliance}
+                                    onClose={() => setShowEnterpriseCompliance(false)}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        blockchainPanel: showBlockchain ? (
+                            <React.Suspense fallback={null}>
+                                <BlockchainPanel
+                                    isOpen={showBlockchain}
+                                    onClose={() => setShowBlockchain(false)}
+                                    sessionId={sessionId}
+                                    conversationData={history}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        aiAgentsPanel: showAIAgents ? (
+                            <React.Suspense fallback={null}>
+                                <AIAgentsPanel
+                                    isOpen={showAIAgents}
+                                    onClose={() => setShowAIAgents(false)}
+                                    onExecutePrompt={async (prompt, promptSystem) => {
+                                        const result = await executeChatCompletion({
+                                            prompt,
+                                            systemPrompt: promptSystem,
+                                        });
+                                        return { content: result.content };
+                                    }}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        federatedLearningPanel: showFederatedLearning ? (
+                            <React.Suspense fallback={null}>
+                                <FederatedLearningPanel
+                                    isOpen={showFederatedLearning}
+                                    onClose={() => setShowFederatedLearning(false)}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                        performanceMonitor: devMonitorsEnabled ? (
+                            <React.Suspense fallback={null}>
+                                <PerformanceMonitorOverlay messageCount={history.length} />
+                            </React.Suspense>
+                        ) : null,
+                        recoveryDialog: showRecoveryDialog ? (
+                            <React.Suspense fallback={null}>
+                                <RecoveryDialog
+                                    isOpen={showRecoveryDialog}
+                                    onClose={() => setShowRecoveryDialog(false)}
+                                    onRestore={handleRestoreSession}
+                                    onDismiss={handleDismissRecovery}
+                                    recoveryState={recoveryState}
+                                />
+                            </React.Suspense>
+                        ) : null,
+                    }}
+                />
+            )}
+        />
     );
 };
 
