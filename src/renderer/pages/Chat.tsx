@@ -1,17 +1,15 @@
 import React from 'react';
-import { Clock, Plus, X, Globe, Settings, Activity, AlertTriangle, ChevronRight, Check, AlertCircle, Brain, Users, Wrench, Eraser, Download, Search, ChevronUp, ChevronDown, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, Network, HelpCircle, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
+import { Plus, Globe, Settings, Activity, AlertTriangle, ChevronRight, Check, AlertCircle, Brain, Users, Wrench, Eraser, Download, Search, ChevronUp, ChevronDown, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, Network, HelpCircle, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
-import { ChatComposerShell } from '../components/chat/ChatComposerShell';
+import { ChatComposerArea } from '../components/chat/ChatComposerArea';
 import { ChatControlsTabPanel } from '../components/chat/ChatControlsTabPanel';
+import { ChatContextWindowPanel, ChatSummaryPanel } from '../components/chat/ChatContextPanels';
 import { ChatHeaderBar } from '../components/chat/ChatHeaderBar';
+import { ChatHistorySidebar } from '../components/chat/ChatHistorySidebar';
 import {
     ChatInspectorTabPanel,
-    ComposerAttachmentsPanel,
-    ComposerAuxPanels,
 } from '../components/chat/ChatInspectorComposerPanels';
 import {
-    ComposerActionButtons,
-    ComposerControlPills,
     SidebarTabsHeader,
 } from '../components/chat/ChatInlinePanels';
 import { ChatMessagesViewport } from '../components/chat/ChatMessagesViewport';
@@ -47,6 +45,7 @@ import { useChatSendPipeline } from '../hooks/useChatSendPipeline';
 import { useChatSessionIntegrations } from '../hooks/useChatSessionIntegrations';
 import { useChatSlashPrompts } from '../hooks/useChatSlashPrompts';
 import { useChatStartupRecovery } from '../hooks/useChatStartupRecovery';
+import { useChatUiActionBundle } from '../hooks/useChatUiActionBundle';
 import { useComposerOverlayLayout } from '../hooks/useComposerOverlayLayout';
 import { useChatDerivedViewModels } from '../hooks/useChatDerivedViewModels';
 import { getDiagnosticsStatus } from '../lib/chatDiagnosticsModels';
@@ -64,6 +63,7 @@ import {
     createChatRowMetadataCacheState,
     type SearchResultPreviewCacheEntry,
 } from '../lib/chatRenderModels';
+import type { ChatVirtuosoHandle } from '../lib/chatVirtuosoTypes';
 import {
     type ChatMessageActionCapabilities,
     getMessageActionCapabilities,
@@ -71,10 +71,8 @@ import {
 import { useMCP } from '../hooks/useMCP';
 import {
     ChatDiagnosticsPopover,
-    ConversationSummaryPanel,
     DocumentChatPanel,
     PromptManager,
-    SidebarHistory,
 } from '../components/chat/chatLazyPanels';
 
 const CHAT_PERF_HISTORY_KEY = 'chat_message_perf_benchmarks_v1';
@@ -91,14 +89,6 @@ const readPersistedApiLogCount = (): number => {
         return 0;
     }
 };
-
-interface VirtuosoHandle {
-    scrollToIndex: (options: {
-        index: number;
-        align?: 'start' | 'center' | 'end';
-        behavior?: ScrollBehavior;
-    }) => void;
-}
 
 const Chat: React.FC = () => {
     // API logs state (defined before useChat so it can be passed as callback)
@@ -330,7 +320,7 @@ const Chat: React.FC = () => {
         handleRateMessage,
         enableProjectContextFeature,
     } = useChatViewState();
-    const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
+    const virtuosoRef = React.useRef<ChatVirtuosoHandle | null>(null);
     const searchResultPreviewCacheRef = React.useRef<Map<number, SearchResultPreviewCacheEntry>>(new Map());
     const rowMetadataCacheRef = React.useRef(createChatRowMetadataCacheState());
     const messageListRef = React.useRef<HTMLDivElement | null>(null);
@@ -761,7 +751,10 @@ const Chat: React.FC = () => {
 
     const handleToggleHistoryPanel = React.useCallback(() => {
         setShowHistory((prev) => !prev);
-    }, []);
+    }, [setShowHistory]);
+    const handleCloseHistoryPanel = React.useCallback(() => {
+        setShowHistory(false);
+    }, [setShowHistory]);
 
     const {
         handleOpenCodeIntegration,
@@ -1080,35 +1073,43 @@ const Chat: React.FC = () => {
         handleToggleGithubInput,
         handleProjectContextControlClick,
     });
+    const uiActionBundle = useChatUiActionBundle({
+        onToggleHistory: handleToggleHistoryPanel,
+        onCloseHistory: handleCloseHistoryPanel,
+        onOpenCodeIntegration: handleOpenCodeIntegration,
+        onOpenExportDialog: handleOpenExportDialog,
+        onExportSessionToObsidian: handleExportSessionToObsidian,
+        onSaveSessionToNotion: handleSaveSessionToNotion,
+        onSendSessionToSlack: handleSendSessionToSlack,
+        onSendSessionToDiscord: handleSendSessionToDiscord,
+        onSendSessionByEmail: handleSendSessionByEmail,
+        onOpenCalendarSchedule: handleOpenCalendarSchedule,
+        onToggleBottomControls: handleToggleBottomControls,
+        onToggleSuggestions: handleToggleSuggestions,
+        onSendComposerMessage: handleSendComposerMessage,
+    });
 
     return (
         <ChatWorkspaceShell
             showHistory={showHistory}
             isCompactViewport={isCompactViewport}
             historySidebar={(
-                <>
-                    <div className="p-4 border-b border-slate-800 font-bold flex justify-between items-center text-slate-200">
-                        <span className="flex items-center gap-2"><Clock size={16} /> Recent Chats</span>
-                        <button onClick={() => setShowHistory(false)} className="touch-target hover:text-white text-slate-400 transition-colors"><X size={18} /></button>
-                    </div>
-                    <React.Suspense fallback={<div className="p-4 text-xs text-slate-500">Loading chat history...</div>}>
-                        <SidebarHistory
-                            sessions={savedSessions}
-                            currentSessionId={sessionId}
-                            onLoadSession={handleLoadSession}
-                            onDeleteSession={deleteSession}
-                            onRenameSession={renameSession}
-                            onTogglePinSession={togglePinSession}
-                            isLoading={isLoadingSessions}
-                        />
-                    </React.Suspense>
-                </>
+                <ChatHistorySidebar
+                    sessions={savedSessions}
+                    currentSessionId={sessionId}
+                    onClose={uiActionBundle.history.close}
+                    onLoadSession={handleLoadSession}
+                    onDeleteSession={deleteSession}
+                    onRenameSession={renameSession}
+                    onTogglePinSession={togglePinSession}
+                    isLoading={isLoadingSessions}
+                />
             )}
             header={(
                 <ChatHeaderBar
                     isCompactViewport={isCompactViewport}
                     showHistory={showHistory}
-                    onToggleHistory={handleToggleHistoryPanel}
+                    onToggleHistory={uiActionBundle.history.toggle}
                     topHeaderPrimaryActions={topHeaderPrimaryActions}
                     experimentalFeatureActions={experimentalFeatureActions}
                     onOpenCloudSyncPanel={handleOpenCloudSyncPanel}
@@ -1116,16 +1117,16 @@ const Chat: React.FC = () => {
                     hasHistory={history.length > 0}
                     showTreeView={showTreeView}
                     integrationAvailability={integrationAvailability}
-                    onOpenCodeIntegration={handleOpenCodeIntegration}
+                    onOpenCodeIntegration={uiActionBundle.integrations.openCodeIntegration}
                     onClearChat={handleClearChat}
-                    onOpenExportDialog={handleOpenExportDialog}
+                    onOpenExportDialog={uiActionBundle.integrations.openExportDialog}
                     onToggleTreeView={handleToggleTreeView}
-                    onExportSessionToObsidian={handleExportSessionToObsidian}
-                    onSaveToNotion={handleSaveSessionToNotion}
-                    onSendToSlack={handleSendSessionToSlack}
-                    onSendToDiscord={handleSendSessionToDiscord}
-                    onSendToEmail={handleSendSessionByEmail}
-                    onOpenCalendarSchedule={handleOpenCalendarSchedule}
+                    onExportSessionToObsidian={uiActionBundle.integrations.exportSessionToObsidian}
+                    onSaveToNotion={uiActionBundle.integrations.saveSessionToNotion}
+                    onSendToSlack={uiActionBundle.integrations.sendSessionToSlack}
+                    onSendToDiscord={uiActionBundle.integrations.sendSessionToDiscord}
+                    onSendToEmail={uiActionBundle.integrations.sendSessionByEmail}
+                    onOpenCalendarSchedule={uiActionBundle.integrations.openCalendarSchedule}
                     battleMode={battleMode}
                     currentModel={currentModel}
                     secondaryModel={secondaryModel}
@@ -1165,40 +1166,19 @@ const Chat: React.FC = () => {
                     renderSearchResultItem={renderSearchResultItem}
                 />
             )}
-            summaryPanel={history.length >= 5 ? (
-                <div className="px-6 py-2">
-                    <React.Suspense fallback={<div className="text-xs text-slate-500">Loading summary...</div>}>
-                        <ConversationSummaryPanel
-                            sessionId={sessionId}
-                            messages={history}
-                            modelId={currentModel}
-                        />
-                    </React.Suspense>
-                </div>
-            ) : null}
-            contextWindowPanel={history.length > 0 ? (
-                <div className="px-6 pb-2">
-                    <div className="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2">
-                        <div className="flex items-center justify-between text-[11px] mb-2">
-                            <span className="text-slate-400 uppercase tracking-wider font-semibold">Context Window</span>
-                            <span className={`${contextUsage.warning ? 'text-amber-300' : 'text-slate-500'}`}>
-                                {Math.min(100, Math.round(contextUsage.fillRatio * 100))}% • {contextUsage.totalTokens.toLocaleString()} / {contextUsage.maxContextTokens.toLocaleString()} tokens
-                            </span>
-                        </div>
-                        <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
-                            <div
-                                className={`h-full transition-all duration-500 ${contextUsage.fillRatio >= 0.9 ? 'bg-red-500' : contextUsage.fillRatio >= 0.8 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                                style={{ width: `${Math.min(100, contextUsage.fillRatio * 100)}%` }}
-                            />
-                        </div>
-                        {contextUsage.warning && (
-                            <div className="mt-2 text-[11px] text-amber-300">
-                                Context is above 80%. Open Controls and use Context Optimizer to trim or auto-summarize.
-                            </div>
-                        )}
-                    </div>
-                </div>
-            ) : null}
+            summaryPanel={(
+                <ChatSummaryPanel
+                    history={history}
+                    sessionId={sessionId}
+                    modelId={currentModel}
+                />
+            )}
+            contextWindowPanel={(
+                <ChatContextWindowPanel
+                    hasHistory={history.length > 0}
+                    contextUsage={contextUsage}
+                />
+            )}
             messagesArea={(
                 <ChatMessagesViewport
                     messageListRef={messageListRef}
@@ -1224,85 +1204,64 @@ const Chat: React.FC = () => {
                 />
             )}
             composer={(
-                <ChatComposerShell
+                <ChatComposerArea
                     composerContainerRef={composerContainerRef}
                     isCompactViewport={isCompactViewport}
                     isDragging={isDragging}
                     onDragOver={handleComposerDragOver}
                     onDragLeave={handleComposerDragLeave}
                     onDrop={handleComposerDrop}
-                    attachmentsPanel={(
-                        <ComposerAttachmentsPanel
-                            attachments={attachments}
-                            imageAttachments={imageAttachments}
-                            onRemoveAttachment={removeAttachment}
-                            onRemoveImageAttachment={removeImageAttachment}
-                        />
-                    )}
-                    auxPanels={(
-                        <ComposerAuxPanels
-                            showSuggestions={showSuggestions}
-                            history={history}
-                            onSelectSuggestion={handleSelectSuggestion}
-                            onCloseSuggestions={handleCloseSuggestionsPanel}
-                            prefill={prefill}
-                            onPrefillChange={handlePrefillChange}
-                            showUrlInput={showUrlInput}
-                            urlInput={urlInput}
-                            onUrlInputChange={handleUrlInputChange}
-                            onUrlInputKeyDown={handleUrlInputKeyDown}
-                            onExecuteWebFetch={executeWebFetch}
-                            isFetchingWeb={isFetchingWeb}
-                            showGithubInput={showGithubInput}
-                            githubUrl={githubUrl}
-                            onGithubUrlChange={handleGithubUrlChange}
-                            onGithubInputKeyDown={handleGithubInputKeyDown}
-                            onExecuteGithubFetch={executeGithubFetch}
-                            isFetchingGithub={isFetchingGithub}
-                            githubConfigured={githubConfigured}
-                            projectContext={projectContext}
-                            includeContextInMessages={includeContextInMessages}
-                            onToggleIncludeContextInMessages={handleToggleIncludeContextInMessages}
-                            onClearProjectContext={handleClearProjectContext}
-                            onStartWatchingProjectContext={handleStartWatchingProjectContext}
-                            slashMatch={slashMatch}
-                            filteredPrompts={filteredPrompts}
-                            activePromptIndex={activePromptIndex}
-                            onInsertPrompt={insertPrompt}
-                        />
-                    )}
+                    attachments={attachments}
+                    imageAttachments={imageAttachments}
+                    onRemoveAttachment={removeAttachment}
+                    onRemoveImageAttachment={removeImageAttachment}
+                    showSuggestions={showSuggestions}
+                    history={history}
+                    onSelectSuggestion={handleSelectSuggestion}
+                    onCloseSuggestions={handleCloseSuggestionsPanel}
+                    prefill={prefill}
+                    onPrefillChange={handlePrefillChange}
+                    showUrlInput={showUrlInput}
+                    urlInput={urlInput}
+                    onUrlInputChange={handleUrlInputChange}
+                    onUrlInputKeyDown={handleUrlInputKeyDown}
+                    onExecuteWebFetch={executeWebFetch}
+                    isFetchingWeb={isFetchingWeb}
+                    showGithubInput={showGithubInput}
+                    githubUrl={githubUrl}
+                    onGithubUrlChange={handleGithubUrlChange}
+                    onGithubInputKeyDown={handleGithubInputKeyDown}
+                    onExecuteGithubFetch={executeGithubFetch}
+                    isFetchingGithub={isFetchingGithub}
+                    githubConfigured={githubConfigured}
+                    projectContext={projectContext}
+                    includeContextInMessages={includeContextInMessages}
+                    onToggleIncludeContextInMessages={handleToggleIncludeContextInMessages}
+                    onClearProjectContext={handleClearProjectContext}
+                    onStartWatchingProjectContext={handleStartWatchingProjectContext}
+                    slashMatch={slashMatch}
+                    filteredPrompts={filteredPrompts}
+                    activePromptIndex={activePromptIndex}
+                    onInsertPrompt={insertPrompt}
                     textareaRef={textareaRef}
                     input={input}
-                    slashMatchActive={Boolean(slashMatch)}
                     onInputChange={handleComposerInputChange}
                     onInputPaste={handleComposerInputPaste}
                     onInputKeyDown={handleComposerInputKeyDown}
                     showBottomControls={showBottomControls}
-                    actionButtons={(
-                        <ComposerActionButtons
-                            showBottomControls={showBottomControls}
-                            showSuggestions={showSuggestions}
-                            canToggleSuggestions={history.length > 0}
-                            canSend={Boolean(input.trim())}
-                            onToggleBottomControls={handleToggleBottomControls}
-                            onToggleSuggestions={handleToggleSuggestions}
-                            onSend={handleSendComposerMessage}
-                        />
-                    )}
-                    bottomControls={(
-                        <ComposerControlPills
-                            actions={composerControlPillActions}
-                            mcpAvailable={mcpAvailable}
-                            mcpConnectedCount={mcpConnectedCount}
-                            mcpToolCount={mcpTools.length}
-                            showExpertMenu={showExpertMenu}
-                            onSelectExpert={handleExpertSelect}
-                            showVariableMenu={showVariableMenu}
-                            onCloseVariableMenu={handleCloseVariableMenu}
-                            onInsertVariable={handleInsertVariable}
-                            variableContext={composerVariableContext}
-                        />
-                    )}
+                    onToggleBottomControls={uiActionBundle.composer.toggleBottomControls}
+                    onToggleSuggestions={uiActionBundle.composer.toggleSuggestions}
+                    onSendComposerMessage={uiActionBundle.composer.sendMessage}
+                    composerControlPillActions={composerControlPillActions}
+                    mcpAvailable={mcpAvailable}
+                    mcpConnectedCount={mcpConnectedCount}
+                    mcpToolCount={mcpTools.length}
+                    showExpertMenu={showExpertMenu}
+                    onSelectExpert={handleExpertSelect}
+                    showVariableMenu={showVariableMenu}
+                    onCloseVariableMenu={handleCloseVariableMenu}
+                    onInsertVariable={handleInsertVariable}
+                    composerVariableContext={composerVariableContext}
                 />
             )}
             sidebar={(

@@ -42,6 +42,24 @@ export interface ChatCompletionParams {
     maxTokens?: number;
 }
 
+interface ChatCompletionResponseBody {
+    choices?: Array<{
+        message?: {
+            content?: string;
+        };
+    }>;
+    usage?: {
+        total_tokens?: number;
+    };
+}
+
+const parseChatCompletionBody = (body: unknown): ChatCompletionResponseBody | null => {
+    if (!body || typeof body !== 'object') {
+        return null;
+    }
+    return body as ChatCompletionResponseBody;
+};
+
 export const useChatExternalActions = ({
     availableModels,
     currentModel,
@@ -90,7 +108,7 @@ export const useChatExternalActions = ({
             throw new Error(`API error (${response.status}): ${response.statusText}`);
         }
 
-        const data = response.body as any;
+        const data = parseChatCompletionBody(response.body);
         const content = data?.choices?.[0]?.message?.content || '';
         const tokensUsed = data?.usage?.total_tokens;
 
@@ -124,8 +142,9 @@ export const useChatExternalActions = ({
             } else {
                 toast.error(result.error || 'Failed to fetch file');
             }
-        } catch (error: any) {
-            toast.error(error.message || 'Failed to fetch from GitHub');
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Failed to fetch from GitHub';
+            toast.error(message);
         } finally {
             setIsFetchingGithub(false);
         }

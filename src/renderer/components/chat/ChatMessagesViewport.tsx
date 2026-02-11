@@ -2,6 +2,7 @@ import React from 'react';
 import { AnimatePresence } from 'framer-motion';
 import type { ChatMessage } from '../../../shared/types';
 import type { LaunchReadinessStep } from '../ChatEmptyState';
+import type { ChatVirtuosoComponent, ChatVirtuosoHandle } from '../../lib/chatVirtuosoTypes';
 import {
     type ChatMessageAction,
     type ChatMessageActionCapabilities,
@@ -9,22 +10,14 @@ import {
 import { LongPressActionMenu } from './ChatInlinePanels';
 import { ChatEmptyState } from './chatLazyPanels';
 
-interface VirtuosoHandleLike {
-    scrollToIndex: (options: {
-        index: number;
-        align?: 'start' | 'center' | 'end';
-        behavior?: ScrollBehavior;
-    }) => void;
-}
-
 interface ChatMessagesViewportProps {
     messageListRef: React.RefObject<HTMLDivElement | null>;
     longPressMenuRef: React.RefObject<HTMLDivElement | null>;
     swipeSessionIndicator: 'previous' | 'next' | null;
     history: ChatMessage[];
     isLoadingMessages: boolean;
-    VirtuosoComponent: React.ComponentType<Record<string, unknown>> | null;
-    virtuosoRef: React.RefObject<VirtuosoHandleLike | null>;
+    VirtuosoComponent: ChatVirtuosoComponent | null;
+    virtuosoRef: React.RefObject<ChatVirtuosoHandle | null>;
     messageListFooterHeight: number;
     renderItemContent: (index: number, msg: ChatMessage) => React.ReactNode;
     showBottomControls: boolean;

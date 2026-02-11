@@ -1,9 +1,11 @@
 import React from 'react';
+import type { ChatVirtuosoHandle } from '../lib/chatVirtuosoTypes';
+import { getBrowserPerformanceMemory } from '../lib/performanceMemory';
 
 interface UseChatDevMonitorsParams {
     enabled: boolean;
     historyLength: number;
-    virtuosoRef: React.RefObject<any>;
+    virtuosoRef: React.RefObject<ChatVirtuosoHandle | null>;
     virtuosoReadyKey: unknown;
 }
 
@@ -16,14 +18,14 @@ export const useChatDevMonitors = ({
     const fpsFrameCount = React.useRef(0);
     const fpsLastTime = React.useRef(performance.now());
     const fpsAnimationFrameId = React.useRef<number | null>(null);
-    const memoryMonitorInterval = React.useRef<NodeJS.Timeout | null>(null);
+    const memoryMonitorInterval = React.useRef<ReturnType<typeof setInterval> | null>(null);
     const lastMemoryWarning = React.useRef<number>(0);
 
     React.useEffect(() => {
         if (!enabled) return;
 
         let isScrolling = false;
-        let scrollTimeout: NodeJS.Timeout;
+        let scrollTimeout: ReturnType<typeof setTimeout>;
 
         const measureFPS = () => {
             fpsFrameCount.current += 1;
@@ -81,8 +83,8 @@ export const useChatDevMonitors = ({
         if (!enabled) return;
 
         const monitorMemory = () => {
-            if ((performance as any).memory) {
-                const memory = (performance as any).memory;
+            const memory = getBrowserPerformanceMemory();
+            if (memory) {
                 const usedMB = Math.round(memory.usedJSHeapSize / 1024 / 1024);
                 const totalMB = Math.round(memory.totalJSHeapSize / 1024 / 1024);
                 const limitMB = Math.round(memory.jsHeapSizeLimit / 1024 / 1024);

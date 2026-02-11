@@ -1,6 +1,7 @@
 import React from 'react';
 import { Check, ChevronDown, ChevronUp, Search, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import type { ChatVirtuosoComponent } from '../../lib/chatVirtuosoTypes';
 
 export interface SearchResultRowProps {
     resultIndex: number;
@@ -135,7 +136,7 @@ export interface ChatSearchPanelProps {
     onPreviousSearchResult: () => void;
     onNextSearchResult: () => void;
     onCloseSearch: () => void;
-    virtuosoComponent: React.ComponentType<any> | null;
+    virtuosoComponent: ChatVirtuosoComponent | null;
     renderSearchResultItem: (resultIndex: number) => React.ReactNode;
 }
 

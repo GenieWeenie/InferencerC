@@ -9,6 +9,7 @@ import {
 } from '../lib/chatComposerHandlers';
 import type { PromptSnippet } from './usePrompts';
 import type { ProjectContext } from '../services/projectContext';
+import type { loadProjectContextService as loadProjectContextServiceFn } from '../lib/chatLazyServices';
 
 interface UseChatComposerInteractionsParams {
     setShowBottomControls: React.Dispatch<React.SetStateAction<boolean>>;
@@ -35,7 +36,7 @@ interface UseChatComposerInteractionsParams {
     addImageAttachment: (file: { name: string; mimeType: string; base64: string; thumbnailUrl: string }) => void;
     projectContext: ProjectContext | null;
     enableProjectContextFeature: () => void;
-    loadProjectContextService: () => Promise<any>;
+    loadProjectContextService: typeof loadProjectContextServiceFn;
 }
 
 export const useChatComposerInteractions = ({

@@ -1,6 +1,7 @@
 import React from 'react';
 import type { IntegrationAvailability } from '../components/chat/ChatHeaderCluster';
 import { readIntegrationAvailability } from '../lib/chatIntegrations';
+import type { ChatVirtuosoComponent } from '../lib/chatVirtuosoTypes';
 
 const CLOUD_SYNC_CONFIG_KEY = 'cloud_sync_config_v1';
 const MCP_SERVERS_CONFIG_KEY = 'mcp_servers';
@@ -102,7 +103,7 @@ export const useChatLifecycleState = ({
 }: UseChatLifecycleStateParams) => {
     const [hasConfiguredMcpServers, setHasConfiguredMcpServers] = React.useState(readHasConfiguredMcpServers);
     const [responsiveConfig, setResponsiveConfig] = React.useState<ResponsiveConfig>(() => getFallbackResponsiveConfig());
-    const [VirtuosoComponent, setVirtuosoComponent] = React.useState<React.ComponentType<Record<string, unknown>> | null>(null);
+    const [VirtuosoComponent, setVirtuosoComponent] = React.useState<ChatVirtuosoComponent | null>(null);
     const [isCloudSyncAuthenticated, setIsCloudSyncAuthenticated] = React.useState<boolean>(readCloudSyncAuthSnapshot);
     const [githubConfigured, setGithubConfigured] = React.useState<boolean>(readHasGithubCredentialSnapshot);
     const [integrationAvailability, setIntegrationAvailability] = React.useState<IntegrationAvailability>(EMPTY_INTEGRATION_AVAILABILITY);
@@ -173,7 +174,7 @@ export const useChatLifecycleState = ({
         import('react-virtuoso')
             .then((mod) => {
                 if (cancelled) return;
-                setVirtuosoComponent(() => mod.Virtuoso as React.ComponentType<Record<string, unknown>>);
+                setVirtuosoComponent(() => mod.Virtuoso as ChatVirtuosoComponent);
             })
             .catch(() => {
                 // Keep fallback UI if loading fails; app remains usable.

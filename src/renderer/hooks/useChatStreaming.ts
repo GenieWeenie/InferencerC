@@ -4,6 +4,7 @@ import { ChatMessage, Message, ToolCall } from '../../shared/types';
 import { HistoryService } from '../services/history';
 import { AVAILABLE_TOOLS } from '../lib/tools';
 import { simulateLogprobs } from '../lib/chatUtils';
+import type { ChatApiLogCallback } from '../lib/chatApiLogTypes';
 import {
     applyChatStreamChunk,
     consumeChatStreamContent,
@@ -15,21 +16,8 @@ import {
     mapChatRequestErrorMessage,
 } from '../lib/chatStreamingRequest';
 
-interface ApiLogCallback {
-    (log: {
-        id: string;
-        timestamp: number;
-        type: 'request' | 'response' | 'error';
-        model: string;
-        request?: unknown;
-        response?: unknown;
-        error?: string;
-        duration?: number;
-    }): void;
-}
-
 interface UseChatStreamingParams {
-    onApiLog?: ApiLogCallback;
+    onApiLog?: ChatApiLogCallback;
     openRouterApiKey: string | null;
     temperature: number;
     topP: number;
@@ -321,12 +309,12 @@ export const useChatStreaming = ({
                     duration: totalTime,
                 });
             }
-        } catch (error: any) {
-            if (error?.name === 'AbortError') {
+        } catch (error: unknown) {
+            if (error instanceof Error && error.name === 'AbortError') {
                 return;
             }
 
-            const originalErrorMessage = error?.message || 'Unknown error';
+            const originalErrorMessage = error instanceof Error ? error.message : 'Unknown error';
             const errorMessage = mapChatRequestErrorMessage(modelId, originalErrorMessage);
 
             if (onApiLog) {

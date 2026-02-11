@@ -26,20 +26,11 @@ import {
     loadEnterpriseComplianceService,
     loadWebhookService,
 } from '../lib/useChatLazyServices';
+import type { ChatApiLogCallback } from '../lib/chatApiLogTypes';
 import type { SelectedTokenContext } from '../lib/chatSelectionTypes';
+import { getBrowserPerformanceMemory } from '../lib/performanceMemory';
 
-export interface ApiLogCallback {
-    (log: {
-        id: string;
-        timestamp: number;
-        type: 'request' | 'response' | 'error';
-        model: string;
-        request?: any;
-        response?: any;
-        error?: string;
-        duration?: number;
-    }): void;
-}
+export type ApiLogCallback = ChatApiLogCallback;
 
 export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = true) => {
     const didBootstrapSessionsRef = useRef(false);
@@ -127,7 +118,7 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         }
     }, []);
 
-    const logComplianceEvent = useCallback((event: any) => {
+    const logComplianceEvent = useCallback((event: Record<string, unknown>) => {
         void loadEnterpriseComplianceService()
             .then((service) => service.logEvent(event))
             .catch(() => {
@@ -242,8 +233,8 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
 
     // Memory monitoring for long conversations
     useEffect(() => {
-        if ((performance as any).memory) {
-            const memory = (performance as any).memory;
+        const memory = getBrowserPerformanceMemory();
+        if (memory) {
             const usedMB = Math.round(memory.usedJSHeapSize / 1024 / 1024);
             const limitMB = Math.round(memory.jsHeapSizeLimit / 1024 / 1024);
             const loadedCount = loadedMessageIndices.size;
