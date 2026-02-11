@@ -112,6 +112,14 @@ const sanitizeStringArray = (value: unknown): string[] => {
     return output;
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 const sanitizeSyncItemState = (value: unknown): SyncItemState | null => {
     if (!isRecord(value)
         || !isFiniteNumber(value.serverVersion)
@@ -433,6 +441,36 @@ export interface CloudSyncStatus {
 
 const CONFIG_KEY = 'cloud_sync_config_v1';
 const STATE_PREFIX = 'cloud_sync_state_v1_';
+const DEFAULT_CLOUD_SYNC_BASE_URL = 'http://localhost:3000';
+const generateCloudSyncDeviceId = (): string => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return `cloud-sync-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const sanitizeCloudSyncConfig = (
+    value: unknown,
+    fallbackDeviceId?: string
+): CloudSyncConfig => {
+    const source = isRecord(value) ? value : {};
+    const normalizedBaseUrl = sanitizeNonEmptyString(source.baseUrl);
+    const deviceId = sanitizeNonEmptyString(source.deviceId) || fallbackDeviceId || generateCloudSyncDeviceId();
+
+    return {
+        enabled: typeof source.enabled === 'boolean' ? source.enabled : true,
+        baseUrl: (normalizedBaseUrl ? normalizedBaseUrl.replace(/\/+$/, '') : DEFAULT_CLOUD_SYNC_BASE_URL)
+            || DEFAULT_CLOUD_SYNC_BASE_URL,
+        token: sanitizeNonEmptyString(source.token) || undefined,
+        accountId: sanitizeNonEmptyString(source.accountId) || undefined,
+        email: sanitizeNonEmptyString(source.email) || undefined,
+        encryptionSalt: sanitizeNonEmptyString(source.encryptionSalt) || undefined,
+        deviceId,
+        syncSettings: typeof source.syncSettings === 'boolean' ? source.syncSettings : true,
+        syncTemplates: typeof source.syncTemplates === 'boolean' ? source.syncTemplates : true,
+        selectedConversationIds: sanitizeStringArray(source.selectedConversationIds),
+    };
+};
 
 const SETTINGS_KEYS = [
     'app_theme',
@@ -454,51 +492,22 @@ class CloudSyncService {
     }
 
     private loadConfig(): CloudSyncConfig {
+        const fallbackDeviceId = generateCloudSyncDeviceId();
         try {
             const raw = localStorage.getItem(CONFIG_KEY);
             if (raw) {
                 const parsedUnknown = parseJson(raw);
-                const parsed = isRecord(parsedUnknown) ? parsedUnknown : {};
-                const selectedConversationIds = sanitizeStringArray(parsed.selectedConversationIds);
-                const baseUrl = typeof parsed.baseUrl === 'string'
-                    ? parsed.baseUrl.trim().replace(/\/$/, '')
-                    : 'http://localhost:3000';
-                return {
-                    enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : true,
-                    baseUrl: baseUrl || 'http://localhost:3000',
-                    token: typeof parsed.token === 'string' && parsed.token.trim()
-                        ? parsed.token.trim()
-                        : undefined,
-                    accountId: typeof parsed.accountId === 'string' && parsed.accountId.trim()
-                        ? parsed.accountId.trim()
-                        : undefined,
-                    email: typeof parsed.email === 'string' && parsed.email.trim()
-                        ? parsed.email.trim()
-                        : undefined,
-                    encryptionSalt: typeof parsed.encryptionSalt === 'string' && parsed.encryptionSalt.trim()
-                        ? parsed.encryptionSalt.trim()
-                        : undefined,
-                    deviceId: typeof parsed.deviceId === 'string' && parsed.deviceId.trim().length > 0 ? parsed.deviceId : crypto.randomUUID(),
-                    syncSettings: typeof parsed.syncSettings === 'boolean' ? parsed.syncSettings : true,
-                    syncTemplates: typeof parsed.syncTemplates === 'boolean' ? parsed.syncTemplates : true,
-                    selectedConversationIds,
-                };
+                return sanitizeCloudSyncConfig(parsedUnknown, fallbackDeviceId);
             }
         } catch (error) {
             console.error('Failed to load cloud sync config:', error);
         }
 
-        return {
-            enabled: true,
-            baseUrl: 'http://localhost:3000',
-            deviceId: crypto.randomUUID(),
-            syncSettings: true,
-            syncTemplates: true,
-            selectedConversationIds: [],
-        };
+        return sanitizeCloudSyncConfig(null, fallbackDeviceId);
     }
 
     private saveConfig(): void {
+        this.config = sanitizeCloudSyncConfig(this.config, this.config.deviceId);
         localStorage.setItem(CONFIG_KEY, JSON.stringify(this.config));
     }
 
@@ -510,16 +519,14 @@ class CloudSyncService {
     }
 
     updateConfig(partial: Partial<CloudSyncConfig>): CloudSyncConfig {
-        const selectedConversationIds = partial.selectedConversationIds
-            ? sanitizeStringArray(partial.selectedConversationIds)
-            : this.config.selectedConversationIds;
-        const normalizedBaseUrl = (partial.baseUrl ?? this.config.baseUrl).trim().replace(/\/$/, '');
-        this.config = {
-            ...this.config,
-            ...partial,
-            baseUrl: normalizedBaseUrl || 'http://localhost:3000',
-            selectedConversationIds,
-        };
+        const partialRecord = isRecord(partial) ? partial : {};
+        this.config = sanitizeCloudSyncConfig(
+            {
+                ...this.config,
+                ...partialRecord,
+            },
+            this.config.deviceId
+        );
         this.saveConfig();
         return this.getConfig();
     }

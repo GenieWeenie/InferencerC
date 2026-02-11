@@ -48,6 +48,14 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 export class ContextualHelpService {
     private static instance: ContextualHelpService;
     private readonly STORAGE_KEY = 'contextual_help';
@@ -69,26 +77,27 @@ export class ContextualHelpService {
         if (!isRecord(value)) {
             return null;
         }
-        if (
-            typeof value.id !== 'string'
-            || typeof value.target !== 'string'
-            || typeof value.title !== 'string'
-            || typeof value.content !== 'string'
-        ) {
+        const id = sanitizeNonEmptyString(value.id);
+        const target = sanitizeNonEmptyString(value.target);
+        const title = sanitizeNonEmptyString(value.title);
+        const content = sanitizeNonEmptyString(value.content);
+        if (!id || !target || !title || !content) {
             return null;
         }
         return {
-            id: value.id,
-            target: value.target,
-            title: value.title,
-            content: value.content,
+            id,
+            target,
+            title,
+            content,
             position: TOOLTIP_POSITIONS.has(value.position as NonNullable<HelpTooltip['position']>)
                 ? value.position as NonNullable<HelpTooltip['position']>
                 : undefined,
             trigger: TOOLTIP_TRIGGERS.has(value.trigger as NonNullable<HelpTooltip['trigger']>)
                 ? value.trigger as NonNullable<HelpTooltip['trigger']>
                 : undefined,
-            delay: typeof value.delay === 'number' && Number.isFinite(value.delay) ? value.delay : undefined,
+            delay: typeof value.delay === 'number' && Number.isFinite(value.delay)
+                ? Math.max(0, Math.floor(value.delay))
+                : undefined,
             persistent: typeof value.persistent === 'boolean' ? value.persistent : undefined,
         };
     }
@@ -98,9 +107,19 @@ export class ContextualHelpService {
         if (!Array.isArray(parsed)) {
             return [];
         }
+        const seenIds = new Set<string>();
         return parsed
             .map((entry) => this.sanitizeTooltip(entry))
-            .filter((entry): entry is HelpTooltip => entry !== null);
+            .filter((entry): entry is HelpTooltip => {
+                if (!entry) {
+                    return false;
+                }
+                if (seenIds.has(entry.id)) {
+                    return false;
+                }
+                seenIds.add(entry.id);
+                return true;
+            });
     }
 
     /**
@@ -208,7 +227,20 @@ export class ContextualHelpService {
      */
     private saveTooltips(): void {
         try {
-            const tooltips = Array.from(this.tooltips.values());
+            const seenIds = new Set<string>();
+            const tooltips = Array.from(this.tooltips.values())
+                .map((entry) => this.sanitizeTooltip(entry))
+                .filter((entry): entry is HelpTooltip => {
+                    if (!entry) {
+                        return false;
+                    }
+                    if (seenIds.has(entry.id)) {
+                        return false;
+                    }
+                    seenIds.add(entry.id);
+                    return true;
+                });
+            this.tooltips = new Map(tooltips.map((entry) => [entry.id, entry]));
             localStorage.setItem(this.STORAGE_KEY, JSON.stringify(tooltips));
         } catch (error) {
             console.error('Failed to save tooltips:', error);
@@ -240,7 +272,11 @@ export class ContextualHelpService {
      * Get tooltip by ID
      */
     getTooltip(id: string): HelpTooltip | null {
-        return this.tooltips.get(id) || null;
+        const normalizedId = sanitizeNonEmptyString(id);
+        if (!normalizedId) {
+            return null;
+        }
+        return this.tooltips.get(normalizedId) || null;
     }
 
     /**
@@ -254,7 +290,11 @@ export class ContextualHelpService {
      * Add or update tooltip
      */
     setTooltip(tooltip: HelpTooltip): void {
-        this.tooltips.set(tooltip.id, tooltip);
+        const sanitized = this.sanitizeTooltip(tooltip);
+        if (!sanitized) {
+            return;
+        }
+        this.tooltips.set(sanitized.id, sanitized);
         this.saveTooltips();
     }
 
@@ -262,7 +302,11 @@ export class ContextualHelpService {
      * Remove tooltip
      */
     removeTooltip(id: string): void {
-        this.tooltips.delete(id);
+        const normalizedId = sanitizeNonEmptyString(id);
+        if (!normalizedId) {
+            return;
+        }
+        this.tooltips.delete(normalizedId);
         this.saveTooltips();
     }
 

@@ -33,7 +33,7 @@ export interface TopicCluster {
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const isFiniteNumber = (value: unknown): value is number => (
@@ -50,6 +50,14 @@ const parseJson = (raw: string): unknown => {
     } catch {
         return null;
     }
+};
+
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
 };
 
 const sanitizeNumberArray = (value: unknown): number[] => {
@@ -149,9 +157,19 @@ const sanitizeTopicModel = (value: unknown): TopicModel | null => {
         return null;
     }
 
+    const seenTopicIds = new Set<string>();
     const topics = value.topics
         .map((entry) => sanitizeTopic(entry))
-        .filter((entry): entry is Topic => entry !== null);
+        .filter((entry): entry is Topic => {
+            if (!entry) {
+                return false;
+            }
+            if (seenTopicIds.has(entry.id)) {
+                return false;
+            }
+            seenTopicIds.add(entry.id);
+            return true;
+        });
 
     const primaryTopic = sanitizeTopic(value.primaryTopic);
     const primaryTopicId = primaryTopic?.id;
@@ -174,9 +192,19 @@ const parseStoredModels = (raw: string): TopicModel[] => {
         return [];
     }
 
+    const seenSessionIds = new Set<string>();
     return parsed
         .map((entry) => sanitizeTopicModel(entry))
-        .filter((entry): entry is TopicModel => entry !== null);
+        .filter((entry): entry is TopicModel => {
+            if (!entry) {
+                return false;
+            }
+            if (seenSessionIds.has(entry.sessionId)) {
+                return false;
+            }
+            seenSessionIds.add(entry.sessionId);
+            return true;
+        });
 };
 
 export class TopicModelingService {
@@ -368,10 +396,14 @@ export class TopicModelingService {
      */
     getTopicModel(sessionId: string): TopicModel | null {
         try {
+            const normalizedSessionId = sanitizeNonEmptyString(sessionId);
+            if (!normalizedSessionId) {
+                return null;
+            }
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return null;
             const models = parseStoredModels(stored);
-            return models.find(m => m.sessionId === sessionId) || null;
+            return models.find(m => m.sessionId === normalizedSessionId) || null;
         } catch (error) {
             console.error('Failed to load topic model:', error);
             return null;
@@ -397,15 +429,32 @@ export class TopicModelingService {
      */
     private saveTopicModel(model: TopicModel): void {
         try {
+            const sanitizedModel = sanitizeTopicModel(model);
+            if (!sanitizedModel) {
+                return;
+            }
             const stored = localStorage.getItem(this.STORAGE_KEY);
             const models = stored ? parseStoredModels(stored) : [];
-            const index = models.findIndex(m => m.sessionId === model.sessionId);
+            const index = models.findIndex(m => m.sessionId === sanitizedModel.sessionId);
             if (index >= 0) {
-                models[index] = model;
+                models[index] = sanitizedModel;
             } else {
-                models.push(model);
+                models.push(sanitizedModel);
             }
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(models));
+            const seenSessionIds = new Set<string>();
+            const persisted = models
+                .map((entry) => sanitizeTopicModel(entry))
+                .filter((entry): entry is TopicModel => {
+                    if (!entry) {
+                        return false;
+                    }
+                    if (seenSessionIds.has(entry.sessionId)) {
+                        return false;
+                    }
+                    seenSessionIds.add(entry.sessionId);
+                    return true;
+                });
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(persisted));
         } catch (error) {
             console.error('Failed to save topic model:', error);
         }

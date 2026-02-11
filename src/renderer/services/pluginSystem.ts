@@ -236,19 +236,10 @@ export class PluginSystemService {
                 }
 
                 parsed.forEach((entry) => {
-                    if (!isRecord(entry) || !this.validateManifest(entry.manifest)) {
+                    const hydrated = this.sanitizePersistedPlugin(entry);
+                    if (!hydrated) {
                         return;
                     }
-                    const manifest = this.normalizeManifest(entry.manifest);
-                    const installedAt = this.normalizeTimestamp(entry.installedAt);
-                    const hydrated: Plugin = {
-                        manifest,
-                        enabled: typeof entry.enabled === 'boolean' ? entry.enabled : false,
-                        installedAt,
-                        lastUpdated: isFiniteNumber(entry.lastUpdated)
-                            ? this.normalizeTimestamp(entry.lastUpdated)
-                            : undefined,
-                    };
                     this.plugins.set(hydrated.manifest.id, hydrated);
                     if (hydrated.enabled) {
                         this.registerPluginContributions(hydrated);
@@ -265,11 +256,39 @@ export class PluginSystemService {
      */
     private savePlugins(): void {
         try {
-            const plugins = Array.from(this.plugins.values()).map(({ instance: _instance, ...plugin }) => plugin);
+            const seenIds = new Set<string>();
+            const plugins = Array.from(this.plugins.values())
+                .map((entry) => this.sanitizePersistedPlugin(entry))
+                .filter((entry): entry is Plugin => {
+                    if (!entry) {
+                        return false;
+                    }
+                    if (seenIds.has(entry.manifest.id)) {
+                        return false;
+                    }
+                    seenIds.add(entry.manifest.id);
+                    return true;
+                })
+                .map(({ instance: _instance, ...plugin }) => plugin);
             this.storageSet(this.STORAGE_KEY, JSON.stringify(plugins));
         } catch (error) {
             console.error('Failed to save plugins:', error);
         }
+    }
+
+    private sanitizePersistedPlugin(value: unknown): Plugin | null {
+        if (!isRecord(value) || !this.validateManifest(value.manifest)) {
+            return null;
+        }
+        const manifest = this.normalizeManifest(value.manifest as PluginManifest);
+        return {
+            manifest,
+            enabled: typeof value.enabled === 'boolean' ? value.enabled : false,
+            installedAt: this.normalizeTimestamp(value.installedAt),
+            lastUpdated: isFiniteNumber(value.lastUpdated)
+                ? this.normalizeTimestamp(value.lastUpdated)
+                : undefined,
+        };
     }
 
     private hasUsableLocalStorage(): boolean {

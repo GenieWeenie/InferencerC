@@ -107,7 +107,7 @@ interface OpenAPIDocument {
 const HTTP_METHODS = new Set<APIEndpoint['method']>(['GET', 'POST', 'PUT', 'DELETE', 'PATCH']);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const isFiniteNumber = (value: unknown): value is number => (
@@ -120,6 +120,14 @@ const parseJson = (raw: string): unknown => {
     } catch {
         return null;
     }
+};
+
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
 };
 
 const sanitizeParameter = (value: unknown): APIParameter | null => {
@@ -323,24 +331,55 @@ const sanitizeDocumentationPayload = (
         return null;
     }
 
-    const title = typeof value.title === 'string' && value.title.trim()
-        ? value.title.trim()
-        : fallbackTitle;
+    const title = sanitizeNonEmptyString(value.title) || fallbackTitle;
 
+    const seenEndpointSignatures = new Set<string>();
     const endpoints = Array.isArray(value.endpoints)
         ? value.endpoints
             .map((entry) => sanitizeEndpoint(entry))
-            .filter((entry): entry is APIEndpoint => entry !== null)
+            .filter((entry): entry is APIEndpoint => {
+                if (!entry) {
+                    return false;
+                }
+                const signature = `${entry.method}:${entry.path}`;
+                if (seenEndpointSignatures.has(signature)) {
+                    return false;
+                }
+                seenEndpointSignatures.add(signature);
+                return true;
+            })
         : [];
+    const seenModelNames = new Set<string>();
     const models = Array.isArray(value.models)
         ? value.models
             .map((entry) => sanitizeModel(entry))
-            .filter((entry): entry is APIModel => entry !== null)
+            .filter((entry): entry is APIModel => {
+                if (!entry) {
+                    return false;
+                }
+                const signature = entry.name.toLowerCase();
+                if (seenModelNames.has(signature)) {
+                    return false;
+                }
+                seenModelNames.add(signature);
+                return true;
+            })
         : [];
+    const seenExampleSignatures = new Set<string>();
     const examples = Array.isArray(value.examples)
         ? value.examples
             .map((entry) => sanitizeExample(entry))
-            .filter((entry): entry is APIExample => entry !== null)
+            .filter((entry): entry is APIExample => {
+                if (!entry) {
+                    return false;
+                }
+                const signature = `${entry.title}:${entry.request.method}:${entry.request.url}`;
+                if (seenExampleSignatures.has(signature)) {
+                    return false;
+                }
+                seenExampleSignatures.add(signature);
+                return true;
+            })
         : [];
 
     return {
@@ -385,9 +424,19 @@ const parseStoredDocumentations = (raw: string): APIDocumentation[] => {
         return [];
     }
 
+    const seenIds = new Set<string>();
     return parsed
         .map((entry) => sanitizeStoredDocumentation(entry))
-        .filter((entry): entry is APIDocumentation => entry !== null);
+        .filter((entry): entry is APIDocumentation => {
+            if (!entry) {
+                return false;
+            }
+            if (seenIds.has(entry.id)) {
+                return false;
+            }
+            seenIds.add(entry.id);
+            return true;
+        });
 };
 
 export class APIDocsGeneratorService {
@@ -655,7 +704,20 @@ export class APIDocsGeneratorService {
             } else {
                 documentations.push(sanitized);
             }
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(documentations));
+            const seenIds = new Set<string>();
+            const persisted = documentations
+                .map((entry) => sanitizeStoredDocumentation(entry))
+                .filter((entry): entry is APIDocumentation => {
+                    if (!entry) {
+                        return false;
+                    }
+                    if (seenIds.has(entry.id)) {
+                        return false;
+                    }
+                    seenIds.add(entry.id);
+                    return true;
+                });
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(persisted));
         } catch (error) {
             console.error('Failed to save documentation:', error);
         }
@@ -666,10 +728,14 @@ export class APIDocsGeneratorService {
      */
     getDocumentation(sessionId: string): APIDocumentation | null {
         try {
+            const normalizedSessionId = sanitizeNonEmptyString(sessionId);
+            if (!normalizedSessionId) {
+                return null;
+            }
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return null;
             const documentations = parseStoredDocumentations(stored);
-            return documentations.find(d => d.sessionId === sessionId) || null;
+            return documentations.find(d => d.sessionId === normalizedSessionId) || null;
         } catch (error) {
             console.error('Failed to load documentation:', error);
             return null;
