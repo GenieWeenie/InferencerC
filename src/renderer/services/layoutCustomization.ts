@@ -27,6 +27,95 @@ export interface LayoutConfig {
     customPresets: LayoutPreset[];
 }
 
+const PANEL_TYPES = new Set<PanelConfig['type']>(['sidebar', 'inspector', 'history', 'prompts', 'controls']);
+const PANEL_POSITIONS = new Set<PanelConfig['position']>(['left', 'right', 'top', 'bottom']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const clonePanel = (panel: PanelConfig): PanelConfig => ({ ...panel });
+
+const sanitizePanel = (value: unknown): PanelConfig | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || !PANEL_TYPES.has(value.type as PanelConfig['type'])
+        || !PANEL_POSITIONS.has(value.position as PanelConfig['position'])
+        || typeof value.size !== 'number'
+        || typeof value.visible !== 'boolean'
+        || typeof value.order !== 'number') {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        type: value.type as PanelConfig['type'],
+        position: value.position as PanelConfig['position'],
+        size: value.size,
+        visible: value.visible,
+        order: value.order,
+    };
+};
+
+const sanitizePreset = (value: unknown): LayoutPreset | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || typeof value.description !== 'string'
+        || typeof value.createdAt !== 'number'
+        || !Array.isArray(value.panels)) {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        name: value.name,
+        description: value.description,
+        panels: value.panels
+            .map((entry) => sanitizePanel(entry))
+            .filter((entry): entry is PanelConfig => entry !== null),
+        createdAt: value.createdAt,
+    };
+};
+
+const sanitizeLayout = (value: unknown, defaults: LayoutConfig): LayoutConfig => {
+    if (!isRecord(value)) {
+        return {
+            panels: defaults.panels.map(clonePanel),
+            customPresets: defaults.customPresets.map((preset) => ({
+                ...preset,
+                panels: preset.panels.map(clonePanel),
+            })),
+            currentPreset: defaults.currentPreset,
+        };
+    }
+
+    const panels = Array.isArray(value.panels)
+        ? value.panels
+            .map((entry) => sanitizePanel(entry))
+            .filter((entry): entry is PanelConfig => entry !== null)
+        : [];
+    const customPresets = Array.isArray(value.customPresets)
+        ? value.customPresets
+            .map((entry) => sanitizePreset(entry))
+            .filter((entry): entry is LayoutPreset => entry !== null)
+        : [];
+
+    return {
+        panels: panels.length > 0 ? panels : defaults.panels.map(clonePanel),
+        customPresets,
+        currentPreset: typeof value.currentPreset === 'string' ? value.currentPreset : undefined,
+    };
+};
+
 export class LayoutCustomizationService {
     private static instance: LayoutCustomizationService;
     private readonly STORAGE_KEY = 'layout_config';
@@ -58,12 +147,12 @@ export class LayoutCustomizationService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                return JSON.parse(stored);
+                return sanitizeLayout(parseJson(stored), this.defaultLayout);
             }
         } catch (error) {
             console.error('Failed to load layout config:', error);
         }
-        return this.defaultLayout;
+        return sanitizeLayout(null, this.defaultLayout);
     }
 
     /**
@@ -71,7 +160,8 @@ export class LayoutCustomizationService {
      */
     saveLayout(layout: LayoutConfig): void {
         try {
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(layout));
+            const sanitized = sanitizeLayout(layout, this.defaultLayout);
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(sanitized));
         } catch (error) {
             console.error('Failed to save layout config:', error);
         }
@@ -95,14 +185,19 @@ export class LayoutCustomizationService {
     reorderPanels(panelIds: string[]): void {
         const layout = this.getLayout();
         const panelMap = new Map(layout.panels.map(p => [p.id, p]));
-        layout.panels = panelIds.map((id, index) => {
+        const reordered = panelIds.map((id, index) => {
             const panel = panelMap.get(id);
             if (panel) {
                 panel.order = index;
                 return panel;
             }
             return null;
-        }).filter(Boolean) as PanelConfig[];
+        }).filter((panel): panel is PanelConfig => panel !== null);
+        const knownIds = new Set(reordered.map((panel) => panel.id));
+        const remaining = layout.panels
+            .filter((panel) => !knownIds.has(panel.id))
+            .map((panel, index) => ({ ...panel, order: reordered.length + index }));
+        layout.panels = [...reordered, ...remaining];
         this.saveLayout(layout);
     }
 
@@ -115,7 +210,7 @@ export class LayoutCustomizationService {
             id: crypto.randomUUID(),
             name,
             description,
-            panels: JSON.parse(JSON.stringify(layout.panels)), // Deep clone
+            panels: layout.panels.map(clonePanel),
             createdAt: Date.now(),
         };
         layout.customPresets.push(preset);
@@ -130,7 +225,7 @@ export class LayoutCustomizationService {
         const layout = this.getLayout();
         const preset = layout.customPresets.find(p => p.id === presetId);
         if (preset) {
-            layout.panels = JSON.parse(JSON.stringify(preset.panels));
+            layout.panels = preset.panels.map(clonePanel);
             layout.currentPreset = presetId;
             this.saveLayout(layout);
         }
@@ -164,7 +259,7 @@ export class LayoutCustomizationService {
                 id: 'default',
                 name: 'Default',
                 description: 'Standard layout with all panels visible',
-                panels: this.defaultLayout.panels,
+                panels: this.defaultLayout.panels.map(clonePanel),
                 createdAt: 0,
             },
             {

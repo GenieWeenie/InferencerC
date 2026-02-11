@@ -33,6 +33,73 @@ export interface SummarizationOptions {
 const SUMMARY_CACHE_KEY = 'conversation_summaries';
 const SUMMARY_THRESHOLD = 10; // Generate summary after this many messages
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.filter((entry): entry is string => typeof entry === 'string');
+};
+
+const sanitizeSummary = (value: unknown): ConversationSummary | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.sessionId !== 'string'
+        || typeof value.summary !== 'string'
+        || typeof value.messageCount !== 'number'
+        || typeof value.generatedAt !== 'number') {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        sessionId: value.sessionId,
+        summary: value.summary,
+        keyPoints: sanitizeStringArray(value.keyPoints),
+        topics: sanitizeStringArray(value.topics),
+        messageCount: value.messageCount,
+        generatedAt: value.generatedAt,
+        lastMessageTimestamp: typeof value.lastMessageTimestamp === 'number'
+            ? value.lastMessageTimestamp
+            : undefined,
+    };
+};
+
+const parseStoredSummaries = (raw: string): ConversationSummary[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+    return parsed
+        .map((entry) => sanitizeSummary(entry))
+        .filter((entry): entry is ConversationSummary => entry !== null);
+};
+
+const sanitizeSummaryResponse = (
+    value: unknown
+): { summary: string; keyPoints?: string[]; topics?: string[] } | null => {
+    if (!isRecord(value) || typeof value.summary !== 'string') {
+        return null;
+    }
+
+    return {
+        summary: value.summary,
+        keyPoints: sanitizeStringArray(value.keyPoints),
+        topics: sanitizeStringArray(value.topics),
+    };
+};
+
 export class SummarizationService {
     private static cache = new Map<string, ConversationSummary>();
 
@@ -43,7 +110,7 @@ export class SummarizationService {
         try {
             const cached = localStorage.getItem(SUMMARY_CACHE_KEY);
             if (cached) {
-                const summaries: ConversationSummary[] = JSON.parse(cached);
+                const summaries = parseStoredSummaries(cached);
                 summaries.forEach(s => this.cache.set(s.sessionId, s));
             }
         } catch (error) {
@@ -227,13 +294,23 @@ ${conversationText}`;
     private static parseJsonResponse(content: string): { summary: string; keyPoints?: string[]; topics?: string[] } | null {
         try {
             // Try direct JSON parse
-            return JSON.parse(content);
+            const parsed = sanitizeSummaryResponse(parseJson(content));
+            if (parsed) {
+                return parsed;
+            }
         } catch {
+            // Continue to fallback parsing.
+        }
+
+        try {
             // Try to extract JSON from markdown code blocks
             const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
             if (jsonMatch) {
                 try {
-                    return JSON.parse(jsonMatch[1]);
+                    const parsed = sanitizeSummaryResponse(parseJson(jsonMatch[1]));
+                    if (parsed) {
+                        return parsed;
+                    }
                 } catch {
                     // Continue to fallback
                 }
@@ -243,7 +320,10 @@ ${conversationText}`;
             const objectMatch = content.match(/\{[\s\S]*\}/);
             if (objectMatch) {
                 try {
-                    return JSON.parse(objectMatch[0]);
+                    const parsed = sanitizeSummaryResponse(parseJson(objectMatch[0]));
+                    if (parsed) {
+                        return parsed;
+                    }
                 } catch {
                     // Continue to fallback
                 }
@@ -258,6 +338,8 @@ ${conversationText}`;
                 };
             }
 
+            return null;
+        } catch {
             return null;
         }
     }

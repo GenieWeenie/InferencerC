@@ -109,6 +109,113 @@ export interface ChainExecutionCallbacks {
 
 const CHAINS_STORAGE_KEY = 'prompt_chains';
 
+const CHAIN_STEP_TYPES = new Set<ChainStepType>(['prompt', 'transform', 'condition', 'aggregate']);
+const CHAIN_TRANSFORMS = new Set<NonNullable<ChainStep['transform']>>(['json_extract', 'summarize', 'format', 'custom']);
+const CHAIN_AGGREGATE_MODES = new Set<NonNullable<ChainStep['aggregateMode']>>(['concat', 'merge', 'list']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.filter((entry): entry is string => typeof entry === 'string');
+};
+
+const sanitizeStep = (value: unknown): ChainStep | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || !CHAIN_STEP_TYPES.has(value.type as ChainStepType)) {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        name: value.name,
+        type: value.type as ChainStepType,
+        prompt: typeof value.prompt === 'string' ? value.prompt : undefined,
+        systemPrompt: typeof value.systemPrompt === 'string' ? value.systemPrompt : undefined,
+        modelId: typeof value.modelId === 'string' ? value.modelId : undefined,
+        temperature: typeof value.temperature === 'number' ? value.temperature : undefined,
+        transform: CHAIN_TRANSFORMS.has(value.transform as NonNullable<ChainStep['transform']>)
+            ? value.transform as NonNullable<ChainStep['transform']>
+            : undefined,
+        transformConfig: isRecord(value.transformConfig) ? value.transformConfig : undefined,
+        condition: typeof value.condition === 'string' ? value.condition : undefined,
+        trueBranch: typeof value.trueBranch === 'string' ? value.trueBranch : undefined,
+        falseBranch: typeof value.falseBranch === 'string' ? value.falseBranch : undefined,
+        aggregateFrom: sanitizeStringArray(value.aggregateFrom),
+        aggregateMode: CHAIN_AGGREGATE_MODES.has(value.aggregateMode as NonNullable<ChainStep['aggregateMode']>)
+            ? value.aggregateMode as NonNullable<ChainStep['aggregateMode']>
+            : undefined,
+        dependsOn: sanitizeStringArray(value.dependsOn),
+        timeout: typeof value.timeout === 'number' ? value.timeout : undefined,
+        retryCount: typeof value.retryCount === 'number' ? value.retryCount : undefined,
+    };
+};
+
+const sanitizeChain = (value: unknown): PromptChain | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || typeof value.description !== 'string'
+        || typeof value.version !== 'number'
+        || !Array.isArray(value.steps)
+        || typeof value.outputStep !== 'string'
+        || typeof value.createdAt !== 'number'
+        || typeof value.updatedAt !== 'number'
+        || typeof value.usageCount !== 'number') {
+        return null;
+    }
+
+    const steps = value.steps
+        .map((entry) => sanitizeStep(entry))
+        .filter((entry): entry is ChainStep => entry !== null);
+    if (steps.length === 0) {
+        return null;
+    }
+
+    const outputStep = steps.some((step) => step.id === value.outputStep)
+        ? value.outputStep
+        : steps[steps.length - 1].id;
+
+    return {
+        id: value.id,
+        name: value.name,
+        description: value.description,
+        version: value.version,
+        steps,
+        inputSchema: isRecord(value.inputSchema) ? value.inputSchema : undefined,
+        outputStep,
+        createdAt: value.createdAt,
+        updatedAt: value.updatedAt,
+        usageCount: value.usageCount,
+        tags: sanitizeStringArray(value.tags),
+    };
+};
+
+const parseStoredChains = (raw: string): PromptChain[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeChain(entry))
+        .filter((entry): entry is PromptChain => entry !== null);
+};
+
 // Built-in chain templates
 const DEFAULT_CHAINS: PromptChain[] = [
     {
@@ -232,7 +339,7 @@ export class PromptChainingService {
         try {
             const stored = localStorage.getItem(CHAINS_STORAGE_KEY);
             if (stored) {
-                const chains: PromptChain[] = JSON.parse(stored);
+                const chains = parseStoredChains(stored);
                 chains.forEach(c => this.chains.set(c.id, c));
             }
 
@@ -278,17 +385,24 @@ export class PromptChainingService {
     ): PromptChain {
         this.init();
 
+        const sanitizedSteps = steps
+            .map((step) => sanitizeStep(step))
+            .filter((step): step is ChainStep => step !== null);
+        const resolvedOutputStep = sanitizedSteps.some((step) => step.id === outputStep)
+            ? outputStep
+            : (sanitizedSteps[sanitizedSteps.length - 1]?.id || outputStep);
+
         const chain: PromptChain = {
             id: `chain-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             name,
             description,
             version: 1,
-            steps,
-            outputStep,
+            steps: sanitizedSteps,
+            outputStep: resolvedOutputStep,
             createdAt: Date.now(),
             updatedAt: Date.now(),
             usageCount: 0,
-            tags,
+            tags: sanitizeStringArray(tags),
         };
 
         this.chains.set(chain.id, chain);
@@ -306,12 +420,24 @@ export class PromptChainingService {
         const chain = this.chains.get(id);
         if (!chain) return null;
 
-        const updated: PromptChain = {
+        const updatedCandidate: PromptChain = {
             ...chain,
             ...updates,
+            steps: typeof updates.steps !== 'undefined'
+                ? updates.steps
+                    .map((step) => sanitizeStep(step))
+                    .filter((step): step is ChainStep => step !== null)
+                : chain.steps,
+            tags: typeof updates.tags !== 'undefined'
+                ? sanitizeStringArray(updates.tags)
+                : chain.tags,
             version: chain.version + 1,
             updatedAt: Date.now(),
         };
+        const updated = sanitizeChain(updatedCandidate);
+        if (!updated) {
+            return null;
+        }
 
         this.chains.set(id, updated);
         this.persist();
@@ -687,7 +813,9 @@ export class PromptChainingService {
     private static persist(): void {
         try {
             const userChains = Array.from(this.chains.values())
-                .filter(c => !DEFAULT_CHAINS.find(d => d.id === c.id));
+                .filter(c => !DEFAULT_CHAINS.find(d => d.id === c.id))
+                .map((entry) => sanitizeChain(entry))
+                .filter((entry): entry is PromptChain => entry !== null);
             localStorage.setItem(CHAINS_STORAGE_KEY, JSON.stringify(userChains));
         } catch (error) {
             console.error('Failed to persist chains:', error);
@@ -721,22 +849,22 @@ export class PromptChainingService {
         let imported = 0;
 
         try {
-            const data = JSON.parse(jsonData);
-
-            if (!data.chains || !Array.isArray(data.chains)) {
+            const data = parseJson(jsonData);
+            if (!isRecord(data) || !Array.isArray(data.chains)) {
                 errors.push('Invalid chain file format');
                 return { imported, errors };
             }
 
             for (const chain of data.chains) {
                 try {
-                    if (!chain.name || !chain.steps || !chain.outputStep) {
+                    const sanitized = sanitizeChain(chain);
+                    if (!sanitized) {
                         errors.push(`Skipped chain: missing required fields`);
                         continue;
                     }
 
                     const newChain: PromptChain = {
-                        ...chain,
+                        ...sanitized,
                         id: `chain-imported-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                         createdAt: Date.now(),
                         updatedAt: Date.now(),
@@ -746,7 +874,10 @@ export class PromptChainingService {
                     this.chains.set(newChain.id, newChain);
                     imported++;
                 } catch (e) {
-                    errors.push(`Failed to import chain: ${chain.name || 'unknown'}`);
+                    const chainName = isRecord(chain) && typeof chain.name === 'string'
+                        ? chain.name
+                        : 'unknown';
+                    errors.push(`Failed to import chain: ${chainName}`);
                 }
             }
 

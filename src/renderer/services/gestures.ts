@@ -49,6 +49,20 @@ interface AttachmentState {
     cleanup: () => void;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
 export class GestureService {
     private static instance: GestureService;
     private readonly STORAGE_KEY = 'gesture_config';
@@ -91,10 +105,29 @@ export class GestureService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                return {
-                    ...this.defaultConfig,
-                    ...JSON.parse(stored),
-                };
+                const parsed = parseJson(stored);
+                if (isRecord(parsed)) {
+                    return {
+                        enablePinchZoom: typeof parsed.enablePinchZoom === 'boolean'
+                            ? parsed.enablePinchZoom
+                            : this.defaultConfig.enablePinchZoom,
+                        enableSwipeNavigation: typeof parsed.enableSwipeNavigation === 'boolean'
+                            ? parsed.enableSwipeNavigation
+                            : this.defaultConfig.enableSwipeNavigation,
+                        enableLongPress: typeof parsed.enableLongPress === 'boolean'
+                            ? parsed.enableLongPress
+                            : this.defaultConfig.enableLongPress,
+                        pinchSensitivity: typeof parsed.pinchSensitivity === 'number'
+                            ? clamp(parsed.pinchSensitivity, 0.1, 5)
+                            : this.defaultConfig.pinchSensitivity,
+                        swipeSensitivity: typeof parsed.swipeSensitivity === 'number'
+                            ? clamp(parsed.swipeSensitivity, 0.1, 5)
+                            : this.defaultConfig.swipeSensitivity,
+                        longPressDuration: typeof parsed.longPressDuration === 'number'
+                            ? clamp(parsed.longPressDuration, 250, 5000)
+                            : this.defaultConfig.longPressDuration,
+                    };
+                }
             }
         } catch (error) {
             console.error('Failed to load gesture config:', error);
@@ -111,9 +144,17 @@ export class GestureService {
     }
 
     updateConfig(config: Partial<GestureConfig>): void {
-        const updated = {
+        const merged = {
             ...this.getConfig(),
             ...config,
+        };
+        const updated: GestureConfig = {
+            enablePinchZoom: merged.enablePinchZoom,
+            enableSwipeNavigation: merged.enableSwipeNavigation,
+            enableLongPress: merged.enableLongPress,
+            pinchSensitivity: clamp(merged.pinchSensitivity, 0.1, 5),
+            swipeSensitivity: clamp(merged.swipeSensitivity, 0.1, 5),
+            longPressDuration: clamp(merged.longPressDuration, 250, 5000),
         };
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(updated));
         this.cachedConfig = updated;

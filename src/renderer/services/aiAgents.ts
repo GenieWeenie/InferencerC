@@ -41,6 +41,100 @@ export interface AgentExecution {
     error?: string;
 }
 
+const TASK_TYPES = new Set<AgentTask['type']>(['research', 'analysis', 'generation', 'automation', 'monitoring']);
+const TASK_STATUSES = new Set<AgentTask['status']>(['pending', 'running', 'completed', 'failed']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.filter((entry): entry is string => typeof entry === 'string');
+};
+
+const sanitizeTask = (value: unknown): AgentTask | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.agentId !== 'string'
+        || !TASK_TYPES.has(value.type as AgentTask['type'])
+        || typeof value.description !== 'string'
+        || !TASK_STATUSES.has(value.status as AgentTask['status'])
+        || typeof value.createdAt !== 'number') {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        agentId: value.agentId,
+        type: value.type as AgentTask['type'],
+        description: value.description,
+        parameters: isRecord(value.parameters) ? value.parameters : {},
+        status: value.status as AgentTask['status'],
+        result: value.result,
+        error: typeof value.error === 'string' ? value.error : undefined,
+        createdAt: value.createdAt,
+        completedAt: typeof value.completedAt === 'number' ? value.completedAt : undefined,
+    };
+};
+
+const sanitizeAgent = (value: unknown): AIAgent | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || typeof value.description !== 'string'
+        || typeof value.role !== 'string'
+        || typeof value.model !== 'string'
+        || typeof value.systemPrompt !== 'string'
+        || typeof value.isActive !== 'boolean'
+        || !Array.isArray(value.taskQueue)
+        || !Array.isArray(value.completedTasks)
+        || typeof value.createdAt !== 'number'
+        || typeof value.lastActive !== 'number') {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        name: value.name,
+        description: value.description,
+        role: value.role,
+        capabilities: sanitizeStringArray(value.capabilities),
+        model: value.model,
+        systemPrompt: value.systemPrompt,
+        isActive: value.isActive,
+        taskQueue: value.taskQueue
+            .map((entry) => sanitizeTask(entry))
+            .filter((entry): entry is AgentTask => entry !== null),
+        completedTasks: value.completedTasks
+            .map((entry) => sanitizeTask(entry))
+            .filter((entry): entry is AgentTask => entry !== null),
+        createdAt: value.createdAt,
+        lastActive: value.lastActive,
+    };
+};
+
+const parseStoredAgents = (raw: string): AIAgent[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeAgent(entry))
+        .filter((entry): entry is AIAgent => entry !== null);
+};
+
 export class AIAgentsService {
     private static instance: AIAgentsService;
     private readonly STORAGE_KEY = 'ai_agents';
@@ -65,7 +159,7 @@ export class AIAgentsService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                const agents: AIAgent[] = JSON.parse(stored);
+                const agents = parseStoredAgents(stored);
                 agents.forEach(agent => {
                     this.agents.set(agent.id, agent);
                 });
@@ -80,7 +174,9 @@ export class AIAgentsService {
      */
     private saveAgents(): void {
         try {
-            const agents = Array.from(this.agents.values());
+            const agents = Array.from(this.agents.values())
+                .map((entry) => sanitizeAgent(entry))
+                .filter((entry): entry is AIAgent => entry !== null);
             localStorage.setItem(this.STORAGE_KEY, JSON.stringify(agents));
         } catch (error) {
             console.error('Failed to save agents:', error);
@@ -94,6 +190,7 @@ export class AIAgentsService {
         const newAgent: AIAgent = {
             ...agent,
             id: crypto.randomUUID(),
+            capabilities: sanitizeStringArray(agent.capabilities),
             taskQueue: [],
             completedTasks: [],
             createdAt: Date.now(),
@@ -132,8 +229,20 @@ export class AIAgentsService {
     updateAgent(agentId: string, updates: Partial<AIAgent>): void {
         const agent = this.agents.get(agentId);
         if (agent) {
-            Object.assign(agent, updates);
-            agent.lastActive = Date.now();
+            const merged = sanitizeAgent({
+                ...agent,
+                ...updates,
+                capabilities: typeof updates.capabilities !== 'undefined'
+                    ? sanitizeStringArray(updates.capabilities)
+                    : agent.capabilities,
+                taskQueue: typeof updates.taskQueue !== 'undefined' ? updates.taskQueue : agent.taskQueue,
+                completedTasks: typeof updates.completedTasks !== 'undefined' ? updates.completedTasks : agent.completedTasks,
+                lastActive: Date.now(),
+            });
+            if (!merged) {
+                return;
+            }
+            this.agents.set(agentId, merged);
             this.saveAgents();
         }
     }

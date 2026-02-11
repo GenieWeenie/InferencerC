@@ -683,4 +683,165 @@ describe('storage hydration guards', () => {
       expect(documentationGeneratorService.getHistory()).toHaveLength(1);
     });
   });
+
+  test('guards layout/gestures/versioning/chaining/summaries/agents storage payloads', () => {
+    localStorage.setItem('layout_config', JSON.stringify({
+      panels: [
+        { id: 'main', type: 'sidebar', position: 'left', size: 80, visible: true, order: 0 },
+        { id: 'bad', type: 'unknown', position: 'left', size: 20, visible: true, order: 1 },
+      ],
+      currentPreset: 'preset-1',
+      customPresets: [
+        {
+          id: 'preset-1',
+          name: 'Custom',
+          description: 'Custom preset',
+          panels: [{ id: 'main', type: 'sidebar', position: 'left', size: 80, visible: true, order: 0 }],
+          createdAt: 1,
+        },
+        { id: 'bad' },
+      ],
+    }));
+    localStorage.setItem('gesture_config', JSON.stringify({
+      enablePinchZoom: true,
+      enableSwipeNavigation: 'yes',
+      enableLongPress: true,
+      pinchSensitivity: 99,
+      swipeSensitivity: -5,
+      longPressDuration: 20,
+    }));
+    localStorage.setItem('versioned_prompts', JSON.stringify([
+      {
+        id: 'vp-1',
+        name: 'Prompt',
+        description: 'Desc',
+        category: 'general',
+        versions: [
+          {
+            id: 'v-1',
+            promptId: 'vp-1',
+            version: 1,
+            content: 'Hello',
+            createdAt: 1,
+            isActive: true,
+            tags: ['alpha', 2],
+            metrics: {
+              useCount: 1,
+              avgResponseTime: 100,
+              avgTokensUsed: 50,
+              successRate: 1,
+              userRatings: [5, 'bad'],
+              avgRating: 5,
+            },
+          },
+        ],
+        activeVersionId: 'v-1',
+        createdAt: 1,
+        updatedAt: 1,
+        tags: ['alpha', 2],
+      },
+      { id: 2 },
+    ]));
+    localStorage.setItem('prompt_chains', JSON.stringify([
+      {
+        id: 'chain-custom-1',
+        name: 'Custom Chain',
+        description: 'Desc',
+        version: 1,
+        steps: [
+          {
+            id: 'step-1',
+            name: 'Step 1',
+            type: 'prompt',
+            prompt: 'Hello {{input}}',
+          },
+        ],
+        outputStep: 'step-1',
+        createdAt: 1,
+        updatedAt: 1,
+        usageCount: 0,
+        tags: ['alpha', 3],
+      },
+      { id: 'bad-chain' },
+    ]));
+    localStorage.setItem('conversation_summaries', JSON.stringify([
+      {
+        id: 'summary-1',
+        sessionId: 'session-1',
+        summary: 'Summary',
+        keyPoints: ['One', 2],
+        topics: ['Topic', 3],
+        messageCount: 12,
+        generatedAt: 2,
+      },
+      { id: 'bad-summary' },
+    ]));
+    localStorage.setItem('ai_agents', JSON.stringify([
+      {
+        id: 'agent-1',
+        name: 'Agent',
+        description: 'Desc',
+        role: 'helper',
+        capabilities: ['analyze', 2],
+        model: 'model-1',
+        systemPrompt: 'You are helpful',
+        isActive: true,
+        taskQueue: [
+          {
+            id: 'task-1',
+            agentId: 'agent-1',
+            type: 'analysis',
+            description: 'Analyze',
+            parameters: { depth: 'high' },
+            status: 'pending',
+            createdAt: 3,
+          },
+          { id: 'bad-task' },
+        ],
+        completedTasks: [],
+        createdAt: 1,
+        lastActive: 2,
+      },
+      { id: 'bad-agent' },
+    ]));
+
+    jest.isolateModules(() => {
+      const { layoutCustomizationService } = require('../src/renderer/services/layoutCustomization') as typeof import('../src/renderer/services/layoutCustomization');
+      const { gestureService } = require('../src/renderer/services/gestures') as typeof import('../src/renderer/services/gestures');
+      const promptVersioningModule = require('../src/renderer/services/promptVersioning') as typeof import('../src/renderer/services/promptVersioning');
+      const promptChainingModule = require('../src/renderer/services/promptChaining') as typeof import('../src/renderer/services/promptChaining');
+      const summarizationModule = require('../src/renderer/services/summarization') as typeof import('../src/renderer/services/summarization');
+      const { aiAgentsService } = require('../src/renderer/services/aiAgents') as typeof import('../src/renderer/services/aiAgents');
+
+      const layout = layoutCustomizationService.getLayout();
+      expect(layout.panels).toHaveLength(1);
+      expect(layout.customPresets).toHaveLength(1);
+
+      const gestureConfig = gestureService.getConfig();
+      expect(gestureConfig.enableSwipeNavigation).toBe(true);
+      expect(gestureConfig.pinchSensitivity).toBe(5);
+      expect(gestureConfig.swipeSensitivity).toBe(0.1);
+      expect(gestureConfig.longPressDuration).toBe(250);
+
+      const promptService = promptVersioningModule.default;
+      const prompts = promptService.getAllPrompts();
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]?.tags).toEqual(['alpha']);
+      expect(prompts[0]?.versions[0]?.metrics?.userRatings).toEqual([5]);
+
+      const chainService = promptChainingModule.default;
+      const customChain = chainService.getChain('chain-custom-1');
+      expect(customChain?.tags).toEqual(['alpha']);
+      expect(customChain?.steps).toHaveLength(1);
+
+      const summarizationService = summarizationModule.default;
+      expect(summarizationService.getCachedSummary('session-1')?.topics).toEqual(['Topic']);
+      expect(summarizationService.getCachedSummary('missing')).toBeNull();
+
+      const agents = aiAgentsService.getAllAgents();
+      expect(agents).toHaveLength(1);
+      expect(agents[0]?.capabilities).toEqual(['analyze']);
+      expect(agents[0]?.taskQueue).toHaveLength(1);
+    });
+  });
 });
