@@ -18,6 +18,21 @@ interface APIPlaygroundProps {
     onClose: () => void;
 }
 
+const isAPIRequestMethod = (value: string): value is APIRequest['method'] => {
+    return value === 'GET' || value === 'POST' || value === 'PUT' || value === 'DELETE';
+};
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+    return fallback;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
 export const APIPlayground: React.FC<APIPlaygroundProps> = ({
     isOpen,
     onClose,
@@ -63,11 +78,13 @@ export const APIPlayground: React.FC<APIPlaygroundProps> = ({
     const handleJsonChange = (json: string) => {
         setRequestJson(json);
         try {
-            const parsed = JSON.parse(json);
-            setRequest({
-                ...request,
-                ...parsed,
-            });
+            const parsedUnknown: unknown = JSON.parse(json);
+            if (isRecord(parsedUnknown)) {
+                setRequest({
+                    ...request,
+                    ...(parsedUnknown as Partial<APIRequest>),
+                });
+            }
         } catch {
             // Invalid JSON, keep as is
         }
@@ -83,9 +100,10 @@ export const APIPlayground: React.FC<APIPlaygroundProps> = ({
             setResponse(result);
             setActiveTab('response');
             toast.success(`Request completed in ${result.duration}ms`);
-        } catch (err: any) {
-            setError(err.message || 'Request failed');
-            toast.error(err.message || 'Request failed');
+        } catch (err: unknown) {
+            const errorMessage = getErrorMessage(err, 'Request failed');
+            setError(errorMessage);
+            toast.error(errorMessage);
         } finally {
             setIsLoading(false);
         }
@@ -157,7 +175,12 @@ export const APIPlayground: React.FC<APIPlaygroundProps> = ({
                                 <div className="flex items-center gap-2">
                                     <select
                                         value={request.method}
-                                        onChange={(e) => setRequest({ ...request, method: e.target.value as any })}
+                                        onChange={(e) => {
+                                            const value = e.target.value;
+                                            if (isAPIRequestMethod(value)) {
+                                                setRequest({ ...request, method: value });
+                                            }
+                                        }}
                                         className="px-3 py-1 bg-slate-800 border border-slate-700 rounded text-white text-sm"
                                     >
                                         <option value="GET">GET</option>

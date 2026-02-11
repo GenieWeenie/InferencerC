@@ -61,6 +61,49 @@ export interface APIExample {
     response: { status: number; body: unknown };
 }
 
+interface OpenAPIResponseContent {
+    description: string;
+    content?: {
+        'application/json': {
+            schema?: Record<string, unknown>;
+            example?: unknown;
+        };
+    };
+}
+
+interface OpenAPIOperation {
+    summary: string;
+    parameters?: Array<{
+        name: string;
+        in: 'query';
+        required: boolean;
+        schema: { type: string };
+        description: string;
+    }>;
+    requestBody?: {
+        content: Record<string, { schema: Record<string, unknown>; example?: unknown }>;
+    };
+    responses: Record<string, OpenAPIResponseContent>;
+}
+
+interface OpenAPIModelSchema {
+    type: 'object';
+    properties: Record<string, { type: string; description: string }>;
+}
+
+interface OpenAPIDocument {
+    openapi: '3.0.0';
+    info: {
+        title: string;
+        description: string;
+        version: string;
+    };
+    paths: Record<string, Record<string, OpenAPIOperation>>;
+    components: {
+        schemas: Record<string, OpenAPIModelSchema>;
+    };
+}
+
 export class APIDocsGeneratorService {
     private static instance: APIDocsGeneratorService;
     private readonly STORAGE_KEY = 'api_documentations';
@@ -237,16 +280,16 @@ export class APIDocsGeneratorService {
      * Export documentation as OpenAPI/Swagger
      */
     exportAsOpenAPI(docs: APIDocumentation): string {
-        const openapi = {
+        const openapi: OpenAPIDocument = {
             openapi: '3.0.0',
             info: {
                 title: docs.title,
                 description: docs.description,
                 version: '1.0.0',
             },
-            paths: {} as Record<string, any>,
+            paths: {},
             components: {
-                schemas: {} as Record<string, any>,
+                schemas: {},
             },
         };
 
@@ -275,7 +318,7 @@ export class APIDocsGeneratorService {
                     },
                 } : undefined,
                 responses: endpoint.responses.reduce((acc, r) => {
-                    acc[r.statusCode] = {
+                    acc[String(r.statusCode)] = {
                         description: r.description,
                         content: r.example ? {
                             'application/json': {
@@ -285,7 +328,7 @@ export class APIDocsGeneratorService {
                         } : undefined,
                     };
                     return acc;
-                }, {} as Record<string, any>),
+                }, {} as Record<string, OpenAPIResponseContent>),
             };
         });
 
@@ -298,7 +341,7 @@ export class APIDocsGeneratorService {
                         description: info.description,
                     };
                     return acc;
-                }, {} as Record<string, any>),
+                }, {} as Record<string, { type: string; description: string }>),
             };
         });
 

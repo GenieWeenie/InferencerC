@@ -137,21 +137,68 @@ Return a JSON array of suggestions:
             const jsonMatch = content.match(/\[[\s\S]*\]/);
             if (!jsonMatch) return [];
 
-            const parsed = JSON.parse(jsonMatch[0]);
-            return parsed.map((s: any, i: number) => ({
-                id: `refactor-${i}`,
-                type: s.type || 'improve-readability',
-                description: s.description || '',
-                code: s.code || '',
-                refactoredCode: s.refactoredCode || s.code || '',
-                confidence: s.confidence || 0.5,
-                impact: s.impact || 'medium',
-                explanation: s.explanation || '',
-            }));
+            const parsedUnknown: unknown = JSON.parse(jsonMatch[0]);
+            if (!Array.isArray(parsedUnknown)) {
+                return [];
+            }
+
+            return parsedUnknown.map((entry, i: number) => {
+                const suggestion = (typeof entry === 'object' && entry !== null
+                    ? entry
+                    : {}) as {
+                        type?: unknown;
+                        description?: unknown;
+                        code?: unknown;
+                        refactoredCode?: unknown;
+                        confidence?: unknown;
+                        impact?: unknown;
+                        explanation?: unknown;
+                    };
+
+                const code = typeof suggestion.code === 'string' ? suggestion.code : '';
+                const refactoredCode = typeof suggestion.refactoredCode === 'string'
+                    ? suggestion.refactoredCode
+                    : code;
+                const confidence = typeof suggestion.confidence === 'number'
+                    ? suggestion.confidence
+                    : 0.5;
+
+                return {
+                    id: `refactor-${i}`,
+                    type: this.normalizeRefactoringType(suggestion.type),
+                    description: typeof suggestion.description === 'string' ? suggestion.description : '',
+                    code,
+                    refactoredCode,
+                    confidence,
+                    impact: this.normalizeRefactoringImpact(suggestion.impact),
+                    explanation: typeof suggestion.explanation === 'string' ? suggestion.explanation : '',
+                } satisfies RefactoringSuggestion;
+            });
         } catch (error) {
             console.error('Failed to parse suggestions:', error);
             return [];
         }
+    }
+
+    private normalizeRefactoringType(value: unknown): RefactoringType {
+        if (value === 'extract-function' ||
+            value === 'extract-variable' ||
+            value === 'rename' ||
+            value === 'simplify' ||
+            value === 'optimize' ||
+            value === 'remove-duplication' ||
+            value === 'improve-readability' ||
+            value === 'add-error-handling') {
+            return value;
+        }
+        return 'improve-readability';
+    }
+
+    private normalizeRefactoringImpact(value: unknown): 'low' | 'medium' | 'high' {
+        if (value === 'low' || value === 'medium' || value === 'high') {
+            return value;
+        }
+        return 'medium';
     }
 
     /**

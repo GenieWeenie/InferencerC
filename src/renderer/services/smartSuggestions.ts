@@ -272,13 +272,21 @@ Types: follow-up, clarification, example, deep-dive, alternative, related`;
             // Try to parse JSON from response
             const jsonMatch = content.match(/\[[\s\S]*\]/);
             if (jsonMatch) {
-                const parsed = JSON.parse(jsonMatch[0]);
-                return parsed.map((s: any, i: number) => ({
-                    id: `ai-${i}`,
-                    text: s.text,
-                    type: s.type || 'follow-up',
-                    confidence: 0.8,
-                }));
+                const parsedUnknown: unknown = JSON.parse(jsonMatch[0]);
+                if (Array.isArray(parsedUnknown)) {
+                    return parsedUnknown.map((entry, i: number) => {
+                        const suggestion = (typeof entry === 'object' && entry !== null
+                            ? entry
+                            : {}) as { text?: unknown; type?: unknown };
+                        const normalizedType = this.normalizeSuggestionType(suggestion.type);
+                        return {
+                            id: `ai-${i}`,
+                            text: typeof suggestion.text === 'string' ? suggestion.text : '',
+                            type: normalizedType,
+                            confidence: 0.8,
+                        } satisfies Suggestion;
+                    }).filter((suggestion) => suggestion.text.trim().length > 0);
+                }
             }
         } catch (error) {
             console.error('AI suggestion generation failed:', error);
@@ -286,6 +294,18 @@ Types: follow-up, clarification, example, deep-dive, alternative, related`;
 
         // Fallback to rule-based suggestions
         return this.generateSuggestions(conversationHistory);
+    }
+
+    private normalizeSuggestionType(value: unknown): SuggestionType {
+        if (value === 'follow-up' ||
+            value === 'clarification' ||
+            value === 'example' ||
+            value === 'deep-dive' ||
+            value === 'alternative' ||
+            value === 'related') {
+            return value;
+        }
+        return 'follow-up';
     }
 }
 

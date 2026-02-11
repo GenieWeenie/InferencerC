@@ -18,6 +18,14 @@ interface RequestBuilderProps {
     onSave?: (request: APIRequest, name: string) => void;
 }
 
+const isAPIRequestMethod = (value: string): value is APIRequest['method'] => {
+    return value === 'GET' || value === 'POST' || value === 'PUT' || value === 'DELETE';
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
 export const RequestBuilder: React.FC<RequestBuilderProps> = ({
     initialRequest,
     onBuild,
@@ -106,13 +114,15 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
 
     const updateBodyField = (path: string[], value: unknown) => {
         const newBody = { ...(request.body as Record<string, unknown>) };
-        let current: any = newBody;
+        let current: Record<string, unknown> = newBody;
 
         for (let i = 0; i < path.length - 1; i++) {
-            if (!current[path[i]]) {
-                current[path[i]] = {};
+            const pathKey = path[i];
+            const nextValue = current[pathKey];
+            if (!isRecord(nextValue)) {
+                current[pathKey] = {};
             }
-            current = current[path[i]];
+            current = current[pathKey] as Record<string, unknown>;
         }
 
         current[path[path.length - 1]] = value;
@@ -172,7 +182,12 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
                     <div className="flex gap-2">
                         <select
                             value={request.method}
-                            onChange={(e) => setRequest({ ...request, method: e.target.value as any })}
+                            onChange={(e) => {
+                                const value = e.target.value;
+                                if (isAPIRequestMethod(value)) {
+                                    setRequest({ ...request, method: value });
+                                }
+                            }}
                             className="px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white text-sm"
                         >
                             <option value="GET">GET</option>

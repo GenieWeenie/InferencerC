@@ -23,6 +23,12 @@ export const BCIPanel: React.FC<BCIPanelProps> = ({
     isOpen,
     onClose,
 }) => {
+    const isDeviceType = (
+        value: string
+    ): value is 'emotiv' | 'neurosky' | 'openbci' | 'simulated' => {
+        return value === 'emotiv' || value === 'neurosky' || value === 'openbci' || value === 'simulated';
+    };
+
     const [config, setConfig] = useState(bciService.getConfig());
     const [isRecording, setIsRecording] = useState(false);
     const [recentSignals, setRecentSignals] = useState<BCISignal[]>([]);
@@ -125,7 +131,12 @@ export const BCIPanel: React.FC<BCIPanelProps> = ({
                                     <label className="block text-sm font-medium text-slate-300 mb-2">Device Type</label>
                                     <select
                                         value={config.deviceType}
-                                        onChange={(e) => handleConfigChange({ deviceType: e.target.value as any })}
+                                        onChange={(e) => {
+                                            const value = e.target.value;
+                                            if (isDeviceType(value)) {
+                                                handleConfigChange({ deviceType: value });
+                                            }
+                                        }}
                                         className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded text-white"
                                     >
                                         <option value="simulated">Simulated (Testing)</option>

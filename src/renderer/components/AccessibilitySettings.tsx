@@ -23,6 +23,12 @@ export const AccessibilitySettings: React.FC<AccessibilitySettingsProps> = ({
     isOpen,
     onClose,
 }) => {
+    const isColorBlindMode = (
+        value: string
+    ): value is AccessibilityConfig['colorBlindMode'] => {
+        return value === 'none' || value === 'protanopia' || value === 'deuteranopia' || value === 'tritanopia';
+    };
+
     const [config, setConfig] = useState<AccessibilityConfig>(accessibilityService.getConfig());
     const [shortcuts, setShortcuts] = useState<KeyboardShortcut[]>([]);
 
@@ -149,7 +155,12 @@ export const AccessibilitySettings: React.FC<AccessibilitySettingsProps> = ({
                                     <div className="font-medium text-white mb-2">Color Blind Mode</div>
                                     <select
                                         value={config.colorBlindMode}
-                                        onChange={(e) => handleConfigChange({ colorBlindMode: e.target.value as any })}
+                                        onChange={(e) => {
+                                            const value = e.target.value;
+                                            if (isColorBlindMode(value)) {
+                                                handleConfigChange({ colorBlindMode: value });
+                                            }
+                                        }}
                                         className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded text-white"
                                     >
                                         <option value="none">None</option>

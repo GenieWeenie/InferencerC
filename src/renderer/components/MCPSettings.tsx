@@ -60,8 +60,9 @@ const MCPSettings: React.FC = () => {
         try {
             await mcpClient.connectServer(id);
             toast.success('Connected to MCP server');
-        } catch (e: any) {
-            toast.error(`Failed to connect: ${e.message}`);
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : 'Unknown connection error';
+            toast.error(`Failed to connect: ${message}`);
         } finally {
             setConnecting(null);
         }

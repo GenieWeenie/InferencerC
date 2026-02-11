@@ -39,6 +39,14 @@ export const WorkspaceViewsPanel: React.FC<WorkspaceViewsPanelProps> = ({
     conversations,
     onSelectConversation,
 }) => {
+    const isGroupByValue = (value: string): value is NonNullable<WorkspaceViewConfig['groupBy']> => {
+        return value === 'none' || value === 'date' || value === 'category' || value === 'model' || value === 'tag';
+    };
+
+    const isSortByValue = (value: string): value is NonNullable<WorkspaceViewConfig['sortBy']> => {
+        return value === 'lastActivity' || value === 'date' || value === 'title' || value === 'messageCount';
+    };
+
     const [config, setConfig] = useState<WorkspaceViewConfig>(workspaceViewsService.getConfig());
     const [groupedConversations, setGroupedConversations] = useState<ConversationGroup[]>([]);
 
@@ -147,7 +155,12 @@ export const WorkspaceViewsPanel: React.FC<WorkspaceViewsPanelProps> = ({
                                 <span className="text-xs text-slate-400">Group:</span>
                                 <select
                                     value={config.groupBy || 'none'}
-                                    onChange={(e) => handleConfigChange({ groupBy: e.target.value as any })}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (isGroupByValue(value)) {
+                                            handleConfigChange({ groupBy: value });
+                                        }
+                                    }}
                                     className="px-3 py-1.5 bg-slate-700 border border-slate-600 rounded text-white text-xs"
                                 >
                                     <option value="none">None</option>
@@ -163,7 +176,12 @@ export const WorkspaceViewsPanel: React.FC<WorkspaceViewsPanelProps> = ({
                                 <span className="text-xs text-slate-400">Sort:</span>
                                 <select
                                     value={config.sortBy || 'lastActivity'}
-                                    onChange={(e) => handleConfigChange({ sortBy: e.target.value as any })}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (isSortByValue(value)) {
+                                            handleConfigChange({ sortBy: value });
+                                        }
+                                    }}
                                     className="px-3 py-1.5 bg-slate-700 border border-slate-600 rounded text-white text-xs"
                                 >
                                     <option value="lastActivity">Last Activity</option>

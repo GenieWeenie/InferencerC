@@ -1,7 +1,19 @@
+export interface ToolParameterSchema {
+    type: string;
+    description?: string;
+    enum?: string[];
+}
+
+export interface ToolParametersSchema {
+    type: 'object';
+    properties: Record<string, ToolParameterSchema>;
+    required?: string[];
+}
+
 export interface ToolDefinition {
     name: string;
     description: string;
-    parameters: any; // JSON Schema
+    parameters: ToolParametersSchema;
 }
 
 export const AVAILABLE_TOOLS: ToolDefinition[] = [

@@ -47,6 +47,13 @@ interface GlobalSearchDialogProps {
     currentSessionTitle?: string;
 }
 
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+    return fallback;
+};
+
 const GlobalSearchDialog: React.FC<GlobalSearchDialogProps> = ({
     isOpen,
     onClose,
@@ -96,8 +103,8 @@ const GlobalSearchDialog: React.FC<GlobalSearchDialogProps> = ({
                 // Validate regex pattern early for better UX.
                 new RegExp(query, filters.regexFlags || 'gi');
                 setRegexError(null);
-            } catch (error: any) {
-                setRegexError(error?.message || 'Invalid regex');
+            } catch (error: unknown) {
+                setRegexError(getErrorMessage(error, 'Invalid regex'));
                 setResults([]);
                 setStats(null);
                 return;

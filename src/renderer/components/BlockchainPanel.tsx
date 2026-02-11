@@ -27,6 +27,12 @@ export const BlockchainPanel: React.FC<BlockchainPanelProps> = ({
     sessionId,
     conversationData,
 }) => {
+    const isBlockchainNetwork = (
+        value: string
+    ): value is 'ethereum' | 'polygon' | 'arbitrum' | 'local' => {
+        return value === 'ethereum' || value === 'polygon' || value === 'arbitrum' || value === 'local';
+    };
+
     const [config, setConfig] = useState(blockchainIntegrationService.getConfig());
     const [transactions, setTransactions] = useState<BlockchainTransaction[]>([]);
     const [storedBlocks, setStoredBlocks] = useState<ConversationBlock[]>([]);
@@ -135,7 +141,12 @@ export const BlockchainPanel: React.FC<BlockchainPanelProps> = ({
                                             <label className="block text-sm font-medium text-slate-300 mb-2">Network</label>
                                             <select
                                                 value={config.network}
-                                                onChange={(e) => handleConfigChange({ network: e.target.value as any })}
+                                                onChange={(e) => {
+                                                    const value = e.target.value;
+                                                    if (isBlockchainNetwork(value)) {
+                                                        handleConfigChange({ network: value });
+                                                    }
+                                                }}
                                                 className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded text-white"
                                             >
                                                 <option value="local">Local (Testing)</option>

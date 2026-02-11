@@ -22,6 +22,12 @@ export const FederatedLearningPanel: React.FC<FederatedLearningPanelProps> = ({
     isOpen,
     onClose,
 }) => {
+    const isParticipationMode = (
+        value: string
+    ): value is 'active' | 'passive' | 'disabled' => {
+        return value === 'active' || value === 'passive' || value === 'disabled';
+    };
+
     const [config, setConfig] = useState(federatedLearningService.getConfig());
     const [rounds, setRounds] = useState<TrainingRound[]>([]);
     const [stats, setStats] = useState(federatedLearningService.getParticipationStats());
@@ -123,7 +129,12 @@ export const FederatedLearningPanel: React.FC<FederatedLearningPanelProps> = ({
                                             <label className="block text-sm font-medium text-slate-300 mb-2">Participation Mode</label>
                                             <select
                                                 value={config.participationMode}
-                                                onChange={(e) => handleConfigChange({ participationMode: e.target.value as any })}
+                                                onChange={(e) => {
+                                                    const value = e.target.value;
+                                                    if (isParticipationMode(value)) {
+                                                        handleConfigChange({ participationMode: value });
+                                                    }
+                                                }}
                                                 className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded text-white"
                                             >
                                                 <option value="disabled">Disabled</option>

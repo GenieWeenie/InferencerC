@@ -8,6 +8,20 @@ interface UseMCPOptions {
     deferUntilIdle?: boolean;
 }
 
+const getSchemaSummary = (schema: unknown): string => {
+    if (typeof schema !== 'object' || schema === null) {
+        return 'unknown';
+    }
+    const record = schema as { description?: unknown; type?: unknown };
+    if (typeof record.description === 'string' && record.description.trim().length > 0) {
+        return record.description;
+    }
+    if (typeof record.type === 'string' && record.type.trim().length > 0) {
+        return record.type;
+    }
+    return 'unknown';
+};
+
 /**
  * Hook for integrating MCP tools into the chat experience
  */
@@ -218,7 +232,7 @@ export const useMCP = (options: UseMCPOptions = {}) => {
             let desc = `- **${t.name}**: ${t.description || 'No description'}`;
             if (t.inputSchema?.properties) {
                 const params = Object.entries(t.inputSchema.properties)
-                    .map(([name, schema]: [string, any]) => `  - ${name}: ${schema.description || schema.type}`)
+                    .map(([name, schema]) => `  - ${name}: ${getSchemaSummary(schema)}`)
                     .join('\n');
                 desc += `\n${params}`;
             }

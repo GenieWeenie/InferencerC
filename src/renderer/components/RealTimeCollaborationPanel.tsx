@@ -32,6 +32,13 @@ interface RealTimeCollaborationPanelProps {
     onClose: () => void;
 }
 
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+    return fallback;
+};
+
 const parseCursor = (text: string, offset: number): { line: number; column: number } => {
     const safeOffset = Math.max(0, Math.min(offset, text.length));
     const before = text.slice(0, safeOffset);
@@ -106,8 +113,8 @@ export const RealTimeCollaborationPanel: React.FC<RealTimeCollaborationPanelProp
             await realTimeCollaborationService.createSession(sessionName.trim());
             setSessionName('');
             toast.success('Collaboration session created');
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to create session');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to create session'));
         } finally {
             setIsBusy(false);
         }
@@ -124,8 +131,8 @@ export const RealTimeCollaborationPanel: React.FC<RealTimeCollaborationPanelProp
             await realTimeCollaborationService.joinSession(joinSessionId.trim());
             setJoinSessionId('');
             toast.success('Joined collaboration session');
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to join session');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to join session'));
         } finally {
             setIsBusy(false);
         }
@@ -137,8 +144,8 @@ export const RealTimeCollaborationPanel: React.FC<RealTimeCollaborationPanelProp
             await realTimeCollaborationService.leaveSession();
             setMessageInput('');
             toast.info('Left collaboration session');
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to leave session');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to leave session'));
         } finally {
             setIsBusy(false);
         }
@@ -154,8 +161,8 @@ export const RealTimeCollaborationPanel: React.FC<RealTimeCollaborationPanelProp
             await realTimeCollaborationService.sendMessage(next);
             realTimeCollaborationService.stopTyping();
             setMessageInput('');
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to send message');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to send message'));
         }
     };
 
@@ -184,8 +191,8 @@ export const RealTimeCollaborationPanel: React.FC<RealTimeCollaborationPanelProp
                 toast.success('Message updated');
             }
             cancelEdit();
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to edit message');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to edit message'));
         }
     };
 
@@ -193,8 +200,8 @@ export const RealTimeCollaborationPanel: React.FC<RealTimeCollaborationPanelProp
         try {
             await realTimeCollaborationService.kickParticipant(participantId);
             toast.success(`Removed ${participantName} from session`);
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to remove participant');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to remove participant'));
         }
     };
 

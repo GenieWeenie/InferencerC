@@ -22,6 +22,13 @@ export interface GitHubGist {
   files: Record<string, { filename: string; content: string }>;
 }
 
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+};
+
 class GitHubService {
   private apiKey: string | null = null;
   private baseUrl = 'https://api.github.com';
@@ -120,8 +127,8 @@ class GitHubService {
       }
 
       return { success: true, content: data.content };
-    } catch (error: any) {
-      return { success: false, error: error.message || 'Failed to fetch file' };
+    } catch (error: unknown) {
+      return { success: false, error: getErrorMessage(error, 'Failed to fetch file') };
     }
   }
 
@@ -164,8 +171,8 @@ class GitHubService {
 
       const gist: GitHubGist = await response.json();
       return { success: true, gist };
-    } catch (error: any) {
-      return { success: false, error: error.message || 'Failed to create gist' };
+    } catch (error: unknown) {
+      return { success: false, error: getErrorMessage(error, 'Failed to create gist') };
     }
   }
 
