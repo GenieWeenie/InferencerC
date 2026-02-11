@@ -1,4 +1,12 @@
-import { deriveLaunchChecklistState } from '../useChatLaunchReadiness';
+/**
+ * @jest-environment jsdom
+ */
+import { renderHook } from '@testing-library/react';
+import {
+    deriveLaunchChecklistState,
+    readPersistedLaunchChecklistCompleted,
+    useChatLaunchReadiness,
+} from '../useChatLaunchReadiness';
 
 describe('deriveLaunchChecklistState', () => {
     const readinessSteps = [
@@ -38,5 +46,35 @@ describe('deriveLaunchChecklistState', () => {
         expect(result.readinessCompletedCount).toBe(3);
         expect(result.launchChecklistComplete).toBe(true);
         expect(result.shouldShowLaunchChecklist).toBe(false);
+    });
+});
+
+describe('useChatLaunchReadiness persistence guards', () => {
+    beforeEach(() => {
+        localStorage.clear();
+    });
+
+    it('treats only "1" as completed launch checklist marker', () => {
+        expect(readPersistedLaunchChecklistCompleted()).toBe(false);
+
+        localStorage.setItem('chat_launch_checklist_completed', 'true');
+        expect(readPersistedLaunchChecklistCompleted()).toBe(false);
+
+        localStorage.setItem('chat_launch_checklist_completed', '1');
+        expect(readPersistedLaunchChecklistCompleted()).toBe(true);
+    });
+
+    it('keeps checklist hidden after persisted completion even with blank prompt', () => {
+        localStorage.setItem('chat_launch_checklist_completed', '1');
+        const { result } = renderHook(() => useChatLaunchReadiness({
+            connectionStatus: { local: 'online', remote: 'none' },
+            currentModel: 'local-lmstudio',
+            currentModelLabel: 'LM Studio',
+            input: '   ',
+        }));
+
+        expect(result.current.hasCompletedLaunchChecklist).toBe(true);
+        expect(result.current.shouldShowLaunchChecklist).toBe(false);
+        expect(result.current.promptReady).toBe(false);
     });
 });

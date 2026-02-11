@@ -5,6 +5,14 @@ import {
     filterModelsByWorkspacePolicy,
     hasLikelyActiveTeamWorkspace,
 } from '../lib/useChatLazyServices';
+import {
+    persistLastModelId,
+    readPersistedLastModelId,
+} from '../lib/modelSelectionStorage';
+import {
+    parseOpenRouterModelsResponse,
+    resolveInitialModelSelection,
+} from '../lib/chatModelDiscovery';
 
 interface ConnectionStatus {
     local: 'online' | 'offline' | 'checking';
@@ -18,32 +26,6 @@ interface UseChatModelDiscoveryParams {
     setConnectionStatus: Dispatch<SetStateAction<ConnectionStatus>>;
     didApplyInitialModelSelectionRef: MutableRefObject<boolean>;
 }
-
-interface OpenRouterModelRecord {
-    id: string;
-    name?: string;
-    context_length?: number;
-    contextLength?: number;
-}
-
-interface OpenRouterModelsResponse {
-    data?: OpenRouterModelRecord[];
-}
-
-const parseOpenRouterModelsResponse = (payload: unknown): OpenRouterModelRecord[] => {
-    if (!payload || typeof payload !== 'object') {
-        return [];
-    }
-
-    const data = (payload as OpenRouterModelsResponse).data;
-    if (!Array.isArray(data)) {
-        return [];
-    }
-
-    return data.filter((model): model is OpenRouterModelRecord =>
-        Boolean(model && typeof model.id === 'string')
-    );
-};
 
 export const useChatModelDiscovery = ({
     openRouterApiKey,
@@ -116,13 +98,15 @@ export const useChatModelDiscovery = ({
             if (!didApplyInitialModelSelectionRef.current && models.length > 0) {
                 didApplyInitialModelSelectionRef.current = true;
                 setCurrentModel((prevModel) => {
-                    if (!prevModel) {
-                        const lastModel = localStorage.getItem('app_last_model');
-                        if (lastModel && models.some((model) => model.id === lastModel)) {
-                            return lastModel;
-                        }
+                    const nextModel = resolveInitialModelSelection(
+                        prevModel,
+                        models,
+                        readPersistedLastModelId()
+                    );
+                    if (nextModel && nextModel !== prevModel) {
+                        persistLastModelId(nextModel);
                     }
-                    return prevModel;
+                    return nextModel;
                 });
             }
         };

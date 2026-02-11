@@ -18,6 +18,8 @@ describe('useComposerOverlayLayout helpers', () => {
         expect(readPersistedShowBottomControls()).toBe(true);
         localStorage.setItem('chat_show_bottom_controls', '0');
         expect(readPersistedShowBottomControls()).toBe(false);
+        localStorage.setItem('chat_show_bottom_controls', 'unexpected');
+        expect(readPersistedShowBottomControls()).toBe(true);
     });
 
     it('resolves baseline overlay heights by control visibility', () => {

@@ -1,6 +1,11 @@
 import { type Dispatch, type MutableRefObject, type SetStateAction, useEffect, useRef } from 'react';
 import { ChatMessage, ChatSession, Model } from '../../shared/types';
 import { HistoryService } from '../services/history';
+import {
+    persistLastModelId,
+    readPersistedLastModelId,
+    resolvePreferredModelId,
+} from '../lib/modelSelectionStorage';
 
 interface UseChatBootstrapParams {
     didBootstrapSessionsRef: MutableRefObject<boolean>;
@@ -56,23 +61,23 @@ export const useChatBootstrap = ({
         if (hasActiveGeneration) return;
 
         const currentModelExists = availableModels.some((model) => model.id === currentModel);
+        const persistedModelId = readPersistedLastModelId();
+        const preferredModelId = resolvePreferredModelId(availableModels, persistedModelId);
 
         if (!currentModel && availableModels.length > 0) {
-            const lastModel = localStorage.getItem('app_last_model');
-            const preferredModel = lastModel && availableModels.some((model) => model.id === lastModel)
-                ? lastModel
-                : (availableModels.find((model: Model) => model.id === 'local-lmstudio')?.id || availableModels[0].id);
-            setCurrentModel(preferredModel);
-            localStorage.setItem('app_last_model', preferredModel);
+            if (!preferredModelId) {
+                return;
+            }
+            setCurrentModel(preferredModelId);
+            persistLastModelId(preferredModelId);
         } else if (currentModel && !currentModelExists && availableModels.length > 0) {
-            const lastModel = localStorage.getItem('app_last_model');
-            const preferredModel = lastModel && availableModels.some((model) => model.id === lastModel)
-                ? lastModel
-                : (availableModels.find((model: Model) => model.id === 'local-lmstudio')?.id || availableModels[0].id);
-            setCurrentModel(preferredModel);
-            localStorage.setItem('app_last_model', preferredModel);
+            if (!preferredModelId) {
+                return;
+            }
+            setCurrentModel(preferredModelId);
+            persistLastModelId(preferredModelId);
         } else if (currentModel && currentModelExists) {
-            localStorage.setItem('app_last_model', currentModel);
+            persistLastModelId(currentModel);
         }
     }, [availableModels, history, currentModel, setCurrentModel]);
 

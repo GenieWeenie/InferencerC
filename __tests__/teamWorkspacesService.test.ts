@@ -222,4 +222,49 @@ describe('TeamWorkspacesService', () => {
       },
     });
   });
+
+  test('guards identity and active-workspace mutation paths against malformed payloads', () => {
+    const createdIdentity = teamWorkspacesService.setIdentity({
+      userId: 'admin-user',
+      displayName: 'Admin User',
+    });
+    expect(createdIdentity).toEqual({ userId: 'admin-user', displayName: 'Admin User' });
+
+    const preservedIdentity = teamWorkspacesService.setIdentity({
+      userId: '   ',
+      displayName: '',
+    } as Partial<{ userId: string; displayName: string }>);
+    expect(preservedIdentity).toEqual({ userId: 'admin-user', displayName: 'Admin User' });
+
+    const workspace = teamWorkspacesService.createWorkspace('Mutation Guard Workspace');
+    const invite = teamWorkspacesService.generateInvite(workspace.id, 'viewer', 1.8);
+    expect(Math.round((invite.expiresAt - invite.createdAt) / (60 * 60 * 1000))).toBe(1);
+
+    teamWorkspacesService.updateModelPolicy(workspace.id, {
+      allowedProviders: [' openrouter ', 42, '', 'openrouter'] as unknown as string[],
+      allowedModelIds: [' model-a ', null, 'model-a', '   '] as unknown as string[],
+    });
+
+    const updatedCollection = teamWorkspacesService.setConversationCollection(workspace.id, [
+      ' convo-a ',
+      123,
+      'convo-a',
+      '',
+      'convo-b',
+    ] as unknown as string[]);
+    expect(updatedCollection.conversationIds).toEqual(['convo-a', 'convo-b']);
+
+    expect(() => teamWorkspacesService.updateMemberRole(workspace.id, '   ', 'member')).toThrow('Member ID is required');
+
+    teamWorkspacesService.setActiveWorkspace(`  ${workspace.id}  `);
+    expect(teamWorkspacesService.getActiveWorkspaceId()).toBe(workspace.id);
+    teamWorkspacesService.setActiveWorkspace('   ');
+    expect(teamWorkspacesService.getActiveWorkspaceId()).toBeNull();
+
+    const persisted = JSON.parse(localStorage.getItem('team_workspaces_v1') ?? '[]');
+    expect(persisted[0]?.modelPolicy).toEqual({
+      allowedProviders: ['openrouter'],
+      allowedModelIds: ['model-a'],
+    });
+  });
 });

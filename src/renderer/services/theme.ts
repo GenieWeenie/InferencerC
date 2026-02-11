@@ -21,6 +21,86 @@ export interface ThemeConfig {
   codeText: string;
 }
 
+const THEME_STORAGE_KEY = 'app_theme';
+const CUSTOM_THEME_STORAGE_KEY = 'app_custom_theme';
+const PRESET_THEME_IDS: ThemeType[] = ['oled-dark', 'deep-purple', 'forest-green', 'solarized-dark', 'light'];
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  Boolean(value && typeof value === 'object' && !Array.isArray(value))
+);
+
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+};
+
+const parseJson = (raw: string): unknown | null => {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const isPresetThemeType = (value: string): value is Exclude<ThemeType, 'auto'> => (
+  PRESET_THEME_IDS.includes(value as Exclude<ThemeType, 'auto'>)
+);
+
+export const readStoredThemeId = (): string | null => {
+  try {
+    return sanitizeNonEmptyString(localStorage.getItem(THEME_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+};
+
+export const parseStoredCustomTheme = (raw: string | null): ThemeConfig | null => {
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = parseJson(raw);
+  if (!isRecord(parsed)) {
+    return null;
+  }
+
+  const id = sanitizeNonEmptyString(parsed.id);
+  const name = sanitizeNonEmptyString(parsed.name);
+  const primaryColor = sanitizeNonEmptyString(parsed.primaryColor);
+  const secondaryColor = sanitizeNonEmptyString(parsed.secondaryColor);
+  const backgroundColor = sanitizeNonEmptyString(parsed.backgroundColor);
+  const surfaceColor = sanitizeNonEmptyString(parsed.surfaceColor);
+  const textColor = sanitizeNonEmptyString(parsed.textColor);
+  const textSecondary = sanitizeNonEmptyString(parsed.textSecondary);
+  const accentColor = sanitizeNonEmptyString(parsed.accentColor);
+  const borderColor = sanitizeNonEmptyString(parsed.borderColor);
+  const codeBackground = sanitizeNonEmptyString(parsed.codeBackground);
+  const codeText = sanitizeNonEmptyString(parsed.codeText);
+
+  if (!id || !name || !primaryColor || !secondaryColor || !backgroundColor || !surfaceColor || !textColor
+    || !textSecondary || !accentColor || !borderColor || !codeBackground || !codeText) {
+    return null;
+  }
+
+  return {
+    id: id as ThemeType,
+    name,
+    primaryColor,
+    secondaryColor,
+    backgroundColor,
+    surfaceColor,
+    textColor,
+    textSecondary,
+    accentColor,
+    borderColor,
+    codeBackground,
+    codeText,
+  };
+};
+
 /**
  * Theme service for managing application themes
  */
@@ -40,15 +120,26 @@ export class ThemeService {
   }
 
   private constructor() {
-    // Load saved theme from localStorage
-    const savedThemeId = localStorage.getItem('app_theme') as ThemeType;
-    if (savedThemeId && this.getThemeById(savedThemeId)) {
-      this.currentTheme = this.getThemeById(savedThemeId)!;
+    const savedThemeId = readStoredThemeId();
+    const customTheme = this.readStoredCustomTheme();
+    if (savedThemeId === 'auto') {
+      this.currentTheme = this.getDefaultTheme();
+    } else if (savedThemeId && isPresetThemeType(savedThemeId)) {
+      this.currentTheme = this.getThemeById(savedThemeId) || this.getDefaultTheme();
+    } else if (savedThemeId && customTheme && customTheme.id === savedThemeId) {
+      this.currentTheme = customTheme;
     } else {
-      // Initialize with default theme
       this.currentTheme = this.getDefaultTheme();
     }
     this.applyThemeToDocument();
+  }
+
+  private readStoredCustomTheme(): ThemeConfig | null {
+    try {
+      return parseStoredCustomTheme(localStorage.getItem(CUSTOM_THEME_STORAGE_KEY));
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -132,7 +223,7 @@ export class ThemeService {
   /**
    * Get theme by ID
    */
-  getThemeById(id: ThemeType): ThemeConfig | null {
+  getThemeById(id: string): ThemeConfig | null {
     return this.getAllThemes().find(t => t.id === id) || null;
   }
 
@@ -171,7 +262,11 @@ export class ThemeService {
     }
 
     this.currentTheme = newTheme;
-    localStorage.setItem('app_theme', newTheme.id);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, themeType === 'auto' ? 'auto' : newTheme.id);
+    } catch {
+      // Ignore storage failures for theme preference persistence.
+    }
     this.applyThemeToDocument();
     this.notifyObservers();
   }
@@ -181,9 +276,15 @@ export class ThemeService {
    * @param theme Custom theme configuration
    */
   setCustomTheme(theme: Partial<ThemeConfig> & { id: string; name: string }): void {
+    const normalizedId = sanitizeNonEmptyString(theme.id);
+    const normalizedName = sanitizeNonEmptyString(theme.name);
+    if (!normalizedId || !normalizedName) {
+      throw new Error('Custom theme id and name are required');
+    }
+
     const fullTheme: ThemeConfig = {
-      id: theme.id as ThemeType,
-      name: theme.name,
+      id: normalizedId as ThemeType,
+      name: normalizedName,
       primaryColor: theme.primaryColor || this.currentTheme.primaryColor,
       secondaryColor: theme.secondaryColor || this.currentTheme.secondaryColor,
       backgroundColor: theme.backgroundColor || this.currentTheme.backgroundColor,
@@ -197,8 +298,12 @@ export class ThemeService {
     };
 
     this.currentTheme = fullTheme;
-    localStorage.setItem('app_theme', fullTheme.id);
-    localStorage.setItem('app_custom_theme', JSON.stringify(fullTheme));
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, fullTheme.id);
+      localStorage.setItem(CUSTOM_THEME_STORAGE_KEY, JSON.stringify(fullTheme));
+    } catch {
+      // Ignore storage failures for custom theme persistence.
+    }
     this.applyThemeToDocument();
     this.notifyObservers();
   }
@@ -262,11 +367,11 @@ export class ThemeService {
     this.applyThemeToDocument();
     
     // Listen for system theme changes if using auto theme
-    const savedThemeId = localStorage.getItem('app_theme') as ThemeType;
+    const savedThemeId = readStoredThemeId();
     if (savedThemeId === 'auto' || !savedThemeId) {
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
       mediaQuery.addEventListener('change', (e) => {
-        const currentThemeId = localStorage.getItem('app_theme') as ThemeType;
+        const currentThemeId = readStoredThemeId();
         if (currentThemeId === 'auto' || !currentThemeId) {
           this.setTheme('auto');
         }

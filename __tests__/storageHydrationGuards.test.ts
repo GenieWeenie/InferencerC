@@ -16,6 +16,11 @@ import { parseStoredExcludedIndices } from '../src/renderer/hooks/useChatContext
 import { parseStoredBenchmarks } from '../src/renderer/hooks/useChatPerfBenchmarks';
 import { parseBookmarkedMessageIndices } from '../src/renderer/hooks/useChatGestureInteractions';
 import { parseRecoveryStateFromRaw } from '../src/renderer/lib/recoveryStateStorage';
+import {
+  persistLastModelId,
+  readPersistedLastModelId,
+  resolvePreferredModelId,
+} from '../src/renderer/lib/modelSelectionStorage';
 
 class MockLocalStorage {
   private store = new Map<string, string>();
@@ -111,6 +116,43 @@ describe('storage hydration guards', () => {
       estimatedCost: 0,
       sessionCount: 0,
     });
+  });
+
+  test('sanitizes persisted model preference reads and fallback resolution', () => {
+    expect(readPersistedLastModelId()).toBeNull();
+
+    localStorage.setItem('app_last_model', '   ');
+    expect(readPersistedLastModelId()).toBeNull();
+
+    persistLastModelId('  local-lmstudio  ');
+    expect(localStorage.getItem('app_last_model')).toBe('local-lmstudio');
+    expect(readPersistedLastModelId()).toBe('local-lmstudio');
+
+    const models = [
+      {
+        id: 'model-a',
+        name: 'Model A',
+        pathOrUrl: 'http://localhost:1234/v1',
+        type: 'local-folder',
+        status: 'loaded' as const,
+        adapter: 'lmstudio',
+      },
+      {
+        id: 'local-lmstudio',
+        name: 'LM Studio',
+        pathOrUrl: 'http://localhost:1234/v1',
+        type: 'local-folder',
+        status: 'loaded' as const,
+        adapter: 'lmstudio',
+      },
+    ];
+
+    expect(resolvePreferredModelId(models, readPersistedLastModelId())).toBe('local-lmstudio');
+    expect(resolvePreferredModelId(models, 'missing-model')).toBe('local-lmstudio');
+    expect(resolvePreferredModelId(models, null)).toBe('local-lmstudio');
+
+    persistLastModelId('   ');
+    expect(localStorage.getItem('app_last_model')).toBeNull();
   });
 
   test('sanitizes keyboard shortcuts storage and import payloads', () => {

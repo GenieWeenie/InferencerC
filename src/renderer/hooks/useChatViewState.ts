@@ -8,7 +8,7 @@ type ContextManagementServiceType = typeof import('../services/contextManagement
 const CHAT_DEV_MONITORS_ENABLED_KEY = 'chat_dev_monitors_enabled_v1';
 const PROJECT_CONTEXT_FEATURE_ENABLED_KEY = 'project_context_feature_enabled_v1';
 
-const readPersistedProjectContextFeatureEnabled = (): boolean => {
+export const readPersistedProjectContextFeatureEnabled = (): boolean => {
     try {
         return localStorage.getItem(PROJECT_CONTEXT_FEATURE_ENABLED_KEY) === '1';
     } catch {
@@ -16,7 +16,7 @@ const readPersistedProjectContextFeatureEnabled = (): boolean => {
     }
 };
 
-const persistProjectContextFeatureEnabled = (enabled: boolean): void => {
+export const persistProjectContextFeatureEnabled = (enabled: boolean): void => {
     try {
         if (enabled) {
             localStorage.setItem(PROJECT_CONTEXT_FEATURE_ENABLED_KEY, '1');
@@ -28,7 +28,7 @@ const persistProjectContextFeatureEnabled = (enabled: boolean): void => {
     }
 };
 
-const readPersistedDevMonitorsEnabled = (): boolean => {
+export const readPersistedDevMonitorsEnabled = (): boolean => {
     try {
         return localStorage.getItem(CHAT_DEV_MONITORS_ENABLED_KEY) === '1';
     } catch {

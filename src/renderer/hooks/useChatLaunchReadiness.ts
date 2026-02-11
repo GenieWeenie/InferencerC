@@ -4,7 +4,7 @@ import { buildReadinessSteps } from '../lib/chatDiagnosticsModels';
 
 const LAUNCH_CHECKLIST_COMPLETED_KEY = 'chat_launch_checklist_completed';
 
-const readPersistedLaunchChecklistCompleted = (): boolean => {
+export const readPersistedLaunchChecklistCompleted = (): boolean => {
     try {
         return localStorage.getItem(LAUNCH_CHECKLIST_COMPLETED_KEY) === '1';
     } catch {
