@@ -77,6 +77,14 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 const sanitizeCondition = (value: unknown): WorkflowCondition | null => {
     if (!isRecord(value)) {
         return null;
@@ -93,14 +101,16 @@ const sanitizeCondition = (value: unknown): WorkflowCondition | null => {
         if (typeof value.value !== 'number' || !Number.isFinite(value.value)) {
             return null;
         }
-    } else if (typeof value.value !== 'string') {
+    } else if (!sanitizeNonEmptyString(value.value)) {
         return null;
     }
 
     return {
         type: value.type as WorkflowCondition['type'],
         operator: value.operator as WorkflowCondition['operator'],
-        value: value.value as string | number,
+        value: isMessageCountCondition
+            ? value.value as number
+            : sanitizeNonEmptyString(value.value) as string,
     };
 };
 
@@ -111,13 +121,19 @@ const sanitizeAction = (value: unknown): WorkflowAction | null => {
     if (!ACTION_TYPES.has(value.type as WorkflowAction['type'])) {
         return null;
     }
-    if (typeof value.value !== 'string' && typeof value.value !== 'number') {
+    const actionValue = typeof value.value === 'string'
+        ? sanitizeNonEmptyString(value.value)
+        : (typeof value.value === 'number' && Number.isFinite(value.value) ? value.value : null);
+    if (actionValue === null) {
+        return null;
+    }
+    if (value.config !== undefined && !isRecord(value.config)) {
         return null;
     }
     const config = isRecord(value.config) ? value.config : undefined;
     return {
         type: value.type as WorkflowAction['type'],
-        value: value.value,
+        value: actionValue,
         config,
     };
 };
@@ -126,7 +142,9 @@ const sanitizeWorkflow = (value: unknown): WorkflowRule | null => {
     if (!isRecord(value)) {
         return null;
     }
-    if (typeof value.id !== 'string' || typeof value.name !== 'string') {
+    const id = sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    if (!id || !name) {
         return null;
     }
     if (typeof value.enabled !== 'boolean') {
@@ -147,9 +165,9 @@ const sanitizeWorkflow = (value: unknown): WorkflowRule | null => {
     }
 
     return {
-        id: value.id,
-        name: value.name,
-        description: typeof value.description === 'string' ? value.description : undefined,
+        id,
+        name,
+        description: sanitizeNonEmptyString(value.description) ?? undefined,
         enabled: value.enabled,
         conditions,
         actions,
@@ -185,11 +203,16 @@ export class WorkflowsService {
                 if (!Array.isArray(parsed)) {
                     return;
                 }
+                const seenIds = new Set<string>();
                 parsed.forEach((entry) => {
                     const workflow = sanitizeWorkflow(entry);
                     if (!workflow) {
                         return;
                     }
+                    if (seenIds.has(workflow.id)) {
+                        return;
+                    }
+                    seenIds.add(workflow.id);
                     this.workflows.set(workflow.id, workflow);
                 });
             }

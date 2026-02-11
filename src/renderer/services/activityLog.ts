@@ -21,6 +21,21 @@ const parseJson = (raw: string): unknown | null => {
   }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeFiniteNonNegativeNumber = (value: unknown): number | null => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+  return value;
+};
+
 export class ActivityLogService {
   private static instance: ActivityLogService;
 
@@ -40,7 +55,9 @@ export class ActivityLogService {
       if (!raw) return [];
       const parsed = parseJson(raw);
       if (!Array.isArray(parsed)) return [];
-      const validEntries = parsed.filter(this.isValidEntry);
+      const validEntries = parsed
+        .map((entry) => this.sanitizeEntry(entry))
+        .filter((entry): entry is ApiActivityLogEntry => entry !== null);
       this.saveCount(validEntries.length);
       return validEntries;
     } catch {
@@ -68,7 +85,11 @@ export class ActivityLogService {
 
   append(entry: ApiActivityLogEntry): ApiActivityLogEntry[] {
     const current = this.getEntries();
-    const next = [...current, entry].slice(-MAX_ACTIVITY_LOG_ENTRIES);
+    const sanitized = this.sanitizeEntry(entry);
+    if (!sanitized) {
+      return current;
+    }
+    const next = [...current, sanitized].slice(-MAX_ACTIVITY_LOG_ENTRIES);
     this.save(next);
     return next;
   }
@@ -96,21 +117,40 @@ export class ActivityLogService {
   private saveCount(count: number): void {
     try {
       if (typeof localStorage === 'undefined') return;
-      localStorage.setItem(ACTIVITY_LOG_COUNT_KEY, String(Math.max(0, count)));
+      const normalized = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+      localStorage.setItem(ACTIVITY_LOG_COUNT_KEY, String(normalized));
     } catch {
       // ignore storage errors
     }
   }
 
-  private isValidEntry(entry: unknown): entry is ApiActivityLogEntry {
-    if (!entry || typeof entry !== 'object') return false;
+  private sanitizeEntry(entry: unknown): ApiActivityLogEntry | null {
+    if (!entry || typeof entry !== 'object') return null;
     const candidate = entry as Partial<ApiActivityLogEntry>;
-    return (
-      typeof candidate.id === 'string' &&
-      typeof candidate.timestamp === 'number' &&
-      (candidate.type === 'request' || candidate.type === 'response' || candidate.type === 'error') &&
-      typeof candidate.model === 'string'
-    );
+    const id = sanitizeNonEmptyString(candidate.id);
+    const model = sanitizeNonEmptyString(candidate.model);
+    const timestamp = sanitizeFiniteNonNegativeNumber(candidate.timestamp);
+    if (!id || !model || timestamp === null) {
+      return null;
+    }
+    if (candidate.type !== 'request' && candidate.type !== 'response' && candidate.type !== 'error') {
+      return null;
+    }
+    const duration = candidate.duration === undefined
+      ? undefined
+      : sanitizeFiniteNonNegativeNumber(candidate.duration);
+    const error = sanitizeNonEmptyString(candidate.error);
+
+    return {
+      id,
+      timestamp,
+      type: candidate.type,
+      model,
+      request: candidate.request,
+      response: candidate.response,
+      error: error ?? undefined,
+      duration: duration ?? undefined,
+    };
   }
 }
 

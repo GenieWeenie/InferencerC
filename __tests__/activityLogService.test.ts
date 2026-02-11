@@ -43,10 +43,10 @@ describe('activityLogService', () => {
 
   test('appends and persists valid log entries', () => {
     const entry: ApiActivityLogEntry = {
-      id: 'entry-1',
+      id: '  entry-1  ',
       timestamp: Date.now(),
       type: 'request',
-      model: 'local/test-model',
+      model: '  local/test-model  ',
       request: { prompt: 'hello' },
     };
 
@@ -119,5 +119,44 @@ describe('activityLogService', () => {
     localStorageMock.setItem('api_activity_log_entries', JSON.stringify([]));
 
     expect(activityLogService.getEntryCount()).toBe(0);
+  });
+
+  test('drops malformed persisted rows and strips invalid optional fields', () => {
+    localStorageMock.setItem('api_activity_log_entries', JSON.stringify([
+      {
+        id: ' ok ',
+        timestamp: 1,
+        type: 'response',
+        model: ' local/model ',
+        duration: -3,
+        error: '   ',
+      },
+      {
+        id: 'bad',
+        timestamp: -1,
+        type: 'request',
+        model: 'local/model',
+      },
+      {
+        id: '',
+        timestamp: 2,
+        type: 'request',
+        model: 'local/model',
+      },
+    ]));
+
+    const entries = activityLogService.getEntries();
+    expect(entries).toEqual([
+      {
+        id: 'ok',
+        timestamp: 1,
+        type: 'response',
+        model: 'local/model',
+        duration: undefined,
+        error: undefined,
+        request: undefined,
+        response: undefined,
+      },
+    ]);
   });
 });

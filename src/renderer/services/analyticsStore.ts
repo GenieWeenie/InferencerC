@@ -16,16 +16,39 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
-const isUsageStatsRecord = (value: unknown): value is UsageStatsRecord => {
-    if (!value || typeof value !== 'object') return false;
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeFiniteNonNegativeNumber = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return null;
+    }
+    return value;
+};
+
+const sanitizeUsageStatsRecord = (value: unknown): UsageStatsRecord | null => {
+    if (!value || typeof value !== 'object') return null;
     const entry = value as Record<string, unknown>;
-    return typeof entry.date === 'string'
-        && typeof entry.tokenCount === 'number'
-        && Number.isFinite(entry.tokenCount)
-        && typeof entry.messageCount === 'number'
-        && Number.isFinite(entry.messageCount)
-        && typeof entry.modelId === 'string'
-        && typeof entry.sessionId === 'string';
+    const date = sanitizeNonEmptyString(entry.date);
+    const modelId = sanitizeNonEmptyString(entry.modelId);
+    const sessionId = sanitizeNonEmptyString(entry.sessionId);
+    const tokenCount = sanitizeFiniteNonNegativeNumber(entry.tokenCount);
+    const messageCount = sanitizeFiniteNonNegativeNumber(entry.messageCount);
+    if (!date || !modelId || !sessionId || tokenCount === null || messageCount === null) {
+        return null;
+    }
+    return {
+        date,
+        tokenCount,
+        messageCount,
+        modelId,
+        sessionId,
+    };
 };
 
 export const readAnalyticsUsageStats = (): UsageStatsRecord[] => {
@@ -34,7 +57,9 @@ export const readAnalyticsUsageStats = (): UsageStatsRecord[] => {
         if (!data) return [];
         const parsed = parseJson(data);
         if (!Array.isArray(parsed)) return [];
-        return parsed.filter(isUsageStatsRecord);
+        return parsed
+            .map((entry) => sanitizeUsageStatsRecord(entry))
+            .filter((entry): entry is UsageStatsRecord => entry !== null);
     } catch (error) {
         console.error('Failed to load analytics:', error);
         return [];

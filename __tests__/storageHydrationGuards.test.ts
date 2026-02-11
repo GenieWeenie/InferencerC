@@ -464,12 +464,17 @@ describe('storage hydration guards', () => {
     ]));
     localStorage.setItem('code_generations', JSON.stringify([
       {
-        code: 'export const x = 1;',
-        language: 'typescript',
-        explanation: 'Simple export',
-        dependencies: ['react', 3],
-        usage: 'import { x }',
+        code: '  export const x = 1;  ',
+        language: ' typescript ',
+        explanation: '  Simple export  ',
+        dependencies: ['react', ' react ', '', 3],
+        usage: '  import { x }  ',
         generatedAt: 2,
+      },
+      {
+        code: 'valid but bad timestamp',
+        language: 'typescript',
+        generatedAt: 'bad',
       },
       { code: 'bad' },
     ]));
@@ -567,6 +572,9 @@ describe('storage hydration guards', () => {
 
       expect(codeGenerationService.getGenerationHistory()).toHaveLength(1);
       expect(codeGenerationService.getGenerationHistory()[0]?.dependencies).toEqual(['react']);
+      expect(codeGenerationService.getGenerationHistory()[0]?.language).toBe('typescript');
+      expect(codeGenerationService.getGenerationHistory()[0]?.explanation).toBe('Simple export');
+      expect(codeGenerationService.getGenerationHistory()[0]?.usage).toBe('import { x }');
 
       expect(sentimentAnalysisService.getSentiment('session-1')?.sentimentLabel).toBe('positive');
       expect(sentimentAnalysisService.getSentiment('missing')).toBeNull();
@@ -893,13 +901,22 @@ describe('storage hydration guards', () => {
   test('guards testcase/autoresponse/variables/topic/bci/macro storage payloads', () => {
     localStorage.setItem('test_case_generations', JSON.stringify([
       {
-        testCode: 'it(\"works\", () => {});',
-        language: 'typescript',
-        framework: 'vitest',
-        testCases: [{ name: 'works', description: 'basic', code: 'it(\"works\")' }],
-        setupCode: 'beforeEach(() => {})',
-        teardownCode: 'afterEach(() => {})',
+        testCode: '  it(\"works\", () => {});  ',
+        language: ' typescript ',
+        framework: ' vitest ',
+        testCases: [
+          { name: ' works ', description: ' basic ', code: ' it(\"works\") ' },
+          { name: 'bad', description: '', code: 'noop' },
+        ],
+        setupCode: '  beforeEach(() => {})  ',
+        teardownCode: '  afterEach(() => {})  ',
         generatedAt: 1,
+      },
+      {
+        testCode: 'valid-code',
+        language: 'typescript',
+        testCases: [],
+        generatedAt: 'bad',
       },
       { testCode: 3 },
     ]));
@@ -921,6 +938,8 @@ describe('storage hydration guards', () => {
     ]));
     localStorage.setItem('prompt_custom_variables', JSON.stringify({
       team_name: 'Inferencer',
+      ' team_alias ': '  inferencer-labs  ',
+      '   ': 'bad-key',
       bad_number: 7,
     }));
     localStorage.setItem('topic_models', JSON.stringify([
@@ -994,6 +1013,10 @@ describe('storage hydration guards', () => {
 
       expect(testCaseGenerationService.getTestCaseHistory()).toHaveLength(1);
       expect(testCaseGenerationService.getTestCaseHistory()[0]?.framework).toBe('vitest');
+      expect(testCaseGenerationService.getTestCaseHistory()[0]?.testCode).toBe('it(\"works\", () => {});');
+      expect(testCaseGenerationService.getTestCaseHistory()[0]?.testCases).toEqual([
+        { name: 'works', description: 'basic', code: 'it(\"works\")' },
+      ]);
 
       const responses = autoResponsesService.getAllResponses();
       expect(responses).toHaveLength(1);
@@ -1003,7 +1026,20 @@ describe('storage hydration guards', () => {
       const promptVariablesService = promptVariablesModule.default;
       const customVars = promptVariablesService.getCustomVariables();
       expect(customVars.get('team_name')).toBe('Inferencer');
+      expect(customVars.get('team_alias')).toBe('inferencer-labs');
       expect(customVars.has('bad_number')).toBe(false);
+
+      const importResult = promptVariablesService.importVariables(JSON.stringify({
+        ' new_key ': '  new value  ',
+        '   ': 'bad',
+        non_string: 3,
+      }));
+      expect(importResult.imported).toBe(1);
+      expect(importResult.errors).toEqual(expect.arrayContaining([
+        'Skipped entry with empty variable name',
+        'Skipped "non_string": value must be a string',
+      ]));
+      expect(promptVariablesService.getCustomVariables().get('new_key')).toBe('new value');
 
       expect(topicModelingService.getAllTopicModels()).toHaveLength(1);
       expect(topicModelingService.getTopicModel('session-1')?.topics[0]?.keywords).toEqual(['code']);

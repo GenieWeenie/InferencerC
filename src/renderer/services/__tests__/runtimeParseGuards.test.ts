@@ -88,16 +88,23 @@ describe('runtime parse guards', () => {
             .toThrow('Stored blockchain conversation is unreadable');
     });
 
-    it('returns empty analytics usage stats for malformed persisted analytics payloads', () => {
-        localStorage.setItem('inferencer-analytics', '{bad-json');
+    it('sanitizes analytics usage stats and drops malformed rows', () => {
+        localStorage.setItem('inferencer-analytics', JSON.stringify([
+            { date: ' 2026-01-01 ', tokenCount: 12, messageCount: 3, modelId: ' model-a ', sessionId: ' session-1 ' },
+            { date: '', tokenCount: 1, messageCount: 1, modelId: 'model-b', sessionId: 'session-2' },
+            { date: '2026-01-02', tokenCount: -2, messageCount: 1, modelId: 'model-b', sessionId: 'session-2' },
+        ]));
         const { readAnalyticsUsageStats } = require('../analyticsStore') as typeof import('../analyticsStore');
-        expect(readAnalyticsUsageStats()).toEqual([]);
+        expect(readAnalyticsUsageStats()).toEqual([
+            { date: '2026-01-01', tokenCount: 12, messageCount: 3, modelId: 'model-a', sessionId: 'session-1' },
+        ]);
     });
 
     it('drops malformed activity log entries while preserving valid rows', () => {
         localStorage.setItem('api_activity_log_entries', JSON.stringify([
-            { id: 'ok', timestamp: 1, type: 'request', model: 'lm-studio' },
+            { id: ' ok ', timestamp: 1, type: 'request', model: ' lm-studio ', duration: -1 },
             { id: 123, timestamp: 'bad', type: 'request', model: 'lm-studio' },
+            { id: 'bad-type', timestamp: 2, type: 'noop', model: 'lm-studio' },
         ]));
 
         const { activityLogService } = require('../activityLog') as typeof import('../activityLog');
@@ -105,5 +112,7 @@ describe('runtime parse guards', () => {
 
         expect(entries).toHaveLength(1);
         expect(entries[0]?.id).toBe('ok');
+        expect(entries[0]?.model).toBe('lm-studio');
+        expect(entries[0]?.duration).toBeUndefined();
     });
 });

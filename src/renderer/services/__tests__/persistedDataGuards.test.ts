@@ -11,12 +11,21 @@ describe('persisted data parse guards', () => {
     it('ignores malformed workflow entries while keeping valid ones', () => {
         localStorage.setItem('workflows', JSON.stringify([
             {
-                id: 'wf-valid',
-                name: 'Valid Workflow',
+                id: ' wf-valid ',
+                name: ' Valid Workflow ',
                 enabled: true,
                 priority: 1,
-                conditions: [{ type: 'keyword', operator: 'contains', value: 'hello' }],
-                actions: [{ type: 'send-notification', value: 'notify' }],
+                description: '  Primary rule  ',
+                conditions: [{ type: 'keyword', operator: 'contains', value: ' hello ' }],
+                actions: [{ type: 'send-notification', value: ' notify ' }],
+            },
+            {
+                id: 'wf-valid',
+                name: 'Duplicate Should Be Ignored',
+                enabled: true,
+                priority: 3,
+                conditions: [{ type: 'keyword', operator: 'contains', value: 'duplicate' }],
+                actions: [{ type: 'send-notification', value: 'duplicate' }],
             },
             {
                 id: 'wf-invalid',
@@ -26,6 +35,14 @@ describe('persisted data parse guards', () => {
                 conditions: [{ type: 'keyword', operator: 'contains', value: 42 }],
                 actions: [{ type: 'send-notification', value: 'notify' }],
             },
+            {
+                id: 'wf-invalid-config',
+                name: 'Invalid Config',
+                enabled: true,
+                priority: 1,
+                conditions: [{ type: 'keyword', operator: 'contains', value: 'hello' }],
+                actions: [{ type: 'send-notification', value: 'notify', config: 'bad-config' }],
+            },
         ]));
 
         jest.isolateModules(() => {
@@ -33,6 +50,10 @@ describe('persisted data parse guards', () => {
             const workflows = workflowsService.getAllWorkflows();
             expect(workflows).toHaveLength(1);
             expect(workflows[0]?.id).toBe('wf-valid');
+            expect(workflows[0]?.name).toBe('Valid Workflow');
+            expect(workflows[0]?.description).toBe('Primary rule');
+            expect(workflows[0]?.conditions[0]?.value).toBe('hello');
+            expect(workflows[0]?.actions[0]?.value).toBe('notify');
         });
     });
 

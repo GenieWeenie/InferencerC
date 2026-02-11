@@ -38,41 +38,59 @@ const parseJson = (raw: string): unknown => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 const sanitizeCaseEntry = (
     value: unknown
 ): { name: string; description: string; code: string } | null => {
-    if (!isRecord(value)
-        || typeof value.name !== 'string'
-        || typeof value.description !== 'string'
-        || typeof value.code !== 'string') {
+    if (!isRecord(value)) {
+        return null;
+    }
+    const name = sanitizeNonEmptyString(value.name);
+    const description = sanitizeNonEmptyString(value.description);
+    const code = sanitizeNonEmptyString(value.code);
+    if (!name || !description || !code) {
         return null;
     }
 
     return {
-        name: value.name,
-        description: value.description,
-        code: value.code,
+        name,
+        description,
+        code,
     };
 };
 
 const sanitizeResult = (value: unknown): TestCaseResult | null => {
-    if (!isRecord(value)
-        || typeof value.testCode !== 'string'
-        || typeof value.language !== 'string'
-        || !Array.isArray(value.testCases)
-        || typeof value.generatedAt !== 'number') {
+    if (!isRecord(value)) {
         return null;
     }
+    const testCode = sanitizeNonEmptyString(value.testCode);
+    const language = sanitizeNonEmptyString(value.language);
+    if (!testCode || !language || !Array.isArray(value.testCases)) {
+        return null;
+    }
+    if (typeof value.generatedAt !== 'number' || !Number.isFinite(value.generatedAt)) {
+        return null;
+    }
+    const framework = sanitizeNonEmptyString(value.framework);
+    const setupCode = sanitizeNonEmptyString(value.setupCode);
+    const teardownCode = sanitizeNonEmptyString(value.teardownCode);
 
     return {
-        testCode: value.testCode,
-        language: value.language,
-        framework: typeof value.framework === 'string' ? value.framework : undefined,
+        testCode,
+        language,
+        framework: framework ?? undefined,
         testCases: value.testCases
             .map((entry) => sanitizeCaseEntry(entry))
             .filter((entry): entry is { name: string; description: string; code: string } => entry !== null),
-        setupCode: typeof value.setupCode === 'string' ? value.setupCode : undefined,
-        teardownCode: typeof value.teardownCode === 'string' ? value.teardownCode : undefined,
+        setupCode: setupCode ?? undefined,
+        teardownCode: teardownCode ?? undefined,
         generatedAt: value.generatedAt,
     };
 };

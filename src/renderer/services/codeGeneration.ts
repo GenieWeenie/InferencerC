@@ -36,27 +36,52 @@ const parseJson = (raw: string): unknown => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 const sanitizeStringArray = (value: unknown): string[] => {
     if (!Array.isArray(value)) {
         return [];
     }
-    return value.filter((entry): entry is string => typeof entry === 'string');
+    const result: string[] = [];
+    const seen = new Set<string>();
+    for (let index = 0; index < value.length; index++) {
+        const normalized = sanitizeNonEmptyString(value[index]);
+        if (!normalized || seen.has(normalized)) {
+            continue;
+        }
+        seen.add(normalized);
+        result.push(normalized);
+    }
+    return result;
 };
 
 const sanitizeStoredGeneration = (value: unknown): CodeGenerationResult | null => {
-    if (!isRecord(value)
-        || typeof value.code !== 'string'
-        || typeof value.language !== 'string'
-        || typeof value.generatedAt !== 'number') {
+    if (!isRecord(value)) {
         return null;
     }
+    const code = sanitizeNonEmptyString(value.code);
+    const language = sanitizeNonEmptyString(value.language);
+    if (!code || !language) {
+        return null;
+    }
+    if (typeof value.generatedAt !== 'number' || !Number.isFinite(value.generatedAt)) {
+        return null;
+    }
+    const explanation = sanitizeNonEmptyString(value.explanation);
+    const usage = sanitizeNonEmptyString(value.usage);
 
     return {
-        code: value.code,
-        language: value.language,
-        explanation: typeof value.explanation === 'string' ? value.explanation : undefined,
+        code,
+        language,
+        explanation: explanation ?? undefined,
         dependencies: sanitizeStringArray(value.dependencies),
-        usage: typeof value.usage === 'string' ? value.usage : undefined,
+        usage: usage ?? undefined,
         generatedAt: value.generatedAt,
     };
 };

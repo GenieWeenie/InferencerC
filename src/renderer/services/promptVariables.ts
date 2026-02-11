@@ -54,6 +54,21 @@ const parseJson = (raw: string): unknown => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeVariableValue = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    return value.trim();
+};
+
 const sanitizeCustomVariableRecord = (value: unknown): Record<string, string> => {
     if (!isRecord(value)) {
         return {};
@@ -61,8 +76,10 @@ const sanitizeCustomVariableRecord = (value: unknown): Record<string, string> =>
 
     const sanitized: Record<string, string> = {};
     Object.entries(value).forEach(([key, entry]) => {
-        if (typeof entry === 'string') {
-            sanitized[key] = entry;
+        const normalizedKey = sanitizeNonEmptyString(key);
+        const normalizedValue = sanitizeVariableValue(entry);
+        if (normalizedKey && normalizedValue !== null) {
+            sanitized[normalizedKey] = normalizedValue;
         }
     });
     return sanitized;
@@ -384,10 +401,12 @@ export class PromptVariableService {
      */
     static setCustomVariable(name: string, value: string): void {
         this.init();
-        if (!name) {
+        const normalizedName = sanitizeNonEmptyString(name);
+        const normalizedValue = sanitizeVariableValue(value);
+        if (!normalizedName || normalizedValue === null) {
             return;
         }
-        this.customVariables.set(name, value);
+        this.customVariables.set(normalizedName, normalizedValue);
         this.persistCustomVariables();
     }
 
@@ -396,7 +415,11 @@ export class PromptVariableService {
      */
     static deleteCustomVariable(name: string): boolean {
         this.init();
-        const deleted = this.customVariables.delete(name);
+        const normalizedName = sanitizeNonEmptyString(name);
+        if (!normalizedName) {
+            return false;
+        }
+        const deleted = this.customVariables.delete(normalizedName);
         if (deleted) {
             this.persistCustomVariables();
         }
@@ -504,23 +527,25 @@ export class PromptVariableService {
         const errors: string[] = [];
         let imported = 0;
 
-        try {
-            const data = parseJson(json);
-            if (!isRecord(data)) {
-                errors.push('Invalid JSON format');
-                return { imported, errors };
-            }
+        const data = parseJson(json);
+        if (!isRecord(data)) {
+            errors.push('Invalid JSON format');
+            return { imported, errors };
+        }
 
-            for (const [key, value] of Object.entries(data)) {
-                if (typeof value === 'string') {
-                    this.setCustomVariable(key, value);
-                    imported++;
-                } else {
-                    errors.push(`Skipped "${key}": value must be a string`);
-                }
+        for (const [key, value] of Object.entries(data)) {
+            const normalizedKey = sanitizeNonEmptyString(key);
+            if (!normalizedKey) {
+                errors.push('Skipped entry with empty variable name');
+                continue;
             }
-        } catch (e) {
-            errors.push('Failed to parse JSON');
+            const normalizedValue = sanitizeVariableValue(value);
+            if (normalizedValue === null) {
+                errors.push(`Skipped "${normalizedKey}": value must be a string`);
+                continue;
+            }
+            this.setCustomVariable(normalizedKey, normalizedValue);
+            imported++;
         }
 
         return { imported, errors };
