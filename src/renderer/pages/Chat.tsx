@@ -30,7 +30,6 @@ import { ChatSidebar, type ChatSidebarPanels } from '../components/chat/ChatSide
 import { ChatWorkspaceShell } from '../components/chat/ChatWorkspaceShell';
 import type { LaunchReadinessStep } from '../components/ChatEmptyState';
 import type { LogEntry } from '../components/RequestResponseLog';
-import type { CloudSyncStatus } from '../services/cloudSync';
 const PromptManager = React.lazy(() => import('../components/PromptManager'));
 import { useChat } from '../hooks/useChat';
 import { usePrompts } from '../hooks/usePrompts';
@@ -48,7 +47,9 @@ import { useChatKeyboardController } from '../hooks/useChatKeyboardController';
 import { useChatMessageActionsController } from '../hooks/useChatMessageActionsController';
 import { useChatHeaderUtilityControls } from '../hooks/useChatHeaderUtilityControls';
 import { useChatMessageListSearch } from '../hooks/useChatMessageListSearch';
+import { useChatPanelsState } from '../hooks/useChatPanelsState';
 import { formatPerfMs, useChatPerfBenchmarks } from '../hooks/useChatPerfBenchmarks';
+import { useChatRuntimeServices } from '../hooks/useChatRuntimeServices';
 import { useChatSendPipeline } from '../hooks/useChatSendPipeline';
 import { useChatSessionIntegrations } from '../hooks/useChatSessionIntegrations';
 import { useChatSlashPrompts } from '../hooks/useChatSlashPrompts';
@@ -56,10 +57,8 @@ import { useChatStartupRecovery } from '../hooks/useChatStartupRecovery';
 import { buildReadinessSteps, getDiagnosticsStatus } from '../lib/chatDiagnosticsModels';
 import {
     loadActivityLogService,
-    loadAnalyticsStore,
     loadAutoCategorizationService,
     loadAutoTaggingService,
-    loadCloudSyncService,
     loadContextManagementService,
     loadMultiModalAIService,
     loadProjectContextService,
@@ -325,10 +324,81 @@ const Chat: React.FC = () => {
     const { prompts } = usePrompts();
     const [searchQuery, setSearchQuery] = React.useState('');
     const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState('');
-    const [showSearch, setShowSearch] = React.useState(false);
     const [searchResults, setSearchResults] = React.useState<number[]>([]);
     const [currentSearchIndex, setCurrentSearchIndex] = React.useState(0);
-    const [showSearchResultsList, setShowSearchResultsList] = React.useState(false);
+    const {
+        showSearch,
+        setShowSearch,
+        showSearchResultsList,
+        setShowSearchResultsList,
+        showInspector,
+        setShowInspector,
+        showShortcutsModal,
+        setShowShortcutsModal,
+        showAnalytics,
+        setShowAnalytics,
+        showGithubInput,
+        setShowGithubInput,
+        showTreeView,
+        setShowTreeView,
+        branchingEnabled,
+        setBranchingEnabled,
+        showExportDialog,
+        setShowExportDialog,
+        showGlobalSearch,
+        setShowGlobalSearch,
+        showABTesting,
+        setShowABTesting,
+        showPromptOptimization,
+        setShowPromptOptimization,
+        showCalendarSchedule,
+        setShowCalendarSchedule,
+        showSuggestions,
+        setShowSuggestions,
+        showRecommendations,
+        setShowRecommendations,
+        showWorkflows,
+        setShowWorkflows,
+        showAPIPlayground,
+        setShowAPIPlayground,
+        showDeveloperDocs,
+        setShowDeveloperDocs,
+        sidebarOpen,
+        setSidebarOpen,
+        showPluginManager,
+        setShowPluginManager,
+        showCodeIntegration,
+        setShowCodeIntegration,
+        selectedCode,
+        setSelectedCode,
+        showWorkspaceViews,
+        setShowWorkspaceViews,
+        showBCI,
+        setShowBCI,
+        showMultiModal,
+        setShowMultiModal,
+        showCollaboration,
+        setShowCollaboration,
+        showCloudSync,
+        setShowCloudSync,
+        showTeamWorkspaces,
+        setShowTeamWorkspaces,
+        showEnterpriseCompliance,
+        setShowEnterpriseCompliance,
+        showBlockchain,
+        setShowBlockchain,
+        showAIAgents,
+        setShowAIAgents,
+        showFederatedLearning,
+        setShowFederatedLearning,
+        showTemplateLibrary,
+        setShowTemplateLibrary,
+        showVariableMenu,
+        setShowVariableMenu,
+        handleToggleTreeView,
+        handleToggleBranching,
+        handleOpenExportDialogShortcut,
+    } = useChatPanelsState({ historyLength: history.length });
     const {
         hasConfiguredMcpServers,
         isCompactViewport,
@@ -349,12 +419,10 @@ const Chat: React.FC = () => {
         executeTool: executeMcpTool,
     } = useMCP({ enabled: hasConfiguredMcpServers, deferUntilIdle: true });
     const [isDragging, setIsDragging] = React.useState(false);
-    const [showInspector, setShowInspector] = React.useState(false);
     const [activeTab, setActiveTab] = React.useState<SidebarTab>('controls');
     const [isEditingSystemPrompt, setIsEditingSystemPrompt] = React.useState(false);
     const [editingMessageIndex, setEditingMessageIndex] = React.useState<number | null>(null);
     const [editedMessageContent, setEditedMessageContent] = React.useState<string>('');
-    const [showShortcutsModal, setShowShortcutsModal] = React.useState(false);
     const virtuosoRef = React.useRef<any>(null);
     const searchResultPreviewCacheRef = React.useRef<Map<number, SearchResultPreviewCacheEntry>>(new Map());
     const rowMetadataCacheRef = React.useRef(createChatRowMetadataCacheState());
@@ -371,62 +439,13 @@ const Chat: React.FC = () => {
     });
     const [messageRatings, setMessageRatings] = React.useState<Record<number, 'up' | 'down'>>({});
     const [jsonMode, setJsonMode] = React.useState(false);
-    const [showAnalytics, setShowAnalytics] = React.useState(false);
     const [usageStats, setUsageStats] = React.useState<UsageStatsRecord[]>([]);
     const [comparisonIndex, setComparisonIndex] = React.useState<number | null>(null);
     const [projectContext, setProjectContext] = React.useState<ProjectContext | null>(null);
     const [projectContextFeatureEnabled, setProjectContextFeatureEnabled] = React.useState(readPersistedProjectContextFeatureEnabled);
     const [includeContextInMessages, setIncludeContextInMessages] = React.useState(true);
-    const [showGithubInput, setShowGithubInput] = React.useState(false);
     const [githubUrl, setGithubUrl] = React.useState('');
-
-    // Conversation branching state
-    const [showTreeView, setShowTreeView] = React.useState(false);
-    const [branchingEnabled, setBranchingEnabled] = React.useState(false);
-
-    // Export dialog state
-    const [showExportDialog, setShowExportDialog] = React.useState(false);
-
-    // Global search dialog state
-    const [showGlobalSearch, setShowGlobalSearch] = React.useState(false);
-
-    // A/B Testing panel state
-    const [showABTesting, setShowABTesting] = React.useState(false);
-
-    // Prompt Optimization panel state
-    const [showPromptOptimization, setShowPromptOptimization] = React.useState(false);
-
-    // Calendar schedule dialog state
-    const [showCalendarSchedule, setShowCalendarSchedule] = React.useState(false);
-
-    // Smart Suggestions state
-    const [showSuggestions, setShowSuggestions] = React.useState(false);
-    const [showRecommendations, setShowRecommendations] = React.useState(false);
-    const [showWorkflows, setShowWorkflows] = React.useState(false);
-    const [showAPIPlayground, setShowAPIPlayground] = React.useState(false);
-    const [showDeveloperDocs, setShowDeveloperDocs] = React.useState(false);
-    const [sidebarOpen, setSidebarOpen] = React.useState(false);
-    const [showPluginManager, setShowPluginManager] = React.useState(false);
-    const [showCodeIntegration, setShowCodeIntegration] = React.useState(false);
-    const [selectedCode, setSelectedCode] = React.useState<{ code: string; language: string } | null>(null);
-    const [showWorkspaceViews, setShowWorkspaceViews] = React.useState(false);
     const [contextManagementService, setContextManagementService] = React.useState<ContextManagementServiceType | null>(null);
-    const [showBCI, setShowBCI] = React.useState(false);
-    const [showMultiModal, setShowMultiModal] = React.useState(false);
-    const [showCollaboration, setShowCollaboration] = React.useState(false);
-    const [showCloudSync, setShowCloudSync] = React.useState(false);
-    const [showTeamWorkspaces, setShowTeamWorkspaces] = React.useState(false);
-    const [showEnterpriseCompliance, setShowEnterpriseCompliance] = React.useState(false);
-    const [cloudSyncStatus, setCloudSyncStatus] = React.useState<CloudSyncStatus | null>(null);
-    const [showBlockchain, setShowBlockchain] = React.useState(false);
-    const [showAIAgents, setShowAIAgents] = React.useState(false);
-    const [showFederatedLearning, setShowFederatedLearning] = React.useState(false);
-
-    // Template library dialog state
-    const [showTemplateLibrary, setShowTemplateLibrary] = React.useState(false);
-
-    // Variable insert menu state
-    const [showVariableMenu, setShowVariableMenu] = React.useState(false);
     const messageListRef = React.useRef<HTMLDivElement | null>(null);
     const composerContainerRef = React.useRef<HTMLDivElement | null>(null);
     const longPressMenuRef = React.useRef<HTMLDivElement | null>(null);
@@ -435,15 +454,6 @@ const Chat: React.FC = () => {
 
     // Initialize conversation tree only when branching is enabled.
     const treeHook = useConversationTree(history, { enabled: branchingEnabled });
-
-    const hydrateUsageStats = React.useCallback(async () => {
-        try {
-            const analyticsStore = await loadAnalyticsStore();
-            setUsageStats(analyticsStore.readAnalyticsUsageStats());
-        } catch {
-            setUsageStats([]);
-        }
-    }, []);
 
     const shouldLoadContextManagement = history.length > 0 || sidebarOpen || projectContextFeatureEnabled;
     React.useEffect(() => {
@@ -467,116 +477,27 @@ const Chat: React.FC = () => {
     }, [shouldLoadContextManagement, contextManagementService]);
 
     const shouldLoadCloudSyncService = showCloudSync || isCloudSyncAuthenticated;
-    React.useEffect(() => {
-        if (!shouldLoadCloudSyncService) {
-            setCloudSyncStatus(null);
-            return;
-        }
-
-        let cancelled = false;
-
-        const refreshCloudSyncStatus = async () => {
-            try {
-                const cloudSyncService = await loadCloudSyncService();
-                if (cancelled) return;
-                setCloudSyncStatus(cloudSyncService.getSyncStatus());
-                setIsCloudSyncAuthenticated(cloudSyncService.isAuthenticated());
-            } catch {
-                if (cancelled) return;
-                setCloudSyncStatus(null);
-            }
-        };
-
-        void refreshCloudSyncStatus();
-        const interval = setInterval(() => {
-            void refreshCloudSyncStatus();
-        }, 5000);
-
-        const handleRefresh = () => {
-            void refreshCloudSyncStatus();
-        };
-        window.addEventListener('focus', handleRefresh);
-        window.addEventListener('storage', handleRefresh);
-
-        return () => {
-            cancelled = true;
-            clearInterval(interval);
-            window.removeEventListener('focus', handleRefresh);
-            window.removeEventListener('storage', handleRefresh);
-        };
-    }, [shouldLoadCloudSyncService]);
-
-    const cloudSyncBadge = React.useMemo(() => {
-        if (!isCloudSyncAuthenticated) {
-            return {
-                label: 'Cloud Off',
-                className: 'bg-slate-800 hover:bg-slate-700 text-slate-300',
-                title: 'Cloud sync is not authenticated',
-            };
-        }
-
-        if (!cloudSyncStatus?.lastSyncedAt) {
-            return {
-                label: 'Cloud Ready',
-                className: 'bg-cyan-900/40 hover:bg-cyan-800/40 text-cyan-300 border-cyan-700/60',
-                title: 'Cloud sync is authenticated and ready',
-            };
-        }
-
-        const ageMs = Date.now() - cloudSyncStatus.lastSyncedAt;
-        if (ageMs < 5 * 60 * 1000) {
-            return {
-                label: 'Cloud Synced',
-                className: 'bg-emerald-900/40 hover:bg-emerald-800/40 text-emerald-300 border-emerald-700/60',
-                title: `Last sync ${new Date(cloudSyncStatus.lastSyncedAt).toLocaleString()}`,
-            };
-        }
-
-        return {
-            label: 'Cloud Stale',
-            className: 'bg-amber-900/40 hover:bg-amber-800/40 text-amber-300 border-amber-700/60',
-            title: `Last sync ${new Date(cloudSyncStatus.lastSyncedAt).toLocaleString()}`,
-        };
-    }, [cloudSyncStatus, isCloudSyncAuthenticated]);
+    const { cloudSyncBadge, clearApiLogs } = useChatRuntimeServices({
+        showRequestLog,
+        hasHydratedApiLogs,
+        setApiLogs,
+        setApiLogCount,
+        setHasHydratedApiLogs,
+        showAnalytics,
+        setUsageStats,
+        showBottomControls,
+        setShowExpertMenu,
+        setShowVariableMenu,
+        shouldLoadCloudSyncService,
+        isCloudSyncAuthenticated,
+        setIsCloudSyncAuthenticated,
+    });
 
     React.useEffect(() => {
         if (isCompactViewport && showHistory) {
             setShowHistory(false);
         }
     }, [isCompactViewport, setShowHistory, showHistory]);
-
-    React.useEffect(() => {
-        if (!showRequestLog || hasHydratedApiLogs) return;
-        let cancelled = false;
-        void loadActivityLogService()
-            .then((service) => {
-                if (cancelled) return;
-                setApiLogs(service.getEntries());
-                setApiLogCount(service.getEntryCount());
-                setHasHydratedApiLogs(true);
-            })
-            .catch(() => {
-                if (cancelled) return;
-                setApiLogs([]);
-                setHasHydratedApiLogs(true);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [showRequestLog, hasHydratedApiLogs]);
-
-    React.useEffect(() => {
-        if (!showAnalytics) return;
-        void hydrateUsageStats();
-    }, [showAnalytics, hydrateUsageStats]);
-
-    React.useEffect(() => {
-        localStorage.setItem('chat_show_bottom_controls', showBottomControls ? '1' : '0');
-        if (!showBottomControls) {
-            setShowExpertMenu(false);
-            setShowVariableMenu(false);
-        }
-    }, [showBottomControls]);
 
     React.useEffect(() => {
         const composerElement = composerContainerRef.current;
@@ -1137,31 +1058,6 @@ const Chat: React.FC = () => {
             toast.success('Last response copied to clipboard');
         }
     }, [history]);
-
-    const handleOpenExportDialogShortcut = React.useCallback(() => {
-        if (history.length > 0) {
-            setShowExportDialog(true);
-            return;
-        }
-        toast.info('No messages to export');
-    }, [history.length]);
-
-    const handleToggleTreeView = React.useCallback(() => {
-        setShowTreeView((prev) => !prev);
-        if (!branchingEnabled) {
-            setBranchingEnabled(true);
-            toast.info('Conversation branching enabled');
-        }
-    }, [branchingEnabled]);
-
-    const handleToggleBranching = React.useCallback(() => {
-        if (!branchingEnabled) {
-            setBranchingEnabled(true);
-            toast.success('Conversation branching enabled! Create branches by sending different messages.');
-            return;
-        }
-        toast.info('Branching is ready - send a different message to create a branch');
-    }, [branchingEnabled]);
 
     const handleNavigateBranch = React.useCallback((direction: -1 | 1) => {
         const currentIndex = treeHook.getCurrentSiblingIndex();
@@ -1770,18 +1666,7 @@ const Chat: React.FC = () => {
                                     isOpen={showRequestLog}
                                     onClose={() => setShowRequestLog(false)}
                                     logs={apiLogs}
-                                    onClear={() => {
-                                        void loadActivityLogService()
-                                            .then((service) => {
-                                                service.clear();
-                                            })
-                                            .catch(() => {
-                                                // Keep UI state cleared even if persistent store clear fails.
-                                            });
-                                        setApiLogs([]);
-                                        setApiLogCount(0);
-                                        setHasHydratedApiLogs(true);
-                                    }}
+                                    onClear={clearApiLogs}
                                 />
                             </React.Suspense>
                         ) : null,

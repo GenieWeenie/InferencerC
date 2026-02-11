@@ -1,36 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { ChatResponse, Message, TokenLogprob, Model, ChatMessage, ChatSession, ToolCall } from '../../shared/types';
+import { TokenLogprob, Model, ChatMessage, ChatSession } from '../../shared/types';
 import { HistoryService } from '../services/history';
-import { simulateLogprobs, detectIntent, findBestModelForIntent } from '../lib/chatUtils';
 import {
-    buildAppendMessagePatch,
-    buildContextMessagesPatch,
-    buildDeleteMessagePatch,
-    buildHistoryResetPatch,
-    buildLazySessionLoadPatch,
-    buildMessageReplacePatch,
     buildOutgoingMessagePatch,
-    buildSessionReloadSignature,
     buildSavedSessionsPatch,
-    buildChoiceSelectionUpdate,
-    buildMessageLoadPatch,
     buildStopGenerationPatch,
-    buildTokenEditUpdate,
-    buildUpdatedMessageContent,
-    collectMessageIndicesToLoad,
-    shouldSkipSessionReload,
 } from '../lib/chatStateGuards';
-import {
-    applyChatStreamChunk,
-    consumeChatStreamContent,
-    createChatStreamParseState,
-    flushChatStreamToolCalls,
-} from '../lib/chatStreamParser';
 import { useChatBootstrap } from './useChatBootstrap';
 import { useChatModelDiscovery } from './useChatModelDiscovery';
 import { useChatSessionPersistence } from './useChatSessionPersistence';
-import { AVAILABLE_TOOLS } from '../lib/tools';
+import { useChatMessageMutations } from './useChatMessageMutations';
+import { useChatSendOrchestrator } from './useChatSendOrchestrator';
+import { useChatSessionManager } from './useChatSessionManager';
+import { useChatStreaming } from './useChatStreaming';
 import { crashRecoveryService } from '../services/crashRecovery';
 import { performanceService } from '../services/performance';
 import {
@@ -343,115 +326,55 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         return () => clearTimeout(timer);
     }, [input, sessionId]);
 
-    const createNewSession = () => {
-        const newSession = HistoryService.createNewSession(currentModel || 'local-lmstudio');
-        const resetPatch = buildHistoryResetPatch([]);
-        lastSidebarMetadataSignatureRef.current = '';
-        setSessionId(newSession.id);
-        loadedSessionIdRef.current = newSession.id;
-        loadedSessionMessagesRef.current = [];
-        loadedSessionSignatureRef.current = buildSessionReloadSignature(newSession.id, newSession.lastModified);
-        applyHistoryStatePatch(resetPatch);
-        selectedTokenRef.current = null;
-        setSelectedToken(null);
-        HistoryService.setLastActiveSessionId(newSession.id);
-        HistoryService.saveSession(newSession);
-        setSavedSessions((prev) => {
-            const metadata: ChatSession = {
-                ...newSession,
-                messages: [],
-            };
-            const patch = buildSavedSessionsPatch(prev, { type: 'upsertTop', metadata });
-            return patch ?? prev;
-        });
-        setShowHistory(false);
+    const {
+        replaceHistory,
+        truncateHistory,
+        appendMessage,
+        deleteMessage,
+        selectChoice,
+        updateMessageContent,
+        updateMessageToken,
+    } = useChatMessageMutations({
+        applyHistoryStatePatch,
+        historyRef,
+        fullMessageCacheRef,
+        loadedMessageIndicesRef,
+        selectedTokenRef,
+        setSelectedToken,
+    });
 
-        // Restore draft for new session
-        const draft = crashRecoveryService.getDraft(newSession.id);
-        if (draft) {
-            setInput(draft);
-        } else {
-            setInput('');
-        }
-
-        logComplianceEvent({
-            category: 'chat.session',
-            action: 'created',
-            result: 'success',
-            resourceType: 'session',
-            resourceId: newSession.id,
-            details: {
-                modelId: newSession.modelId,
-            },
-        });
-    };
-
-    const loadSession = (id: string) => {
-        const session = HistoryService.getSession(id);
-        if (session) {
-            if (shouldSkipSessionReload({
-                activeSessionId: sessionId,
-                loadedSessionSignature: loadedSessionSignatureRef.current,
-                nextSessionId: session.id,
-                nextSessionLastModified: session.lastModified,
-            })) {
-                setShowHistory(false);
-                return;
-            }
-
-            lastSidebarMetadataSignatureRef.current = '';
-            setSessionId(session.id);
-
-            // Lazy loading: Only load recent messages initially
-            const INITIAL_LOAD_COUNT = 50; // Load last 50 messages with full content
-            const allMessages = session.messages;
-            const messageCount = allMessages.length;
-            loadedSessionIdRef.current = session.id;
-            loadedSessionMessagesRef.current = allMessages;
-            loadedSessionSignatureRef.current = buildSessionReloadSignature(session.id, session.lastModified);
-            const lazySessionPatch = buildLazySessionLoadPatch({
-                allMessages,
-                initialLoadCount: INITIAL_LOAD_COUNT,
-            });
-            applyHistoryStatePatch(lazySessionPatch);
-
-            if (session.modelId) {
-                setCurrentModel(session.modelId);
-                localStorage.setItem('app_last_model', session.modelId);
-            }
-            // Restore all session state
-            if (session.expertMode !== undefined) setExpertMode(session.expertMode);
-            if (session.thinkingEnabled !== undefined) setThinkingEnabled(session.thinkingEnabled);
-            if (session.systemPrompt !== undefined) setSystemPrompt(session.systemPrompt);
-            if (session.temperature !== undefined) setTemperature(session.temperature);
-            if (session.topP !== undefined) setTopP(session.topP);
-            if (session.maxTokens !== undefined) setMaxTokens(session.maxTokens);
-            if (session.batchSize !== undefined) setBatchSize(session.batchSize);
-            HistoryService.setLastActiveSessionId(session.id);
-            setSelectedToken(null);
-            setShowHistory(false);
-
-            // Restore draft for this session
-            const draft = crashRecoveryService.getDraft(session.id);
-            if (draft) {
-                setInput(draft);
-            } else {
-                setInput('');
-            }
-
-            logComplianceEvent({
-                category: 'chat.session',
-                action: 'loaded',
-                result: 'success',
-                resourceType: 'session',
-                resourceId: session.id,
-                details: {
-                    messageCount,
-                    modelId: session.modelId,
-                },
-            });
-        }
-    };
+    const {
+        createNewSession,
+        loadSession,
+        deleteSession,
+        loadMessageRange,
+    } = useChatSessionManager({
+        sessionId,
+        currentModel,
+        setSessionId,
+        setSavedSessions,
+        setShowHistory,
+        setInput,
+        setCurrentModel,
+        setExpertMode,
+        setThinkingEnabled,
+        setSystemPrompt,
+        setTemperature,
+        setTopP,
+        setMaxTokens,
+        setBatchSize,
+        setSelectedToken,
+        applyHistoryStatePatch,
+        historyRef,
+        fullMessageCacheRef,
+        loadedMessageIndicesRef,
+        selectedTokenRef,
+        loadedSessionIdRef,
+        loadedSessionMessagesRef,
+        loadedSessionSignatureRef,
+        lastSidebarMetadataSignatureRef,
+        logComplianceEvent,
+    });
 
     useChatBootstrap({
         didBootstrapSessionsRef,
@@ -465,110 +388,6 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         maxTokens,
         setMaxTokens,
     });
-
-    const deleteSession = (id: string) => {
-        lastSidebarMetadataSignatureRef.current = '';
-        HistoryService.deleteSession(id);
-        setSavedSessions((prev) => {
-            const patch = buildSavedSessionsPatch(prev, { type: 'removeById', id });
-            return patch ?? prev;
-        });
-        if (id === sessionId) createNewSession();
-        logComplianceEvent({
-            category: 'chat.session',
-            action: 'deleted',
-            result: 'success',
-            resourceType: 'session',
-            resourceId: id,
-            details: {},
-        });
-    };
-
-    const resolveLazyLoadSourceMessages = useCallback((): ChatMessage[] => {
-        if (sessionId && loadedSessionIdRef.current === sessionId && loadedSessionMessagesRef.current.length > 0) {
-            return loadedSessionMessagesRef.current;
-        }
-
-        if (sessionId) {
-            const session = HistoryService.getSession(sessionId);
-            if (session && session.messages.length > 0) {
-                loadedSessionIdRef.current = sessionId;
-                loadedSessionMessagesRef.current = session.messages;
-                return session.messages;
-            }
-        }
-
-        return historyRef.current;
-    }, [sessionId]);
-
-    // Lazy loading: Load message content on demand
-    const loadMessageContent = useCallback((indices: number[]) => {
-        const allMessages = resolveLazyLoadSourceMessages();
-        const patch = buildMessageLoadPatch(
-            allMessages,
-            loadedMessageIndicesRef.current,
-            fullMessageCacheRef.current,
-            indices
-        );
-        if (!patch) {
-            return;
-        }
-
-        applyHistoryStatePatch({
-            nextHistory: historyRef.current,
-            nextFullMessageCache: patch.nextFullMessageCache,
-            nextLoadedMessageIndices: patch.nextLoadedMessageIndices,
-        });
-    }, [applyHistoryStatePatch, resolveLazyLoadSourceMessages]);
-
-    // Load a range of messages (for scrolling/pagination)
-    const loadMessageRange = useCallback((startIndex: number, endIndex: number) => {
-        const allMessages = resolveLazyLoadSourceMessages();
-        const indicesToLoad = collectMessageIndicesToLoad(
-            startIndex,
-            endIndex,
-            allMessages.length,
-            loadedMessageIndicesRef.current
-        );
-        if (indicesToLoad.length > 0) {
-            loadMessageContent(indicesToLoad);
-        }
-    }, [loadMessageContent, resolveLazyLoadSourceMessages]);
-
-    const applyAppendedMessagePatch = useCallback((patch: ReturnType<typeof buildAppendMessagePatch>) => {
-        applyHistoryStatePatch(patch);
-    }, [applyHistoryStatePatch]);
-
-    const replaceHistory = useCallback((nextHistory: ChatMessage[]) => {
-        const resetPatch = buildHistoryResetPatch(nextHistory);
-        applyHistoryStatePatch(resetPatch);
-        setSelectedToken((prevSelectedToken) => {
-            if (!prevSelectedToken || prevSelectedToken.messageIndex < nextHistory.length) {
-                return prevSelectedToken;
-            }
-            selectedTokenRef.current = null;
-            return null;
-        });
-    }, [applyHistoryStatePatch]);
-
-    const truncateHistory = useCallback((endExclusive: number) => {
-        const currentHistory = historyRef.current;
-        const boundedEnd = Math.max(0, Math.min(endExclusive, currentHistory.length));
-        if (boundedEnd === currentHistory.length) {
-            return;
-        }
-        replaceHistory(currentHistory.slice(0, boundedEnd));
-    }, [replaceHistory]);
-
-    const appendMessage = useCallback((message: ChatMessage) => {
-        const appendPatch = buildAppendMessagePatch(
-            historyRef.current,
-            fullMessageCacheRef.current,
-            loadedMessageIndicesRef.current,
-            message
-        );
-        applyAppendedMessagePatch(appendPatch);
-    }, [applyAppendedMessagePatch]);
 
     const executeWebFetch = useCallback(async () => {
         if (!urlInput) { setShowUrlInput(false); return; }
@@ -610,436 +429,30 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         }
     }, [appendMessage, logComplianceEvent, urlInput]);
 
-    const applyDeleteMessagePatch = useCallback((patch: NonNullable<ReturnType<typeof buildDeleteMessagePatch>>) => {
-        applyHistoryStatePatch(patch);
-    }, [applyHistoryStatePatch]);
-
-    const applyMessageReplacePatch = useCallback((patch: NonNullable<ReturnType<typeof buildMessageReplacePatch>>) => {
-        applyHistoryStatePatch({
-            nextHistory: patch.nextHistory,
-            nextFullMessageCache: patch.nextFullMessageCache,
-            nextLoadedMessageIndices: loadedMessageIndicesRef.current,
-        });
-    }, [applyHistoryStatePatch]);
-
-    const deleteMessage = useCallback((index: number) => {
-        const patch = buildDeleteMessagePatch(
-            historyRef.current,
-            fullMessageCacheRef.current,
-            loadedMessageIndicesRef.current,
-            index
-        );
-        if (!patch) {
-            return;
-        }
-
-        applyDeleteMessagePatch(patch);
-        selectedTokenRef.current = null;
-        setSelectedToken(null);
-    }, [applyDeleteMessagePatch]);
-
-    const selectChoice = useCallback((messageIndex: number, choiceIndex: number) => {
-        const targetMessage = historyRef.current[messageIndex];
-        if (!targetMessage) {
-            return;
-        }
-
-        const updatedMessage = buildChoiceSelectionUpdate(targetMessage, choiceIndex);
-        if (!updatedMessage) {
-            return;
-        }
-
-        const patch = buildMessageReplacePatch(
-            historyRef.current,
-            fullMessageCacheRef.current,
-            messageIndex,
-            updatedMessage
-        );
-        if (!patch) {
-            return;
-        }
-
-        applyMessageReplacePatch(patch);
-        selectedTokenRef.current = null;
-        setSelectedToken(null);
-    }, [applyMessageReplacePatch]);
-
-    const updateMessageContent = useCallback((index: number, content: string, isLoading: boolean, logprobs?: TokenLogprob[], generationTime?: number, toolCalls?: ToolCall[]) => {
-        const existing = historyRef.current[index];
-        if (!existing) {
-            return;
-        }
-
-        const updatedMessage = buildUpdatedMessageContent({
-            existing,
-            content,
-            isLoading,
-            logprobs,
-            generationTime,
-            toolCalls,
-        });
-        if (!updatedMessage) {
-            return;
-        }
-
-        const patch = buildMessageReplacePatch(
-            historyRef.current,
-            fullMessageCacheRef.current,
-            index,
-            updatedMessage
-        );
-        if (!patch) {
-            return;
-        }
-
-        applyMessageReplacePatch(patch);
-    }, [applyMessageReplacePatch]);
-
-    const updateMessageToken = useCallback((messageIndex: number, tokenIndex: number, newToken: string) => {
-        const currentMessage = historyRef.current[messageIndex];
-        if (!currentMessage) {
-            return;
-        }
-
-        const tokenUpdate = buildTokenEditUpdate(currentMessage, tokenIndex, newToken);
-        if (!tokenUpdate) {
-            return;
-        }
-
-        const patch = buildMessageReplacePatch(
-            historyRef.current,
-            fullMessageCacheRef.current,
-            messageIndex,
-            tokenUpdate.updatedMessage
-        );
-        if (!patch) {
-            return;
-        }
-
-        applyMessageReplacePatch(patch);
-        setSelectedToken((prevSelectedToken) => {
-            if (!prevSelectedToken || prevSelectedToken.messageIndex !== messageIndex || prevSelectedToken.tokenIndex !== tokenIndex) {
-                return prevSelectedToken;
-            }
-            const nextSelectedToken = { ...prevSelectedToken, logprob: tokenUpdate.updatedToken };
-            selectedTokenRef.current = nextSelectedToken;
-            return nextSelectedToken;
-        });
-    }, [applyMessageReplacePatch]);
-
-    const deriveSessionTitleFromMessages = (messages: ChatMessage[]): string => {
-        const firstUserMessage = messages.find(
-            (message) => message.role === 'user' && typeof message.content === 'string' && message.content.trim().length > 0
-        );
-        if (!firstUserMessage || typeof firstUserMessage.content !== 'string') {
-            return 'New Chat';
-        }
-        const content = firstUserMessage.content;
-        return content.slice(0, 30) + (content.length > 30 ? '...' : '');
-    };
-
-
-    const streamResponse = async (
-        modelId: string,
-        messages: Message[],
-        targetIndex: number,
-        signal: AbortSignal,
-        labelPrefix: string = "",
-        webhookHistorySnapshot: ChatMessage[] | null = null
-    ) => {
-        const startTime = Date.now(); // Track generation start time
-        const logId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        let finalToolCalls: ToolCall[] | undefined;
-
-        try {
-            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-            let url = 'http://localhost:3000/v1/chat/completions';
-            let actualModelId = modelId;
-
-            if (modelId.startsWith('openrouter/') && openRouterApiKey) {
-                url = 'https://openrouter.ai/api/v1/chat/completions';
-                actualModelId = modelId.replace('openrouter/', '');
-                headers['Authorization'] = `Bearer ${openRouterApiKey}`;
-                headers['HTTP-Referer'] = 'http://localhost:5173';
-                headers['X-Title'] = 'WinInferencer';
-            }
-
-            const requestBody = {
-                model: actualModelId,
-                messages,
-                temperature,
-                top_p: topP,
-                max_tokens: maxTokens,
-                n: batchSize,
-                stream: streamingEnabled,
-                response_format: responseFormat === 'json_object' ? { type: 'json_object' } : undefined
-            };
-
-            // OpenAI/compatible APIs require 'JSON' in message if json_object is set
-            if (responseFormat === 'json_object') {
-                const sysMsg = requestBody.messages.find(m => m.role === 'system');
-                if (sysMsg && !sysMsg.content.toLowerCase().includes('json')) {
-                    sysMsg.content += " You are a helpful assistant designed to output JSON.";
-                }
-            }
-
-            // Add Tools
-            const activeTools = AVAILABLE_TOOLS.filter(t => enabledTools.has(t.name)).map(t => ({
-                type: 'function',
-                function: {
-                    name: t.name,
-                    description: t.description,
-                    parameters: t.parameters
-                }
-            }));
-
-            if (activeTools.length > 0) {
-                // @ts-ignore
-                requestBody.tools = activeTools;
-                // @ts-ignore
-                requestBody.tool_choice = "auto";
-            }
-
-            // Log request
-            if (onApiLog) {
-                onApiLog({
-                    id: logId,
-                    timestamp: Date.now(),
-                    type: 'request',
-                    model: actualModelId,
-                    request: requestBody
-                });
-            }
-
-            const res = await fetch(url, {
-                method: 'POST',
-                headers,
-                signal,
-                body: JSON.stringify(requestBody)
-            });
-
-            // Report TTFB Latency
-            reportPerformanceLatency(Date.now() - startTime);
-
-            if (!res.ok) throw new Error(`Server error: ${res.status}`);
-
-            let fullContent = labelPrefix ? `**${labelPrefix}**\n\n` : (prefill || '');
-
-            if (streamingEnabled) {
-                // Streaming mode
-                if (!res.body) throw new Error("No response body");
-
-                const reader = res.body.getReader();
-                const decoder = new TextDecoder();
-                let done = false;
-                let lastUpdate = Date.now();
-                const parserState = createChatStreamParseState();
-                let cachedToolCalls: ToolCall[] = [];
-
-                while (!done) {
-                    const { value, done: isDone } = await reader.read();
-                    done = isDone;
-                    if (value) {
-                        const chunk = decoder.decode(value, { stream: true });
-                        applyChatStreamChunk(parserState, chunk, isDone);
-                    }
-
-                    const now = Date.now();
-                    // Optimize: Update more frequently for better UX, but batch small updates
-                    const shouldUpdate = (
-                        done ||
-                        parserState.contentBuffer.length > 50 ||
-                        (parserState.toolCallsDirty && (now - lastUpdate > 100)) ||
-                        ((now - lastUpdate > 100) && parserState.contentBuffer.length > 0)
-                    );
-                    if (shouldUpdate) {
-                        const flushedToolCalls = flushChatStreamToolCalls(parserState);
-                        if (flushedToolCalls) {
-                            cachedToolCalls = flushedToolCalls;
-                        }
-                        fullContent += consumeChatStreamContent(parserState);
-                        lastUpdate = now;
-                        updateMessageContent(
-                            targetIndex,
-                            fullContent,
-                            !done,
-                            undefined,
-                            undefined,
-                            cachedToolCalls.length > 0 ? cachedToolCalls : undefined
-                        );
-                    }
-                }
-                const flushedToolCalls = flushChatStreamToolCalls(parserState);
-                if (flushedToolCalls) {
-                    cachedToolCalls = flushedToolCalls;
-                }
-                const completedToolCalls = cachedToolCalls;
-                if (completedToolCalls.length > 0) {
-                    finalToolCalls = completedToolCalls;
-                }
-            } else {
-                // Non-streaming mode - get full response at once
-                const data = await res.json();
-                const content = data.choices?.[0]?.message?.content || '';
-                fullContent += content;
-                updateMessageContent(targetIndex, fullContent, false);
-            }
-
-            // Final logprob simulation
-            const processedLogprobs = simulateLogprobs(fullContent);
-            const totalTime = Date.now() - startTime;
-            updateMessageContent(targetIndex, fullContent, false, processedLogprobs, totalTime, finalToolCalls);
-
-            // Track analytics - estimate token count (rough: ~4 chars per token)
-            const estimatedTokens = Math.ceil(fullContent.length / 4);
-            trackAnalyticsMessage(sessionId, modelId, estimatedTokens);
-
-            logComplianceEvent({
-                category: 'chat.message',
-                action: 'generation.completed',
-                result: 'success',
-                resourceType: 'session',
-                resourceId: sessionId,
-                details: {
-                    modelId,
-                    tokenEstimate: estimatedTokens,
-                    battleMode,
-                    streamingEnabled,
-                },
-            });
-
-            const canUseInMemoryWebhookSnapshot = Boolean(
-                webhookHistorySnapshot
-            );
-
-            let webhookMessages: ChatMessage[] | null = null;
-            let webhookTitle: string | null = null;
-
-            if (canUseInMemoryWebhookSnapshot && webhookHistorySnapshot) {
-                const cachedSessionMessages = loadedSessionIdRef.current === sessionId
-                    ? loadedSessionMessagesRef.current
-                    : [];
-                let missingMessages = false;
-                webhookMessages = webhookHistorySnapshot.map((message, index) => {
-                    if (index === targetIndex) {
-                        return {
-                            ...message,
-                            role: 'assistant',
-                            content: fullContent,
-                            isLoading: false,
-                            generationTime: totalTime,
-                            tool_calls: finalToolCalls || message.tool_calls,
-                            choices: [{
-                                message: { role: 'assistant', content: fullContent },
-                                index: 0,
-                                logprobs: { content: processedLogprobs },
-                            }],
-                        } as ChatMessage;
-                    }
-                    if (loadedMessageIndices.has(index) && fullMessageCache.has(index)) {
-                        return fullMessageCache.get(index)!;
-                    }
-                    if (cachedSessionMessages[index]) {
-                        return cachedSessionMessages[index];
-                    }
-                    missingMessages = true;
-                    return message;
-                });
-
-                if (!missingMessages) {
-                    const savedTitle = savedSessions.find((session) => session.id === sessionId)?.title;
-                    webhookTitle = savedTitle && savedTitle.trim().length > 0 && savedTitle !== 'New Chat'
-                        ? savedTitle
-                        : deriveSessionTitleFromMessages(webhookMessages);
-                } else {
-                    webhookMessages = null;
-                }
-            } else {
-                // Fallback to persisted session when lazy placeholders are still present.
-                const currentSession = HistoryService.getSession(sessionId);
-                if (currentSession) {
-                    webhookMessages = currentSession.messages;
-                    webhookTitle = currentSession.title;
-                }
-            }
-
-            if (webhookMessages) {
-                loadedSessionIdRef.current = sessionId;
-                loadedSessionMessagesRef.current = webhookMessages;
-                triggerConversationCompleteWebhooks({
-                    sessionId,
-                    sessionTitle: webhookTitle || 'New Chat',
-                    modelId: modelId,
-                    messageCount: webhookMessages.length,
-                    messages: webhookMessages,
-                    metadata: {
-                        temperature,
-                        topP,
-                        maxTokens,
-                    },
-                });
-            }
-
-            // Log successful response
-            if (onApiLog) {
-                onApiLog({
-                    id: logId,
-                    timestamp: Date.now(),
-                    type: 'response',
-                    model: actualModelId,
-                    response: {
-                        content: fullContent,
-                        finish_reason: 'stop'
-                    },
-                    duration: totalTime
-                });
-            }
-
-        } catch (err: any) {
-            if (err.name === 'AbortError') return;
-            let errorMsg = err.message;
-
-            if (err.message.includes('Failed to fetch')) {
-                if (modelId.startsWith('openrouter/')) {
-                    errorMsg = "Connection error. Check your internet or OpenRouter API key.";
-                } else {
-                    errorMsg = "Could not connect to LM Studio. Make sure it's running on port 3000.";
-                }
-            } else if (err.message.includes('429')) {
-                errorMsg = "Rate limit exceeded (429). Please wait a moment.";
-            } else if (err.message.includes('401')) {
-                errorMsg = "Unauthorized (401). Check your API key.";
-            } else if (err.message.includes('404')) {
-                errorMsg = `Model not found (404): ${modelId}`;
-            }
-
-            // Log error
-            if (onApiLog) {
-                onApiLog({
-                    id: logId,
-                    timestamp: Date.now(),
-                    type: 'error',
-                    model: modelId,
-                    error: errorMsg,
-                    duration: Date.now() - startTime
-                });
-            }
-
-            updateMessageContent(targetIndex, `Error: ${errorMsg}`, false);
-            toast.error(errorMsg);
-            logComplianceEvent({
-                category: 'chat.message',
-                action: 'generation.failed',
-                result: 'failure',
-                resourceType: 'session',
-                resourceId: sessionId,
-                details: {
-                    modelId,
-                    error: errorMsg,
-                },
-            });
-        }
-    };
+    const { streamResponse } = useChatStreaming({
+        onApiLog,
+        openRouterApiKey,
+        temperature,
+        topP,
+        maxTokens,
+        batchSize,
+        streamingEnabled,
+        responseFormat,
+        enabledTools,
+        prefill,
+        sessionId,
+        battleMode,
+        loadedMessageIndices,
+        fullMessageCache,
+        savedSessions,
+        loadedSessionIdRef,
+        loadedSessionMessagesRef,
+        reportPerformanceLatency,
+        updateMessageContent,
+        trackAnalyticsMessage,
+        logComplianceEvent,
+        triggerConversationCompleteWebhooks,
+    });
 
     const applyStopGenerationPatch = useCallback((patch: NonNullable<ReturnType<typeof buildStopGenerationPatch>>) => {
         applyHistoryStatePatch({
@@ -1094,194 +507,33 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         applyHistoryStatePatch(outgoingPatch);
     }, [applyHistoryStatePatch]);
 
-    const buildComposerResetPatch = () => ({
-        nextInput: '',
-        nextAttachments: [] as { id: string; name: string; content: string }[],
-        nextImageAttachments: [] as { id: string; name: string; mimeType: string; base64: string; thumbnailUrl: string }[],
-        nextPrefill: null as string | null,
+    const { sendMessage } = useChatSendOrchestrator({
+        input,
+        setInput,
+        prefill,
+        setPrefill,
+        attachments,
+        setAttachments,
+        imageAttachments,
+        setImageAttachments,
+        sessionId,
+        currentModel,
+        setCurrentModel,
+        availableModels,
+        systemPrompt,
+        thinkingEnabled,
+        autoRouting,
+        battleMode,
+        secondaryModel,
+        setAbortControllers,
+        historyRef,
+        fullMessageCacheRef,
+        loadedMessageIndicesRef,
+        applyOutgoingPatch,
+        streamResponse,
+        logComplianceEvent,
+        responseFormat,
     });
-
-    const applyComposerResetPatch = useCallback((activeSessionId: string) => {
-        const resetPatch = buildComposerResetPatch();
-        setInput(resetPatch.nextInput);
-        setAttachments(resetPatch.nextAttachments);
-        setImageAttachments(resetPatch.nextImageAttachments);
-        setPrefill(resetPatch.nextPrefill);
-        crashRecoveryService.saveDraft(activeSessionId, '');
-    }, []);
-
-    const sendMessage = async (contextOptions?: {
-        excludedMessageIndices?: number[];
-        contextSummary?: string;
-    }) => {
-        if (!input.trim() && attachments.length === 0 && imageAttachments.length === 0) return;
-
-        let finalInput = input;
-
-        // Auto-Routing Logic
-        let modelToUse = currentModel;
-        if (autoRouting && availableModels.length > 0 && !battleMode) {
-            const intent = detectIntent(finalInput);
-            const best = findBestModelForIntent(intent, availableModels);
-            if (best && best !== currentModel) {
-                modelToUse = best;
-                // Don't change persistent model, just route this request? 
-                // Or change it? Changing it feels better for continuity.
-                setCurrentModel(best);
-                toast.info(`Auto-routed to ${best} (${intent})`);
-                logComplianceEvent({
-                    category: 'chat.routing',
-                    action: 'auto_route.selected',
-                    result: 'info',
-                    resourceType: 'session',
-                    resourceId: sessionId,
-                    details: {
-                        fromModel: currentModel,
-                        toModel: best,
-                        intent,
-                    },
-                });
-            }
-        }
-
-        logComplianceEvent({
-            category: 'chat.message',
-            action: 'send.requested',
-            result: 'info',
-            resourceType: 'session',
-            resourceId: sessionId,
-            details: {
-                modelId: modelToUse,
-                battleMode,
-                attachmentCount: attachments.length,
-                imageCount: imageAttachments.length,
-                excludedContextCount: contextOptions?.excludedMessageIndices?.length || 0,
-            },
-        });
-
-        // Append text attachments to the user message transparently
-        if (attachments.length > 0) {
-            const attachmentText = attachments.map(a => `\n\n--- FILE: ${a.name} ---\n${a.content}\n--- END FILE ---`).join('');
-            finalInput += attachmentText;
-        }
-
-        // Append project context if provided (will be passed from Chat component)
-        // This is handled in Chat.tsx by modifying input before sendMessage
-
-        let finalSystemPrompt = systemPrompt;
-        if (thinkingEnabled) {
-            finalSystemPrompt += "\n\nIMPORTANT: You must engage in a deep thought process before answering. Enclose your thought process inside <thinking>...</thinking> XML tags. In the thinking block, break down the problem step-by-step, consider multiple angles, and critique your own reasoning. Then provide your final answer outside the tags.";
-        }
-
-        // Build the user message content (may be multimodal with images)
-        let userMessageContent: any = finalInput;
-
-        // If there are images, use the OpenAI vision format
-        if (imageAttachments.length > 0) {
-            const contentParts: any[] = [];
-
-            // Add text content first if present
-            if (finalInput.trim()) {
-                contentParts.push({ type: 'text', text: finalInput });
-            }
-
-            // Add image content parts
-            for (const img of imageAttachments) {
-                contentParts.push({
-                    type: 'image_url',
-                    image_url: {
-                        url: `data:${img.mimeType};base64,${img.base64}`,
-                        detail: 'auto' // Can be 'low', 'high', or 'auto'
-                    }
-                });
-            }
-
-            userMessageContent = contentParts;
-        }
-
-        const currentHistory = historyRef.current;
-        const currentFullMessageCache = fullMessageCacheRef.current;
-        const currentLoadedMessageIndices = loadedMessageIndicesRef.current;
-        const excludedIndices = new Set(contextOptions?.excludedMessageIndices || []);
-        const baseMessages: Message[] = buildContextMessagesPatch({
-            history: currentHistory,
-            excludedIndices,
-            finalSystemPrompt,
-            contextSummary: contextOptions?.contextSummary,
-            userMessageContent,
-        });
-
-        // UI display content
-        const imageCountText = imageAttachments.length > 0 ? `[${imageAttachments.length} image(s)]` : '';
-        const fileCountText = attachments.length > 0 ? `[${attachments.length} file(s)]` : '';
-        const uiContent = input || `${imageCountText} ${fileCountText}`.trim() || '[Empty message]';
-
-        // Store image thumbnails in the user message for display
-        const userMsg: ChatMessage = {
-            role: 'user',
-            content: uiContent,
-            images: imageAttachments.map(img => ({
-                id: img.id,
-                name: img.name,
-                mimeType: img.mimeType as any,
-                base64: img.base64,
-                thumbnailUrl: img.thumbnailUrl
-            }))
-        };
-
-        if (battleMode && secondaryModel) {
-            // Battle Mode: 2 Assistant Messages
-            const msgA: ChatMessage = { role: 'assistant', content: '', isLoading: true };
-            const msgB: ChatMessage = { role: 'assistant', content: '', isLoading: true };
-            const outgoingPatch = buildOutgoingMessagePatch({
-                history: currentHistory,
-                fullMessageCache: currentFullMessageCache,
-                loadedMessageIndices: currentLoadedMessageIndices,
-                userMessage: userMsg,
-                assistantMessages: [msgA, msgB],
-            });
-            const indexA = outgoingPatch.assistantStartIndex;
-            const indexB = outgoingPatch.assistantStartIndex + 1;
-
-            applyOutgoingPatch(outgoingPatch);
-            applyComposerResetPatch(sessionId);
-
-            const ctrlA = new AbortController();
-            const ctrlB = new AbortController();
-            setAbortControllers([ctrlA, ctrlB]);
-
-            // Model Name Lookup
-            const nameA = availableModels.find(m => m.id === modelToUse)?.name || modelToUse;
-            const nameB = availableModels.find(m => m.id === secondaryModel)?.name || secondaryModel;
-
-            // Trigger Parallel Streams
-            streamResponse(modelToUse, baseMessages, indexA, ctrlA.signal, `Model A: ${nameA}`, outgoingPatch.nextHistory);
-            streamResponse(secondaryModel, baseMessages, indexB, ctrlB.signal, `Model B: ${nameB}`, outgoingPatch.nextHistory);
-
-        } else {
-            // Normal Mode
-            const loadingItem: ChatMessage = { role: 'assistant', content: prefill || '', isLoading: true };
-            const outgoingPatch = buildOutgoingMessagePatch({
-                history: currentHistory,
-                fullMessageCache: currentFullMessageCache,
-                loadedMessageIndices: currentLoadedMessageIndices,
-                userMessage: userMsg,
-                assistantMessages: [loadingItem],
-            });
-            const targetIndex = outgoingPatch.assistantStartIndex;
-
-            applyOutgoingPatch(outgoingPatch);
-            applyComposerResetPatch(sessionId);
-
-            const ctrl = new AbortController();
-            setAbortControllers([ctrl]);
-
-            let messagesToSend = [...baseMessages];
-            if (prefill) messagesToSend.push({ role: 'assistant', content: prefill });
-
-            streamResponse(modelToUse, messagesToSend, targetIndex, ctrl.signal, "", outgoingPatch.nextHistory);
-        }
-    };
 
     const renameSession = useCallback((id: string, newTitle: string) => {
         HistoryService.renameSession(id, newTitle);
