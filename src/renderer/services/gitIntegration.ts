@@ -34,7 +34,7 @@ export interface GitRepository {
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -50,6 +50,29 @@ const getDefaultConfig = (): GitConfig => ({
     autoCommit: false,
 });
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeFiniteNonNegativeInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return null;
+    }
+    return Math.floor(value);
+};
+
+const sanitizePositiveInteger = (value: unknown): number | null => {
+    const normalized = sanitizeFiniteNonNegativeInteger(value);
+    if (normalized === null || normalized <= 0) {
+        return null;
+    }
+    return normalized;
+};
+
 const sanitizeConfig = (value: unknown): GitConfig => {
     const defaults = getDefaultConfig();
     if (!isRecord(value)) {
@@ -59,35 +82,42 @@ const sanitizeConfig = (value: unknown): GitConfig => {
     return {
         enabled: typeof value.enabled === 'boolean' ? value.enabled : defaults.enabled,
         autoCommit: typeof value.autoCommit === 'boolean' ? value.autoCommit : defaults.autoCommit,
-        defaultCommitMessage: typeof value.defaultCommitMessage === 'string' ? value.defaultCommitMessage : undefined,
-        authorName: typeof value.authorName === 'string' ? value.authorName : undefined,
-        authorEmail: typeof value.authorEmail === 'string' ? value.authorEmail : undefined,
+        defaultCommitMessage: sanitizeNonEmptyString(value.defaultCommitMessage) || undefined,
+        authorName: sanitizeNonEmptyString(value.authorName) || undefined,
+        authorEmail: sanitizeNonEmptyString(value.authorEmail) || undefined,
     };
 };
 
 const sanitizeCommit = (value: unknown): GitCommit | null => {
-    if (!isRecord(value)
-        || typeof value.id !== 'string'
-        || typeof value.sessionId !== 'string'
-        || typeof value.messageId !== 'number'
-        || typeof value.filePath !== 'string'
-        || typeof value.code !== 'string'
-        || typeof value.commitMessage !== 'string'
-        || typeof value.committedAt !== 'number'
-        || typeof value.success !== 'boolean') {
+    if (!isRecord(value) || typeof value.success !== 'boolean') {
         return null;
     }
+    const id = sanitizeNonEmptyString(value.id);
+    const filePath = sanitizeNonEmptyString(value.filePath);
+    const commitMessage = sanitizeNonEmptyString(value.commitMessage);
+    const messageId = sanitizeFiniteNonNegativeInteger(value.messageId);
+    const committedAt = sanitizeFiniteNonNegativeInteger(value.committedAt);
+    if (!id
+        || !filePath
+        || !commitMessage
+        || messageId === null
+        || committedAt === null
+        || typeof value.sessionId !== 'string'
+        || typeof value.code !== 'string') {
+        return null;
+    }
+    const sessionId = value.sessionId.trim();
 
     return {
-        id: value.id,
-        sessionId: value.sessionId,
-        messageId: value.messageId,
-        filePath: value.filePath,
+        id,
+        sessionId,
+        messageId,
+        filePath,
         code: value.code,
-        commitMessage: value.commitMessage,
-        committedAt: value.committedAt,
+        commitMessage,
+        committedAt,
         success: value.success,
-        error: typeof value.error === 'string' ? value.error : undefined,
+        error: sanitizeNonEmptyString(value.error) || undefined,
     };
 };
 
@@ -97,9 +127,17 @@ const parseStoredCommits = (raw: string): GitCommit[] => {
         return [];
     }
 
-    return parsed
+    const commits = parsed
         .map((entry) => sanitizeCommit(entry))
         .filter((entry): entry is GitCommit => entry !== null);
+    const seenIds = new Set<string>();
+    return commits.filter((entry) => {
+        if (seenIds.has(entry.id)) {
+            return false;
+        }
+        seenIds.add(entry.id);
+        return true;
+    });
 };
 
 export class GitIntegrationService {
@@ -223,8 +261,9 @@ export class GitIntegrationService {
         try {
             const stored = localStorage.getItem(this.COMMITS_KEY);
             if (!stored) return [];
+            const sanitizedLimit = sanitizePositiveInteger(limit) ?? 20;
             const commits = parseStoredCommits(stored);
-            return commits.slice(-limit).reverse();
+            return commits.slice(-sanitizedLimit).reverse();
         } catch (error) {
             console.error('Failed to load commit history:', error);
             return [];
@@ -236,14 +275,34 @@ export class GitIntegrationService {
      */
     private saveCommit(commit: GitCommit): void {
         try {
+            const sanitizedCommit = sanitizeCommit(commit);
+            if (!sanitizedCommit) {
+                return;
+            }
             const stored = localStorage.getItem(this.COMMITS_KEY);
             const commits = stored ? parseStoredCommits(stored) : [];
-            commits.push(commit);
-            // Keep only last 100 commits
-            if (commits.length > 100) {
-                commits.shift();
+            const index = commits.findIndex((entry) => entry.id === sanitizedCommit.id);
+            if (index >= 0) {
+                commits[index] = sanitizedCommit;
+            } else {
+                commits.push(sanitizedCommit);
             }
-            localStorage.setItem(this.COMMITS_KEY, JSON.stringify(commits));
+            const deduped: GitCommit[] = [];
+            const seenIds = new Set<string>();
+            for (let currentIndex = commits.length - 1; currentIndex >= 0; currentIndex--) {
+                const entry = commits[currentIndex];
+                if (seenIds.has(entry.id)) {
+                    continue;
+                }
+                seenIds.add(entry.id);
+                deduped.push(entry);
+            }
+            deduped.reverse();
+            // Keep only last 100 commits
+            if (deduped.length > 100) {
+                deduped.splice(0, deduped.length - 100);
+            }
+            localStorage.setItem(this.COMMITS_KEY, JSON.stringify(deduped));
         } catch (error) {
             console.error('Failed to save commit:', error);
         }

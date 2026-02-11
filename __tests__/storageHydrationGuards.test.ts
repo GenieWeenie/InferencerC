@@ -1297,6 +1297,285 @@ describe('storage hydration guards', () => {
     });
   });
 
+  test('sanitizes git/blockchain/federated/docs/mock/onboarding mutation paths', () => {
+    jest.isolateModules(() => {
+      const { gitIntegrationService } = require('../src/renderer/services/gitIntegration') as typeof import('../src/renderer/services/gitIntegration');
+      const { blockchainIntegrationService } = require('../src/renderer/services/blockchainIntegration') as typeof import('../src/renderer/services/blockchainIntegration');
+      const { federatedLearningService } = require('../src/renderer/services/federatedLearning') as typeof import('../src/renderer/services/federatedLearning');
+      const { documentationGeneratorService } = require('../src/renderer/services/documentationGenerator') as typeof import('../src/renderer/services/documentationGenerator');
+      const { mockServerService } = require('../src/renderer/services/mockServer') as typeof import('../src/renderer/services/mockServer');
+      const { onboardingService } = require('../src/renderer/services/onboarding') as typeof import('../src/renderer/services/onboarding');
+
+      gitIntegrationService.updateConfig({
+        enabled: true,
+        autoCommit: true,
+        defaultCommitMessage: '  feat: update  ',
+        authorName: '  Dev User  ',
+        authorEmail: '  dev@example.com  ',
+      });
+      (gitIntegrationService as any).saveCommit({
+        id: ' commit-1 ',
+        sessionId: ' session-1 ',
+        messageId: 1.9,
+        filePath: ' src/index.ts ',
+        code: 'console.log(1);',
+        commitMessage: '  feat: add log  ',
+        committedAt: 10.4,
+        success: true,
+        error: '   ',
+      });
+      (gitIntegrationService as any).saveCommit({
+        id: 'commit-1',
+        sessionId: 'session-1',
+        messageId: 2,
+        filePath: 'src/index.ts',
+        code: 'console.log(2);',
+        commitMessage: 'feat: update log',
+        committedAt: 11,
+        success: false,
+        error: '  failed ',
+      });
+      (gitIntegrationService as any).saveCommit({
+        id: '',
+        sessionId: 'session',
+        messageId: 0,
+        filePath: 'src/bad.ts',
+        code: 'x',
+        commitMessage: 'bad',
+        committedAt: 0,
+        success: true,
+      });
+      expect(gitIntegrationService.getConfig()).toMatchObject({
+        enabled: true,
+        autoCommit: true,
+        defaultCommitMessage: 'feat: update',
+        authorName: 'Dev User',
+        authorEmail: 'dev@example.com',
+      });
+      expect(gitIntegrationService.getCommitHistory(-1)).toHaveLength(1);
+      expect(gitIntegrationService.getCommitHistory()[0]).toMatchObject({
+        id: 'commit-1',
+        messageId: 2,
+        commitMessage: 'feat: update log',
+        error: 'failed',
+      });
+
+      blockchainIntegrationService.saveConfig({
+        enabled: true,
+        network: 'polygon',
+        contractAddress: '  0xabc  ',
+        privateKey: '  secret-key  ',
+        gasPrice: -5,
+      } as any);
+      (blockchainIntegrationService as any).saveTransaction({
+        hash: ' 0x1 ',
+        from: ' 0xaaa ',
+        to: ' 0xbbb ',
+        value: ' 1 ',
+        gasUsed: 21000.9,
+        status: 'confirmed',
+        timestamp: 20.7,
+      });
+      (blockchainIntegrationService as any).saveTransaction({
+        hash: '0x1',
+        from: '0xaaa',
+        to: '0xbbb',
+        value: '1',
+        gasUsed: 20000,
+        status: 'failed',
+        timestamp: 21,
+      });
+      (blockchainIntegrationService as any).saveTransaction({ hash: 'bad' });
+      const blockchainConfig = blockchainIntegrationService.getConfig();
+      expect(blockchainConfig).toMatchObject({
+        enabled: true,
+        network: 'polygon',
+        contractAddress: '0xabc',
+        privateKey: 'secret-key',
+      });
+      expect(blockchainConfig.gasPrice).toBeUndefined();
+      expect(blockchainIntegrationService.getTransactionHistory(-1)).toHaveLength(1);
+      expect(blockchainIntegrationService.getTransactionHistory()[0]).toMatchObject({
+        hash: '0x1',
+        status: 'failed',
+        timestamp: 21,
+      });
+
+      federatedLearningService.saveConfig({
+        enabled: true,
+        participationMode: 'active',
+        aggregationServer: '  https://agg.test  ',
+        modelName: '  model-a  ',
+        trainingRounds: -2,
+        localEpochs: 0,
+        batchSize: Number.NaN,
+        learningRate: 0,
+      } as any);
+      (federatedLearningService as any).saveLocalUpdate({
+        round: 2.9,
+        modelWeights: '  abc==  ',
+        sampleCount: 10.7,
+        metrics: { loss: 0.2, accuracy: 0.8 },
+        timestamp: 30.4,
+      });
+      (federatedLearningService as any).saveLocalUpdate({
+        round: 2,
+        modelWeights: 'abc==',
+        sampleCount: 11,
+        metrics: { loss: 0.1, accuracy: 0.95 },
+        timestamp: 30,
+      });
+      (federatedLearningService as any).saveLocalUpdate({
+        round: 2,
+        modelWeights: '',
+        sampleCount: 1,
+        metrics: { loss: 0.1, accuracy: 0.9 },
+        timestamp: 32,
+      });
+      expect(federatedLearningService.getConfig()).toMatchObject({
+        enabled: true,
+        participationMode: 'active',
+        aggregationServer: 'https://agg.test',
+        modelName: 'model-a',
+        trainingRounds: 10,
+        localEpochs: 3,
+        batchSize: 32,
+        learningRate: 0.001,
+      });
+      expect(federatedLearningService.getLocalUpdates()).toHaveLength(1);
+      expect(federatedLearningService.getLocalUpdates()[0]).toMatchObject({
+        round: 2,
+        sampleCount: 11,
+        timestamp: 30,
+      });
+
+      (documentationGeneratorService as any).saveResult({
+        code: '  function a() {}  ',
+        language: ' javascript ',
+        documentedCode: ' /** a */ function a() {} ',
+        documentation: '  docs a  ',
+        format: 'jsdoc',
+        generatedAt: 40,
+      });
+      (documentationGeneratorService as any).saveResult({
+        code: 'function a() {}',
+        language: 'javascript',
+        documentedCode: '/** updated */ function a() {}',
+        documentation: 'updated docs',
+        format: 'jsdoc',
+        generatedAt: 40,
+      });
+      (documentationGeneratorService as any).saveResult({
+        code: 'x',
+        language: 'js',
+        documentedCode: 'x',
+        documentation: '',
+        format: 'jsdoc',
+        generatedAt: 41,
+      });
+      expect(documentationGeneratorService.getHistory(-1)).toHaveLength(1);
+      expect(documentationGeneratorService.getHistory()[0]).toMatchObject({
+        language: 'javascript',
+        documentation: 'updated docs',
+      });
+
+      const createdEndpoint = mockServerService.createEndpoint({
+        method: 'GET',
+        path: ' api/test ',
+        response: {
+          status: 200,
+          headers: { ' X-Test ': ' 1 ' },
+          body: { ok: true },
+        },
+        enabled: true,
+        delay: 12.8,
+        statusCode: 201.6,
+      });
+      expect(createdEndpoint.path).toBe('/api/test');
+      expect(createdEndpoint.delay).toBe(12);
+      expect(createdEndpoint.statusCode).toBe(201);
+      expect(createdEndpoint.response.headers).toEqual({ 'X-Test': '1' });
+      expect(mockServerService.updateEndpoint(createdEndpoint.id, {
+        statusCode: 999,
+      } as any)).toBe(true);
+      expect(mockServerService.getEndpoint(createdEndpoint.id)?.statusCode).toBeUndefined();
+      (mockServerService as any).saveEndpoint({
+        ...createdEndpoint,
+        path: 'api/updated',
+      });
+      (mockServerService as any).saveEndpoint({ id: '', path: '/bad' });
+      expect(mockServerService.getAllEndpoints()).toHaveLength(1);
+      expect(mockServerService.getAllEndpoints()[0]?.path).toBe('/api/updated');
+      expect(mockServerService.deleteEndpoint('   ')).toBe(false);
+      expect(mockServerService.deleteEndpoint(createdEndpoint.id)).toBe(true);
+      expect(mockServerService.getAllEndpoints()).toHaveLength(0);
+
+      (onboardingService as any).saveTutorials([
+        {
+          id: ' tutorial-1 ',
+          name: ' Welcome ',
+          description: ' Intro ',
+          completed: false,
+          steps: [
+            { id: ' step-1 ', title: ' Start ', description: ' Begin ', position: 'top' },
+          ],
+          completedAt: 1.8,
+        },
+        {
+          id: 'tutorial-1',
+          name: 'Welcome Updated',
+          description: 'Intro Updated',
+          completed: true,
+          steps: [
+            { id: 'step-1', title: 'Start Updated', description: 'Begin Updated', action: 'click' },
+          ],
+          completedAt: 2,
+        },
+        { id: 'bad' },
+      ]);
+      expect(onboardingService.getTutorials()).toHaveLength(1);
+      expect(onboardingService.getTutorials()[0]).toMatchObject({
+        id: 'tutorial-1',
+        name: 'Welcome Updated',
+        completed: true,
+        completedAt: 2,
+      });
+      expect(onboardingService.getTutorials()[0]?.steps).toHaveLength(1);
+      expect(onboardingService.getTutorials()[0]?.steps[0]).toMatchObject({
+        id: 'step-1',
+        title: 'Start Updated',
+      });
+
+      (onboardingService as any).saveFeatureDiscoveries([
+        {
+          id: ' feature-1 ',
+          featureName: ' Feature One ',
+          description: ' Desc ',
+          shown: true,
+          shownAt: 3.9,
+          dismissed: false,
+        },
+        {
+          id: 'feature-1',
+          featureName: 'Feature One Updated',
+          description: 'Desc Updated',
+          shown: true,
+          shownAt: 4,
+          dismissed: true,
+          dismissedAt: 5.2,
+        },
+        { id: 'bad' },
+      ]);
+      expect(onboardingService.getFeatureDiscoveries()).toHaveLength(1);
+      expect(onboardingService.getFeatureDiscoveries()[0]).toMatchObject({
+        id: 'feature-1',
+        featureName: 'Feature One Updated',
+        dismissed: true,
+        dismissedAt: 5,
+      });
+    });
+  });
+
   test('guards layout/gestures/versioning/chaining/summaries/agents storage payloads', () => {
     localStorage.setItem('layout_config', JSON.stringify({
       panels: [

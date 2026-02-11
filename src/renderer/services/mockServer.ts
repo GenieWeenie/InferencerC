@@ -48,6 +48,37 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeFiniteNonNegativeInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return null;
+    }
+    return Math.floor(value);
+};
+
+const sanitizeHttpStatus = (value: unknown): number | null => {
+    const normalized = sanitizeFiniteNonNegativeInteger(value);
+    if (normalized === null || normalized < 100 || normalized > 599) {
+        return null;
+    }
+    return normalized;
+};
+
+const normalizeMockPath = (value: unknown): string | null => {
+    const normalized = sanitizeNonEmptyString(value);
+    if (!normalized) {
+        return null;
+    }
+    return normalized.startsWith('/') ? normalized : `/${normalized}`;
+};
+
 export class MockServerService {
     private static instance: MockServerService;
     private readonly STORAGE_KEY = 'mock_endpoints';
@@ -59,16 +90,22 @@ export class MockServerService {
     }
 
     private sanitizeResponse(value: unknown): MockResponse | null {
-        if (!isRecord(value) || typeof value.status !== 'number' || !Number.isFinite(value.status)) {
+        if (!isRecord(value)) {
+            return null;
+        }
+        const status = sanitizeHttpStatus(value.status);
+        if (status === null) {
             return null;
         }
         const headers = isRecord(value.headers)
             ? Object.fromEntries(
-                Object.entries(value.headers).filter(([, headerValue]) => typeof headerValue === 'string')
+                Object.entries(value.headers)
+                    .map(([headerKey, headerValue]) => [sanitizeNonEmptyString(headerKey), sanitizeNonEmptyString(headerValue)])
+                    .filter((entry): entry is [string, string] => entry[0] !== null && entry[1] !== null)
             )
             : undefined;
         return {
-            status: value.status,
+            status,
             headers: headers && Object.keys(headers).length > 0 ? headers : undefined,
             body: value.body,
         };
@@ -78,29 +115,31 @@ export class MockServerService {
         if (!isRecord(value)) {
             return null;
         }
-        if (
-            typeof value.id !== 'string'
-            || !HTTP_METHODS.has(value.method as MockEndpoint['method'])
-            || typeof value.path !== 'string'
-            || typeof value.enabled !== 'boolean'
-            || typeof value.createdAt !== 'number'
-            || !Number.isFinite(value.createdAt)
-        ) {
+        if (!HTTP_METHODS.has(value.method as MockEndpoint['method']) || typeof value.enabled !== 'boolean') {
+            return null;
+        }
+        const id = sanitizeNonEmptyString(value.id);
+        const path = normalizeMockPath(value.path);
+        const createdAt = sanitizeFiniteNonNegativeInteger(value.createdAt);
+        if (!id || !path || createdAt === null) {
             return null;
         }
         const response = this.sanitizeResponse(value.response);
         if (!response) {
             return null;
         }
+        const delay = sanitizeFiniteNonNegativeInteger(value.delay);
+        const statusCode = sanitizeHttpStatus(value.statusCode);
+
         return {
-            id: value.id,
+            id,
             method: value.method as MockEndpoint['method'],
-            path: value.path,
+            path,
             response,
             enabled: value.enabled,
-            delay: typeof value.delay === 'number' && Number.isFinite(value.delay) ? value.delay : undefined,
-            statusCode: typeof value.statusCode === 'number' && Number.isFinite(value.statusCode) ? value.statusCode : undefined,
-            createdAt: value.createdAt,
+            delay: delay === null ? undefined : delay,
+            statusCode: statusCode === null ? undefined : statusCode,
+            createdAt,
         };
     }
 
@@ -110,11 +149,14 @@ export class MockServerService {
             return [];
         }
         const endpoints: MockEndpoint[] = [];
+        const seenIds = new Set<string>();
         for (let index = 0; index < parsed.length; index++) {
             const endpoint = this.sanitizeEndpoint(parsed[index]);
-            if (endpoint) {
-                endpoints.push(endpoint);
+            if (!endpoint || seenIds.has(endpoint.id)) {
+                continue;
             }
+            seenIds.add(endpoint.id);
+            endpoints.push(endpoint);
         }
         return endpoints;
     }
@@ -145,12 +187,15 @@ export class MockServerService {
      * Create a mock endpoint
      */
     createEndpoint(endpoint: Omit<MockEndpoint, 'id' | 'createdAt'>): MockEndpoint {
-        const newEndpoint: MockEndpoint = {
+        const candidate: MockEndpoint = {
             ...endpoint,
             id: crypto.randomUUID(),
             createdAt: Date.now(),
         };
-
+        const newEndpoint = this.sanitizeEndpoint(candidate);
+        if (!newEndpoint) {
+            throw new Error('Invalid mock endpoint configuration');
+        }
         this.saveEndpoint(newEndpoint);
         return newEndpoint;
     }
@@ -173,8 +218,12 @@ export class MockServerService {
      * Get an endpoint by ID
      */
     getEndpoint(id: string): MockEndpoint | null {
+        const normalizedId = sanitizeNonEmptyString(id);
+        if (!normalizedId) {
+            return null;
+        }
         const endpoints = this.getAllEndpoints();
-        return endpoints.find(e => e.id === id) || null;
+        return endpoints.find((endpoint) => endpoint.id === normalizedId) || null;
     }
 
     /**
@@ -196,8 +245,12 @@ export class MockServerService {
      * Delete an endpoint
      */
     deleteEndpoint(id: string): boolean {
+        const normalizedId = sanitizeNonEmptyString(id);
+        if (!normalizedId) {
+            return false;
+        }
         const endpoints = this.getAllEndpoints();
-        const filtered = endpoints.filter(e => e.id !== id);
+        const filtered = endpoints.filter((endpoint) => endpoint.id !== normalizedId);
         if (filtered.length === endpoints.length) return false;
 
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(filtered));
@@ -233,16 +286,17 @@ export class MockServerService {
     private matchPath(pattern: string, url: string): { params: Record<string, string> } | null {
         // Simple pattern matching with :param support
         const patternParts = pattern.split('/');
+        const normalizedPatternParts = patternParts.filter((part) => part.length > 0);
         const urlParts = new URL(url).pathname.split('/').filter(p => p);
 
-        if (patternParts.length !== urlParts.length) {
+        if (normalizedPatternParts.length !== urlParts.length) {
             return null;
         }
 
         const params: Record<string, string> = {};
 
-        for (let i = 0; i < patternParts.length; i++) {
-            const patternPart = patternParts[i];
+        for (let i = 0; i < normalizedPatternParts.length; i++) {
+            const patternPart = normalizedPatternParts[i];
             const urlPart = urlParts[i];
 
             if (patternPart.startsWith(':')) {
@@ -292,14 +346,29 @@ export class MockServerService {
      * Save an endpoint
      */
     private saveEndpoint(endpoint: MockEndpoint): void {
-        const endpoints = this.getAllEndpoints();
-        const index = endpoints.findIndex(e => e.id === endpoint.id);
-        if (index >= 0) {
-            endpoints[index] = endpoint;
-        } else {
-            endpoints.push(endpoint);
+        const sanitizedEndpoint = this.sanitizeEndpoint(endpoint);
+        if (!sanitizedEndpoint) {
+            return;
         }
-        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(endpoints));
+        const endpoints = this.getAllEndpoints();
+        const index = endpoints.findIndex((entry) => entry.id === sanitizedEndpoint.id);
+        if (index >= 0) {
+            endpoints[index] = sanitizedEndpoint;
+        } else {
+            endpoints.push(sanitizedEndpoint);
+        }
+        const deduped: MockEndpoint[] = [];
+        const seenIds = new Set<string>();
+        for (let currentIndex = endpoints.length - 1; currentIndex >= 0; currentIndex--) {
+            const entry = endpoints[currentIndex];
+            if (seenIds.has(entry.id)) {
+                continue;
+            }
+            seenIds.add(entry.id);
+            deduped.push(entry);
+        }
+        deduped.reverse();
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(deduped));
     }
 
     /**

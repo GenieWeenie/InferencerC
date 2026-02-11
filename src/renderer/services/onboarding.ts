@@ -49,6 +49,21 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeFiniteNonNegativeInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return null;
+    }
+    return Math.floor(value);
+};
+
 const STEP_POSITIONS = new Set<NonNullable<TutorialStep['position']>>([
     'top',
     'bottom',
@@ -76,25 +91,24 @@ export class OnboardingService {
         if (!isRecord(value)) {
             return null;
         }
-        if (
-            typeof value.id !== 'string'
-            || typeof value.title !== 'string'
-            || typeof value.description !== 'string'
-        ) {
+        const id = sanitizeNonEmptyString(value.id);
+        const title = sanitizeNonEmptyString(value.title);
+        const description = sanitizeNonEmptyString(value.description);
+        if (!id || !title || !description) {
             return null;
         }
         return {
-            id: value.id,
-            title: value.title,
-            description: value.description,
-            target: typeof value.target === 'string' ? value.target : undefined,
+            id,
+            title,
+            description,
+            target: sanitizeNonEmptyString(value.target) || undefined,
             position: STEP_POSITIONS.has(value.position as NonNullable<TutorialStep['position']>)
                 ? value.position as NonNullable<TutorialStep['position']>
                 : undefined,
             action: STEP_ACTIONS.has(value.action as NonNullable<TutorialStep['action']>)
                 ? value.action as NonNullable<TutorialStep['action']>
                 : undefined,
-            actionTarget: typeof value.actionTarget === 'string' ? value.actionTarget : undefined,
+            actionTarget: sanitizeNonEmptyString(value.actionTarget) || undefined,
             skipable: typeof value.skipable === 'boolean' ? value.skipable : undefined,
         };
     }
@@ -103,30 +117,38 @@ export class OnboardingService {
         if (!isRecord(value)) {
             return null;
         }
-        if (
-            typeof value.id !== 'string'
-            || typeof value.name !== 'string'
-            || typeof value.description !== 'string'
+        const id = sanitizeNonEmptyString(value.id);
+        const name = sanitizeNonEmptyString(value.name);
+        const description = sanitizeNonEmptyString(value.description);
+        if (!id
+            || !name
+            || !description
             || typeof value.completed !== 'boolean'
-            || !Array.isArray(value.steps)
-        ) {
+            || !Array.isArray(value.steps)) {
             return null;
         }
         const steps = value.steps
             .map((entry) => this.sanitizeTutorialStep(entry))
             .filter((entry): entry is TutorialStep => entry !== null);
-        if (steps.length === 0) {
+        const seenStepIds = new Set<string>();
+        const dedupedSteps = steps.filter((step) => {
+            if (seenStepIds.has(step.id)) {
+                return false;
+            }
+            seenStepIds.add(step.id);
+            return true;
+        });
+        if (dedupedSteps.length === 0) {
             return null;
         }
+        const completedAt = sanitizeFiniteNonNegativeInteger(value.completedAt);
         return {
-            id: value.id,
-            name: value.name,
-            description: value.description,
+            id,
+            name,
+            description,
             completed: value.completed,
-            completedAt: typeof value.completedAt === 'number' && Number.isFinite(value.completedAt)
-                ? value.completedAt
-                : undefined,
-            steps,
+            completedAt: completedAt === null ? undefined : completedAt,
+            steps: dedupedSteps,
         };
     }
 
@@ -135,38 +157,45 @@ export class OnboardingService {
         if (!Array.isArray(parsed)) {
             return [];
         }
-        return parsed
+        const tutorials = parsed
             .map((entry) => this.sanitizeTutorial(entry))
             .filter((entry): entry is Tutorial => entry !== null);
+        const seenIds = new Set<string>();
+        return tutorials.filter((entry) => {
+            if (seenIds.has(entry.id)) {
+                return false;
+            }
+            seenIds.add(entry.id);
+            return true;
+        });
     }
 
     private sanitizeFeatureDiscovery(value: unknown): FeatureDiscovery | null {
         if (!isRecord(value)) {
             return null;
         }
-        if (
-            typeof value.id !== 'string'
-            || typeof value.featureName !== 'string'
-            || typeof value.description !== 'string'
+        const id = sanitizeNonEmptyString(value.id);
+        const featureName = sanitizeNonEmptyString(value.featureName);
+        const description = sanitizeNonEmptyString(value.description);
+        if (!id
+            || !featureName
+            || !description
             || typeof value.shown !== 'boolean'
-            || typeof value.dismissed !== 'boolean'
-        ) {
+            || typeof value.dismissed !== 'boolean') {
             return null;
         }
+        const shownAt = sanitizeFiniteNonNegativeInteger(value.shownAt);
+        const dismissedAt = sanitizeFiniteNonNegativeInteger(value.dismissedAt);
         return {
-            id: value.id,
-            featureName: value.featureName,
-            description: value.description,
-            target: typeof value.target === 'string' ? value.target : undefined,
-            version: typeof value.version === 'string' ? value.version : undefined,
+            id,
+            featureName,
+            description,
+            target: sanitizeNonEmptyString(value.target) || undefined,
+            version: sanitizeNonEmptyString(value.version) || undefined,
             shown: value.shown,
-            shownAt: typeof value.shownAt === 'number' && Number.isFinite(value.shownAt)
-                ? value.shownAt
-                : undefined,
+            shownAt: shownAt === null ? undefined : shownAt,
             dismissed: value.dismissed,
-            dismissedAt: typeof value.dismissedAt === 'number' && Number.isFinite(value.dismissedAt)
-                ? value.dismissedAt
-                : undefined,
+            dismissedAt: dismissedAt === null ? undefined : dismissedAt,
         };
     }
 
@@ -175,9 +204,17 @@ export class OnboardingService {
         if (!Array.isArray(parsed)) {
             return [];
         }
-        return parsed
+        const discoveries = parsed
             .map((entry) => this.sanitizeFeatureDiscovery(entry))
             .filter((entry): entry is FeatureDiscovery => entry !== null);
+        const seenIds = new Set<string>();
+        return discoveries.filter((entry) => {
+            if (seenIds.has(entry.id)) {
+                return false;
+            }
+            seenIds.add(entry.id);
+            return true;
+        });
     }
 
     static getInstance(): OnboardingService {
@@ -318,7 +355,21 @@ export class OnboardingService {
      */
     private saveTutorials(tutorials: Tutorial[]): void {
         try {
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(tutorials));
+            const sanitized = tutorials
+                .map((entry) => this.sanitizeTutorial(entry))
+                .filter((entry): entry is Tutorial => entry !== null);
+            const deduped: Tutorial[] = [];
+            const seenIds = new Set<string>();
+            for (let index = sanitized.length - 1; index >= 0; index--) {
+                const entry = sanitized[index];
+                if (seenIds.has(entry.id)) {
+                    continue;
+                }
+                seenIds.add(entry.id);
+                deduped.push(entry);
+            }
+            deduped.reverse();
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(deduped));
         } catch (error) {
             console.error('Failed to save tutorials:', error);
         }
@@ -358,11 +409,15 @@ export class OnboardingService {
      */
     addFeatureDiscovery(discovery: Omit<FeatureDiscovery, 'shown' | 'dismissed'>): void {
         const discoveries = this.getFeatureDiscoveries();
-        const newDiscovery: FeatureDiscovery = {
+        const newDiscoveryCandidate: FeatureDiscovery = {
             ...discovery,
             shown: false,
             dismissed: false,
         };
+        const newDiscovery = this.sanitizeFeatureDiscovery(newDiscoveryCandidate);
+        if (!newDiscovery) {
+            return;
+        }
         discoveries.push(newDiscovery);
         this.saveFeatureDiscoveries(discoveries);
     }
@@ -407,7 +462,21 @@ export class OnboardingService {
      */
     private saveFeatureDiscoveries(discoveries: FeatureDiscovery[]): void {
         try {
-            localStorage.setItem(this.DISCOVERY_KEY, JSON.stringify(discoveries));
+            const sanitized = discoveries
+                .map((entry) => this.sanitizeFeatureDiscovery(entry))
+                .filter((entry): entry is FeatureDiscovery => entry !== null);
+            const deduped: FeatureDiscovery[] = [];
+            const seenIds = new Set<string>();
+            for (let index = sanitized.length - 1; index >= 0; index--) {
+                const entry = sanitized[index];
+                if (seenIds.has(entry.id)) {
+                    continue;
+                }
+                seenIds.add(entry.id);
+                deduped.push(entry);
+            }
+            deduped.reverse();
+            localStorage.setItem(this.DISCOVERY_KEY, JSON.stringify(deduped));
         } catch (error) {
             console.error('Failed to save feature discoveries:', error);
         }

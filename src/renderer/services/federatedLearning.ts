@@ -42,7 +42,7 @@ export interface LocalModelUpdate {
 
 const PARTICIPATION_MODES = new Set<FederatedLearningConfig['participationMode']>(['active', 'passive', 'disabled']);
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -62,6 +62,36 @@ const getDefaultConfig = (): FederatedLearningConfig => ({
     learningRate: 0.001,
 });
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeFiniteNonNegativeInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return null;
+    }
+    return Math.floor(value);
+};
+
+const sanitizePositiveInteger = (value: unknown): number | null => {
+    const normalized = sanitizeFiniteNonNegativeInteger(value);
+    if (normalized === null || normalized <= 0) {
+        return null;
+    }
+    return normalized;
+};
+
+const sanitizePositiveFiniteNumber = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        return null;
+    }
+    return value;
+};
+
 const sanitizeConfig = (value: unknown): FederatedLearningConfig => {
     const defaults = getDefaultConfig();
     if (!isRecord(value)) {
@@ -73,36 +103,47 @@ const sanitizeConfig = (value: unknown): FederatedLearningConfig => {
         participationMode: PARTICIPATION_MODES.has(value.participationMode as FederatedLearningConfig['participationMode'])
             ? value.participationMode as FederatedLearningConfig['participationMode']
             : defaults.participationMode,
-        aggregationServer: typeof value.aggregationServer === 'string' ? value.aggregationServer : undefined,
-        modelName: typeof value.modelName === 'string' ? value.modelName : undefined,
-        trainingRounds: typeof value.trainingRounds === 'number' ? value.trainingRounds : defaults.trainingRounds,
-        localEpochs: typeof value.localEpochs === 'number' ? value.localEpochs : defaults.localEpochs,
-        batchSize: typeof value.batchSize === 'number' ? value.batchSize : defaults.batchSize,
-        learningRate: typeof value.learningRate === 'number' ? value.learningRate : defaults.learningRate,
+        aggregationServer: sanitizeNonEmptyString(value.aggregationServer) || undefined,
+        modelName: sanitizeNonEmptyString(value.modelName) || undefined,
+        trainingRounds: sanitizePositiveInteger(value.trainingRounds) ?? defaults.trainingRounds,
+        localEpochs: sanitizePositiveInteger(value.localEpochs) ?? defaults.localEpochs,
+        batchSize: sanitizePositiveInteger(value.batchSize) ?? defaults.batchSize,
+        learningRate: sanitizePositiveFiniteNumber(value.learningRate) ?? defaults.learningRate,
     };
 };
 
 const sanitizeLocalUpdate = (value: unknown): LocalModelUpdate | null => {
-    if (!isRecord(value)
-        || typeof value.round !== 'number'
-        || typeof value.modelWeights !== 'string'
-        || typeof value.sampleCount !== 'number'
-        || !isRecord(value.metrics)
-        || typeof value.metrics.loss !== 'number'
-        || typeof value.metrics.accuracy !== 'number'
-        || typeof value.timestamp !== 'number') {
+    if (!isRecord(value) || !isRecord(value.metrics)) {
+        return null;
+    }
+    const round = sanitizeFiniteNonNegativeInteger(value.round);
+    const modelWeights = sanitizeNonEmptyString(value.modelWeights);
+    const sampleCount = sanitizeFiniteNonNegativeInteger(value.sampleCount);
+    const timestamp = sanitizeFiniteNonNegativeInteger(value.timestamp);
+    const loss = typeof value.metrics.loss === 'number' && Number.isFinite(value.metrics.loss)
+        ? value.metrics.loss
+        : null;
+    const accuracy = typeof value.metrics.accuracy === 'number' && Number.isFinite(value.metrics.accuracy)
+        ? value.metrics.accuracy
+        : null;
+    if (round === null
+        || !modelWeights
+        || sampleCount === null
+        || loss === null
+        || accuracy === null
+        || timestamp === null) {
         return null;
     }
 
     return {
-        round: value.round,
-        modelWeights: value.modelWeights,
-        sampleCount: value.sampleCount,
+        round,
+        modelWeights,
+        sampleCount,
         metrics: {
-            loss: value.metrics.loss,
-            accuracy: value.metrics.accuracy,
+            loss,
+            accuracy,
         },
-        timestamp: value.timestamp,
+        timestamp,
     };
 };
 
@@ -112,9 +153,18 @@ const parseStoredUpdates = (raw: string): LocalModelUpdate[] => {
         return [];
     }
 
-    return parsed
+    const updates = parsed
         .map((entry) => sanitizeLocalUpdate(entry))
         .filter((entry): entry is LocalModelUpdate => entry !== null);
+    const seenKeys = new Set<string>();
+    return updates.filter((entry) => {
+        const key = `${entry.round}:${entry.timestamp}:${entry.modelWeights}`;
+        if (seenKeys.has(key)) {
+            return false;
+        }
+        seenKeys.add(key);
+        return true;
+    });
 };
 
 export class FederatedLearningService {
@@ -246,14 +296,30 @@ export class FederatedLearningService {
      */
     private saveLocalUpdate(update: LocalModelUpdate): void {
         try {
+            const sanitizedUpdate = sanitizeLocalUpdate(update);
+            if (!sanitizedUpdate) {
+                return;
+            }
             const stored = localStorage.getItem(this.UPDATES_KEY);
             const updates = stored ? parseStoredUpdates(stored) : [];
-            updates.push(update);
-            // Keep only last 50 updates
-            if (updates.length > 50) {
-                updates.shift();
+            updates.push(sanitizedUpdate);
+            const deduped: LocalModelUpdate[] = [];
+            const seenKeys = new Set<string>();
+            for (let index = updates.length - 1; index >= 0; index--) {
+                const entry = updates[index];
+                const key = `${entry.round}:${entry.timestamp}:${entry.modelWeights}`;
+                if (seenKeys.has(key)) {
+                    continue;
+                }
+                seenKeys.add(key);
+                deduped.push(entry);
             }
-            localStorage.setItem(this.UPDATES_KEY, JSON.stringify(updates));
+            deduped.reverse();
+            // Keep only last 50 updates
+            if (deduped.length > 50) {
+                deduped.splice(0, deduped.length - 50);
+            }
+            localStorage.setItem(this.UPDATES_KEY, JSON.stringify(deduped));
         } catch (error) {
             console.error('Failed to save update:', error);
         }

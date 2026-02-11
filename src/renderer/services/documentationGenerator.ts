@@ -29,7 +29,7 @@ const DOCUMENTATION_FORMATS = new Set<DocumentationOptions['format']>([
 ]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -40,22 +40,42 @@ const parseJson = (raw: string): unknown => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizePositiveInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return null;
+    }
+    const rounded = Math.floor(value);
+    return rounded > 0 ? rounded : null;
+};
+
 const sanitizeResult = (value: unknown): DocumentationResult | null => {
     if (!isRecord(value)
-        || typeof value.code !== 'string'
-        || typeof value.language !== 'string'
-        || typeof value.documentedCode !== 'string'
-        || typeof value.documentation !== 'string'
         || !DOCUMENTATION_FORMATS.has(value.format as DocumentationOptions['format'])
-        || typeof value.generatedAt !== 'number') {
+        || typeof value.generatedAt !== 'number'
+        || !Number.isFinite(value.generatedAt)) {
+        return null;
+    }
+    const code = sanitizeNonEmptyString(value.code);
+    const language = sanitizeNonEmptyString(value.language);
+    const documentedCode = sanitizeNonEmptyString(value.documentedCode);
+    const documentation = sanitizeNonEmptyString(value.documentation);
+    if (!code || !language || !documentedCode || !documentation) {
         return null;
     }
 
     return {
-        code: value.code,
-        language: value.language,
-        documentedCode: value.documentedCode,
-        documentation: value.documentation,
+        code,
+        language,
+        documentedCode,
+        documentation,
         format: value.format as DocumentationOptions['format'],
         generatedAt: value.generatedAt,
     };
@@ -67,9 +87,18 @@ const parseStoredResults = (raw: string): DocumentationResult[] => {
         return [];
     }
 
-    return parsed
+    const results = parsed
         .map((entry) => sanitizeResult(entry))
         .filter((entry): entry is DocumentationResult => entry !== null);
+    const seenKeys = new Set<string>();
+    return results.filter((entry) => {
+        const key = `${entry.generatedAt}:${entry.language}:${entry.code}`;
+        if (seenKeys.has(key)) {
+            return false;
+        }
+        seenKeys.add(key);
+        return true;
+    });
 };
 
 export class DocumentationGeneratorService {
@@ -229,14 +258,30 @@ export class DocumentationGeneratorService {
      */
     private saveResult(result: DocumentationResult): void {
         try {
+            const sanitizedResult = sanitizeResult(result);
+            if (!sanitizedResult) {
+                return;
+            }
             const stored = localStorage.getItem(this.STORAGE_KEY);
             const results = stored ? parseStoredResults(stored) : [];
-            results.push(result);
-            // Keep only last 50
-            if (results.length > 50) {
-                results.shift();
+            results.push(sanitizedResult);
+            const deduped: DocumentationResult[] = [];
+            const seenKeys = new Set<string>();
+            for (let index = results.length - 1; index >= 0; index--) {
+                const entry = results[index];
+                const key = `${entry.generatedAt}:${entry.language}:${entry.code}`;
+                if (seenKeys.has(key)) {
+                    continue;
+                }
+                seenKeys.add(key);
+                deduped.push(entry);
             }
-            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(results));
+            deduped.reverse();
+            // Keep only last 50
+            if (deduped.length > 50) {
+                deduped.splice(0, deduped.length - 50);
+            }
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(deduped));
         } catch (error) {
             console.error('Failed to save documentation result:', error);
         }
@@ -249,8 +294,9 @@ export class DocumentationGeneratorService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
+            const sanitizedLimit = sanitizePositiveInteger(limit) ?? 20;
             const results = parseStoredResults(stored);
-            return results.slice(-limit).reverse();
+            return results.slice(-sanitizedLimit).reverse();
         } catch (error) {
             console.error('Failed to load documentation history:', error);
             return [];

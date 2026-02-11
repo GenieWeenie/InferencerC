@@ -35,7 +35,7 @@ const BLOCKCHAIN_NETWORKS = new Set<BlockchainConfig['network']>(['ethereum', 'p
 const TRANSACTION_STATUSES = new Set<BlockchainTransaction['status']>(['pending', 'confirmed', 'failed']);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -74,6 +74,36 @@ const getDefaultConfig = (): BlockchainConfig => ({
     network: 'local',
 });
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeFiniteNonNegativeInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return null;
+    }
+    return Math.floor(value);
+};
+
+const sanitizePositiveFiniteNumber = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        return null;
+    }
+    return value;
+};
+
+const sanitizePositiveInteger = (value: unknown): number | null => {
+    const normalized = sanitizeFiniteNonNegativeInteger(value);
+    if (normalized === null || normalized <= 0) {
+        return null;
+    }
+    return normalized;
+};
+
 const sanitizeConfig = (value: unknown): BlockchainConfig => {
     const defaults = getDefaultConfig();
     if (!isRecord(value)) {
@@ -85,53 +115,60 @@ const sanitizeConfig = (value: unknown): BlockchainConfig => {
         network: BLOCKCHAIN_NETWORKS.has(value.network as BlockchainConfig['network'])
             ? value.network as BlockchainConfig['network']
             : defaults.network,
-        contractAddress: typeof value.contractAddress === 'string' ? value.contractAddress : undefined,
-        privateKey: typeof value.privateKey === 'string' ? value.privateKey : undefined,
-        gasPrice: typeof value.gasPrice === 'number' ? value.gasPrice : undefined,
+        contractAddress: sanitizeNonEmptyString(value.contractAddress) || undefined,
+        privateKey: sanitizeNonEmptyString(value.privateKey) || undefined,
+        gasPrice: sanitizePositiveFiniteNumber(value.gasPrice) || undefined,
     };
 };
 
 const sanitizeBlock = (value: unknown): ConversationBlock | null => {
-    if (!isRecord(value)
-        || typeof value.blockNumber !== 'number'
-        || typeof value.transactionHash !== 'string'
-        || typeof value.sessionId !== 'string'
-        || typeof value.encryptedData !== 'string'
-        || typeof value.timestamp !== 'number'
-        || typeof value.blockHash !== 'string') {
+    if (!isRecord(value)) {
+        return null;
+    }
+    const blockNumber = sanitizeFiniteNonNegativeInteger(value.blockNumber);
+    const timestamp = sanitizeFiniteNonNegativeInteger(value.timestamp);
+    const transactionHash = sanitizeNonEmptyString(value.transactionHash);
+    const sessionId = sanitizeNonEmptyString(value.sessionId);
+    const encryptedData = sanitizeNonEmptyString(value.encryptedData);
+    const blockHash = sanitizeNonEmptyString(value.blockHash);
+    if (blockNumber === null || timestamp === null
+        || !transactionHash || !sessionId || !encryptedData || !blockHash) {
         return null;
     }
 
     return {
-        blockNumber: value.blockNumber,
-        transactionHash: value.transactionHash,
-        sessionId: value.sessionId,
-        encryptedData: value.encryptedData,
-        timestamp: value.timestamp,
-        blockHash: value.blockHash,
+        blockNumber,
+        transactionHash,
+        sessionId,
+        encryptedData,
+        timestamp,
+        blockHash,
     };
 };
 
 const sanitizeTransaction = (value: unknown): BlockchainTransaction | null => {
     if (!isRecord(value)
-        || typeof value.hash !== 'string'
-        || typeof value.from !== 'string'
-        || typeof value.to !== 'string'
-        || typeof value.value !== 'string'
-        || typeof value.gasUsed !== 'number'
-        || !TRANSACTION_STATUSES.has(value.status as BlockchainTransaction['status'])
-        || typeof value.timestamp !== 'number') {
+        || !TRANSACTION_STATUSES.has(value.status as BlockchainTransaction['status'])) {
+        return null;
+    }
+    const hash = sanitizeNonEmptyString(value.hash);
+    const from = sanitizeNonEmptyString(value.from);
+    const to = sanitizeNonEmptyString(value.to);
+    const amountValue = sanitizeNonEmptyString(value.value);
+    const gasUsed = sanitizeFiniteNonNegativeInteger(value.gasUsed);
+    const timestamp = sanitizeFiniteNonNegativeInteger(value.timestamp);
+    if (!hash || !from || !to || !amountValue || gasUsed === null || timestamp === null) {
         return null;
     }
 
     return {
-        hash: value.hash,
-        from: value.from,
-        to: value.to,
-        value: value.value,
-        gasUsed: value.gasUsed,
+        hash,
+        from,
+        to,
+        value: amountValue,
+        gasUsed,
         status: value.status as BlockchainTransaction['status'],
-        timestamp: value.timestamp,
+        timestamp,
     };
 };
 
@@ -141,9 +178,17 @@ const parseStoredTransactions = (raw: string): BlockchainTransaction[] => {
         return [];
     }
 
-    return parsed
+    const transactions = parsed
         .map((entry) => sanitizeTransaction(entry))
         .filter((entry): entry is BlockchainTransaction => entry !== null);
+    const seenHashes = new Set<string>();
+    return transactions.filter((entry) => {
+        if (seenHashes.has(entry.hash)) {
+            return false;
+        }
+        seenHashes.add(entry.hash);
+        return true;
+    });
 };
 
 export class BlockchainIntegrationService {
@@ -249,7 +294,11 @@ export class BlockchainIntegrationService {
 
         // In a real implementation, this would query the blockchain
         // For now, we'll return mock data
-        const stored = localStorage.getItem(`blockchain_${transactionHash}`);
+        const normalizedTransactionHash = sanitizeNonEmptyString(transactionHash);
+        if (!normalizedTransactionHash) {
+            throw new Error('Conversation not found on blockchain');
+        }
+        const stored = localStorage.getItem(`blockchain_${normalizedTransactionHash}`);
         if (!stored) {
             throw new Error('Conversation not found on blockchain');
         }
@@ -305,14 +354,34 @@ export class BlockchainIntegrationService {
      */
     private saveTransaction(transaction: BlockchainTransaction): void {
         try {
+            const sanitizedTransaction = sanitizeTransaction(transaction);
+            if (!sanitizedTransaction) {
+                return;
+            }
             const stored = localStorage.getItem(this.TRANSACTIONS_KEY);
             const transactions = stored ? parseStoredTransactions(stored) : [];
-            transactions.push(transaction);
-            // Keep only last 100 transactions
-            if (transactions.length > 100) {
-                transactions.shift();
+            const index = transactions.findIndex((entry) => entry.hash === sanitizedTransaction.hash);
+            if (index >= 0) {
+                transactions[index] = sanitizedTransaction;
+            } else {
+                transactions.push(sanitizedTransaction);
             }
-            localStorage.setItem(this.TRANSACTIONS_KEY, JSON.stringify(transactions));
+            const deduped: BlockchainTransaction[] = [];
+            const seenHashes = new Set<string>();
+            for (let currentIndex = transactions.length - 1; currentIndex >= 0; currentIndex--) {
+                const entry = transactions[currentIndex];
+                if (seenHashes.has(entry.hash)) {
+                    continue;
+                }
+                seenHashes.add(entry.hash);
+                deduped.push(entry);
+            }
+            deduped.reverse();
+            // Keep only last 100 transactions
+            if (deduped.length > 100) {
+                deduped.splice(0, deduped.length - 100);
+            }
+            localStorage.setItem(this.TRANSACTIONS_KEY, JSON.stringify(deduped));
         } catch (error) {
             console.error('Failed to save transaction:', error);
         }
@@ -325,8 +394,9 @@ export class BlockchainIntegrationService {
         try {
             const stored = localStorage.getItem(this.TRANSACTIONS_KEY);
             if (!stored) return [];
+            const sanitizedLimit = sanitizePositiveInteger(limit) ?? 20;
             const transactions = parseStoredTransactions(stored);
-            return transactions.slice(-limit).reverse();
+            return transactions.slice(-sanitizedLimit).reverse();
         } catch (error) {
             console.error('Failed to load transactions:', error);
             return [];
