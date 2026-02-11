@@ -1,23 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
-    Save, Key, Globe, ShieldCheck, Server, Plus, Trash2, Edit2, Check, X,
+    Key, Server, Plus, Trash2, Edit2, Check,
     Palette, Database, DollarSign, Activity, Settings as SettingsIcon, Sparkles, Plug, Download,
-    Shield, Lock, RefreshCw, BarChart3, MessageSquare, Mail, Calendar, Code, Eye, GraduationCap
+    Shield, Lock, RefreshCw, BarChart3, Eye, GraduationCap
 } from 'lucide-react';
 import MCPSettings from '../components/MCPSettings';
 import ModelDownloader from '../components/ModelDownloader';
+import { SettingsApiTab } from '../components/settings/SettingsApiTab';
+import { SettingsIntegrationsTab } from '../components/settings/SettingsIntegrationsTab';
 import { ThemeService, ThemeConfig } from '../services/theme';
 import { githubService } from '../services/github';
 import { notionService } from '../services/notion';
-import { webhookService, WebhookConfig } from '../services/webhooks';
+import { webhookService } from '../services/webhooks';
 import { privacyService } from '../services/privacy';
 import { encryptionService } from '../services/encryption';
-import { slackService, SlackConfig } from '../services/slack';
-import { discordService, DiscordConfig } from '../services/discord';
-import { emailService, EmailConfig } from '../services/email';
-import { calendarService, CalendarConfig } from '../services/calendar';
-import { apiAccessService } from '../services/apiAccess';
 import { ConversationAnalyticsDashboard } from '../components/ConversationAnalyticsDashboard';
 import { AccessibilitySettingsContent } from '../components/AccessibilitySettingsContent';
 import { InteractiveTutorial } from '../components/InteractiveTutorial';
@@ -334,130 +331,19 @@ const Settings: React.FC = () => {
 
                 {/* API Keys Tab */}
                 {activeTab === 'api' && (
-                    <div className="max-w-2xl space-y-6 animate-in fade-in slide-in-from-right-2">
-                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg">
-                            <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                                <Globe className="text-primary" size={24} /> OpenRouter Integration
-                            </h3>
-                            <p className="text-slate-400 mb-6">
-                                Connect to OpenRouter to access hundreds of top-tier models like GPT-4, Claude 3, and Llama 3.
-                            </p>
-
-                            <div className="space-y-4">
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-sm font-bold text-slate-300 flex items-center gap-2">
-                                        <Key size={16} /> API Key
-                                    </label>
-                                    <div className="flex gap-3">
-                                        <input
-                                            type="password"
-                                            value={openRouterKey}
-                                            onChange={(e) => setOpenRouterKey(e.target.value)}
-                                            placeholder="sk-or-..."
-                                            className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-primary/50 outline-none placeholder-slate-600 font-mono"
-                                        />
-                                        <button
-                                            onClick={saveOpenRouterKey}
-                                            className="px-6 py-3 bg-primary text-slate-900 font-bold rounded-lg hover:brightness-110 transition-all flex items-center gap-2"
-                                        >
-                                            <Save size={18} />
-                                            Save
-                                        </button>
-                                    </div>
-                                    <p className="text-xs text-slate-500 mt-1">
-                                        Your key is stored locally and never sent to our servers.
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* GitHub Integration */}
-                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg mt-6">
-                            <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                                <Globe className="text-primary" size={24} /> GitHub Integration
-                            </h3>
-                            <p className="text-slate-400 mb-6">
-                                Connect to GitHub to fetch file contents from repositories and create gists from code blocks.
-                            </p>
-
-                            <div className="space-y-4">
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-sm font-bold text-slate-300 flex items-center gap-2">
-                                        <Key size={16} /> GitHub Personal Access Token
-                                    </label>
-                                    <div className="flex gap-3">
-                                        <input
-                                            type="password"
-                                            value={githubKey}
-                                            onChange={(e) => setGithubKey(e.target.value)}
-                                            placeholder="ghp_..."
-                                            className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-primary/50 outline-none placeholder-slate-600 font-mono"
-                                        />
-                                        <button
-                                            onClick={saveGithubKey}
-                                            className="px-6 py-3 bg-primary text-slate-900 font-bold rounded-lg hover:brightness-110 transition-all flex items-center gap-2"
-                                        >
-                                            <Save size={18} />
-                                            Save
-                                        </button>
-                                    </div>
-                                    <p className="text-xs text-slate-500 mt-1">
-                                        Create a token at <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">github.com/settings/tokens</a>. Required scopes: <code className="bg-slate-800 px-1 rounded">gist</code> and <code className="bg-slate-800 px-1 rounded">repo</code> (for private repos).
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Notion Integration */}
-                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg mt-6">
-                            <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                                <Database className="text-primary" size={24} /> Notion Integration
-                            </h3>
-                            <p className="text-slate-400 mb-6">
-                                Save conversations directly to your Notion workspace. Create a database in Notion and connect it here.
-                            </p>
-
-                            <div className="space-y-4">
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-sm font-bold text-slate-300 flex items-center gap-2">
-                                        <Key size={16} /> Notion API Key
-                                    </label>
-                                    <input
-                                        type="password"
-                                        value={notionKey}
-                                        onChange={(e) => setNotionKey(e.target.value)}
-                                        placeholder="secret_..."
-                                        className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-primary/50 outline-none placeholder-slate-600 font-mono"
-                                    />
-                                    <p className="text-xs text-slate-500 mt-1">
-                                        Create an integration at <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">notion.so/my-integrations</a>
-                                    </p>
-                                </div>
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-sm font-bold text-slate-300 flex items-center gap-2">
-                                        <Database size={16} /> Database ID
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={notionDatabaseId}
-                                        onChange={(e) => setNotionDatabaseId(e.target.value)}
-                                        placeholder="32-character database ID"
-                                        className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-primary/50 outline-none placeholder-slate-600 font-mono"
-                                    />
-                                    <p className="text-xs text-slate-500 mt-1">
-                                        Get the database ID from the Notion database URL. The ID is the 32-character string after the workspace name.
-                                    </p>
-                                </div>
-                                <button
-                                    onClick={saveNotionConfig}
-                                    className="px-6 py-3 bg-primary text-slate-900 font-bold rounded-lg hover:brightness-110 transition-all flex items-center gap-2 w-full justify-center"
-                                >
-                                    <Save size={18} />
-                                    Save Configuration
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+                    <SettingsApiTab
+                        openRouterKey={openRouterKey}
+                        setOpenRouterKey={setOpenRouterKey}
+                        githubKey={githubKey}
+                        setGithubKey={setGithubKey}
+                        notionKey={notionKey}
+                        setNotionKey={setNotionKey}
+                        notionDatabaseId={notionDatabaseId}
+                        setNotionDatabaseId={setNotionDatabaseId}
+                        onSaveOpenRouterKey={saveOpenRouterKey}
+                        onSaveGithubKey={saveGithubKey}
+                        onSaveNotionConfig={saveNotionConfig}
+                    />
                 )}
 
                 {/* Model Endpoints Tab */}
@@ -1239,7 +1125,7 @@ const Settings: React.FC = () => {
 
                 {/* Integrations Tab */}
                 {activeTab === 'integrations' && (
-                    <IntegrationsTab />
+                    <SettingsIntegrationsTab />
                 )}
 
                 {/* Usage & Cost Tab */}
@@ -1405,283 +1291,6 @@ const OnboardingSettingsContent: React.FC = () => {
                     }}
                 />
             )}
-        </div>
-    );
-};
-
-// Integrations Tab Component
-const IntegrationsTab: React.FC = () => {
-    const [slackWebhook, setSlackWebhook] = useState('');
-    const [discordWebhook, setDiscordWebhook] = useState('');
-    const [emailRecipient, setEmailRecipient] = useState('');
-    const [calendarProvider, setCalendarProvider] = useState<'google' | 'outlook' | 'ical'>('google');
-    const [apiEnabled, setApiEnabled] = useState(false);
-    const [apiPort, setApiPort] = useState(3001);
-    const [apiKey, setApiKey] = useState('');
-
-    useEffect(() => {
-        // Load existing configs
-        const slackConfig = slackService.getConfig();
-        if (slackConfig?.webhookUrl) setSlackWebhook(slackConfig.webhookUrl);
-
-        const discordConfig = discordService.getConfig();
-        if (discordConfig?.webhookUrl) setDiscordWebhook(discordConfig.webhookUrl);
-
-        const emailConfig = emailService.getConfig();
-        if (emailConfig?.defaultRecipient) setEmailRecipient(emailConfig.defaultRecipient);
-
-        const calendarConfig = calendarService.getConfig();
-        if (calendarConfig?.provider) setCalendarProvider(calendarConfig.provider);
-
-        const apiConfig = apiAccessService.getConfig();
-        setApiEnabled(apiConfig.enabled);
-        setApiPort(apiConfig.port);
-        if (apiConfig.apiKey) setApiKey(apiConfig.apiKey);
-    }, []);
-
-    const saveSlack = () => {
-        if (slackWebhook.trim()) {
-            slackService.setConfig({ webhookUrl: slackWebhook.trim() });
-            toast.success('Slack configuration saved!');
-        } else {
-            slackService.setConfig({ webhookUrl: '' });
-            toast.success('Slack configuration cleared');
-        }
-    };
-
-    const saveDiscord = () => {
-        if (discordWebhook.trim()) {
-            discordService.setConfig({ webhookUrl: discordWebhook.trim() });
-            toast.success('Discord configuration saved!');
-        } else {
-            discordService.setConfig({ webhookUrl: '' });
-            toast.success('Discord configuration cleared');
-        }
-    };
-
-    const saveEmail = () => {
-        if (emailRecipient.trim()) {
-            emailService.setConfig({ defaultRecipient: emailRecipient.trim() });
-            toast.success('Email configuration saved!');
-        } else {
-            emailService.setConfig({ defaultRecipient: '' });
-            toast.success('Email configuration cleared');
-        }
-    };
-
-    const saveCalendar = () => {
-        calendarService.setConfig({ provider: calendarProvider });
-        toast.success('Calendar provider saved!');
-    };
-
-    const saveAPI = () => {
-        apiAccessService.setConfig({
-            enabled: apiEnabled,
-            port: apiPort,
-            apiKey: apiKey.trim() || undefined,
-        });
-        toast.success('API configuration saved!');
-    };
-
-    return (
-        <div className="max-w-3xl space-y-6 animate-in fade-in slide-in-from-right-2">
-            <div>
-                <h3 className="text-xl font-bold text-white mb-2">Integrations</h3>
-                <p className="text-slate-500 text-sm">Connect InferencerC with external services</p>
-            </div>
-
-            {/* Slack Integration */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                <div className="flex items-center gap-3 mb-4">
-                    <MessageSquare className="w-6 h-6 text-purple-400" />
-                    <h4 className="text-lg font-bold text-white">Slack Integration</h4>
-                </div>
-                <p className="text-sm text-slate-400 mb-4">
-                    Send conversations to Slack channels using webhooks
-                </p>
-                <div className="space-y-3">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">
-                            Webhook URL
-                        </label>
-                        <input
-                            type="text"
-                            value={slackWebhook}
-                            onChange={(e) => setSlackWebhook(e.target.value)}
-                            placeholder="https://hooks.slack.com/services/..."
-                            className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:ring-2 focus:ring-purple-500 outline-none"
-                        />
-                        <p className="text-xs text-slate-500 mt-1">
-                            Create a webhook at <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">api.slack.com</a>
-                        </p>
-                    </div>
-                    <button
-                        onClick={saveSlack}
-                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors"
-                    >
-                        Save Configuration
-                    </button>
-                </div>
-            </div>
-
-            {/* Discord Integration */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                <div className="flex items-center gap-3 mb-4">
-                    <MessageSquare className="w-6 h-6 text-indigo-400" />
-                    <h4 className="text-lg font-bold text-white">Discord Integration</h4>
-                </div>
-                <p className="text-sm text-slate-400 mb-4">
-                    Send conversations to Discord channels using webhooks
-                </p>
-                <div className="space-y-3">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">
-                            Webhook URL
-                        </label>
-                        <input
-                            type="text"
-                            value={discordWebhook}
-                            onChange={(e) => setDiscordWebhook(e.target.value)}
-                            placeholder="https://discord.com/api/webhooks/..."
-                            className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 outline-none"
-                        />
-                        <p className="text-xs text-slate-500 mt-1">
-                            Create a webhook in your Discord server settings
-                        </p>
-                    </div>
-                    <button
-                        onClick={saveDiscord}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
-                    >
-                        Save Configuration
-                    </button>
-                </div>
-            </div>
-
-            {/* Email Integration */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                <div className="flex items-center gap-3 mb-4">
-                    <Mail className="w-6 h-6 text-blue-400" />
-                    <h4 className="text-lg font-bold text-white">Email Export</h4>
-                </div>
-                <p className="text-sm text-slate-400 mb-4">
-                    Set default email recipient for conversation exports
-                </p>
-                <div className="space-y-3">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">
-                            Default Recipient
-                        </label>
-                        <input
-                            type="email"
-                            value={emailRecipient}
-                            onChange={(e) => setEmailRecipient(e.target.value)}
-                            placeholder="your@email.com"
-                            className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none"
-                        />
-                    </div>
-                    <button
-                        onClick={saveEmail}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
-                    >
-                        Save Configuration
-                    </button>
-                </div>
-            </div>
-
-            {/* Calendar Integration */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                <div className="flex items-center gap-3 mb-4">
-                    <Calendar className="w-6 h-6 text-green-400" />
-                    <h4 className="text-lg font-bold text-white">Calendar Integration</h4>
-                </div>
-                <p className="text-sm text-slate-400 mb-4">
-                    Choose your preferred calendar provider for scheduling
-                </p>
-                <div className="space-y-3">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">
-                            Calendar Provider
-                        </label>
-                        <select
-                            value={calendarProvider}
-                            onChange={(e) => setCalendarProvider(e.target.value as any)}
-                            className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-green-500 outline-none"
-                        >
-                            <option value="google">Google Calendar</option>
-                            <option value="outlook">Outlook Calendar</option>
-                            <option value="ical">iCal (.ics file)</option>
-                        </select>
-                    </div>
-                    <button
-                        onClick={saveCalendar}
-                        className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors"
-                    >
-                        Save Configuration
-                    </button>
-                </div>
-            </div>
-
-            {/* API Access */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                <div className="flex items-center gap-3 mb-4">
-                    <Code className="w-6 h-6 text-orange-400" />
-                    <h4 className="text-lg font-bold text-white">REST API Access</h4>
-                </div>
-                <p className="text-sm text-slate-400 mb-4">
-                    Enable REST API for programmatic access to conversations
-                </p>
-                <div className="space-y-3">
-                    <div className="flex items-center gap-3">
-                        <input
-                            type="checkbox"
-                            checked={apiEnabled}
-                            onChange={(e) => setApiEnabled(e.target.checked)}
-                            className="w-4 h-4 text-orange-600 bg-slate-800 border-slate-700 rounded focus:ring-orange-500"
-                        />
-                        <label className="text-sm text-slate-300">Enable REST API</label>
-                    </div>
-                    {apiEnabled && (
-                        <>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-300 mb-2">
-                                    Port
-                                </label>
-                                <input
-                                    type="number"
-                                    value={apiPort}
-                                    onChange={(e) => setApiPort(parseInt(e.target.value) || 3001)}
-                                    min={1024}
-                                    max={65535}
-                                    className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-orange-500 outline-none"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-300 mb-2">
-                                    API Key (Optional)
-                                </label>
-                                <input
-                                    type="password"
-                                    value={apiKey}
-                                    onChange={(e) => setApiKey(e.target.value)}
-                                    placeholder="Leave empty for no authentication"
-                                    className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:ring-2 focus:ring-orange-500 outline-none"
-                                />
-                            </div>
-                            <div className="bg-slate-800 rounded-lg p-3 text-xs text-slate-400">
-                                <p className="font-semibold mb-1">API Base URL:</p>
-                                <code className="text-orange-400">http://localhost:{apiPort}/api</code>
-                            </div>
-                        </>
-                    )}
-                    <button
-                        onClick={saveAPI}
-                        className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-medium rounded-lg transition-colors"
-                    >
-                        Save Configuration
-                    </button>
-                </div>
-            </div>
         </div>
     );
 };

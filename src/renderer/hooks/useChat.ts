@@ -27,10 +27,19 @@ import {
     createChatStreamParseState,
     flushChatStreamToolCalls,
 } from '../lib/chatStreamParser';
+import { useChatBootstrap } from './useChatBootstrap';
+import { useChatModelDiscovery } from './useChatModelDiscovery';
+import { useChatSessionPersistence } from './useChatSessionPersistence';
 import { AVAILABLE_TOOLS } from '../lib/tools';
 import { crashRecoveryService } from '../services/crashRecovery';
 import { performanceService } from '../services/performance';
-import { backendHealthService } from '../services/backendHealth';
+import {
+    hasLikelyOpenRouterCredential,
+    loadAnalyticsService,
+    loadCredentialService,
+    loadEnterpriseComplianceService,
+    loadWebhookService,
+} from '../lib/useChatLazyServices';
 
 export interface ApiLogCallback {
     (log: {
@@ -50,144 +59,6 @@ export interface SelectedTokenContext {
     messageIndex: number;
     tokenIndex: number;
 }
-
-type AnalyticsService = typeof import('../services/analytics')['analyticsService'];
-type WebhookService = typeof import('../services/webhooks')['webhookService'];
-type EnterpriseComplianceService = typeof import('../services/enterpriseCompliance')['enterpriseComplianceService'];
-type CredentialService = typeof import('../services/credentials')['credentialService'];
-
-let analyticsServicePromise: Promise<AnalyticsService> | null = null;
-let webhookServicePromise: Promise<WebhookService> | null = null;
-let enterpriseComplianceServicePromise: Promise<EnterpriseComplianceService> | null = null;
-let credentialServicePromise: Promise<CredentialService> | null = null;
-const OPENROUTER_CREDENTIAL_MARKER_KEY = 'secure_marker_openRouterApiKey';
-const OPENROUTER_CREDENTIAL_LEGACY_KEY = 'openRouterApiKey';
-const TEAM_WORKSPACES_ACTIVE_KEY = 'team_workspaces_active_v1';
-const TEAM_WORKSPACES_STORAGE_KEY = 'team_workspaces_v1';
-
-const loadAnalyticsService = async (): Promise<AnalyticsService> => {
-    if (!analyticsServicePromise) {
-        analyticsServicePromise = import('../services/analytics').then((mod) => mod.analyticsService);
-    }
-    return analyticsServicePromise;
-};
-
-const loadWebhookService = async (): Promise<WebhookService> => {
-    if (!webhookServicePromise) {
-        webhookServicePromise = import('../services/webhooks').then((mod) => mod.webhookService);
-    }
-    return webhookServicePromise;
-};
-
-const loadEnterpriseComplianceService = async (): Promise<EnterpriseComplianceService> => {
-    if (!enterpriseComplianceServicePromise) {
-        enterpriseComplianceServicePromise = import('../services/enterpriseCompliance').then((mod) => mod.enterpriseComplianceService);
-    }
-    return enterpriseComplianceServicePromise;
-};
-
-const loadCredentialService = async (): Promise<CredentialService> => {
-    if (!credentialServicePromise) {
-        credentialServicePromise = import('../services/credentials').then((mod) => mod.credentialService);
-    }
-    return credentialServicePromise;
-};
-
-const hasLikelyOpenRouterCredential = (): boolean => {
-    try {
-        return Boolean(
-            localStorage.getItem(OPENROUTER_CREDENTIAL_MARKER_KEY) ||
-            localStorage.getItem(OPENROUTER_CREDENTIAL_LEGACY_KEY)
-        );
-    } catch {
-        return false;
-    }
-};
-
-const hasLikelyActiveTeamWorkspace = (): boolean => {
-    try {
-        const activeWorkspace = localStorage.getItem(TEAM_WORKSPACES_ACTIVE_KEY);
-        if (!activeWorkspace || activeWorkspace.trim().length === 0) {
-            return false;
-        }
-        const workspacesRaw = localStorage.getItem(TEAM_WORKSPACES_STORAGE_KEY);
-        return Boolean(workspacesRaw && workspacesRaw !== '[]');
-    } catch {
-        return false;
-    }
-};
-
-type WorkspaceModelPolicy = {
-    allowedProviders: string[];
-    allowedModelIds: string[];
-};
-
-type SerializedWorkspace = {
-    id: string;
-    modelPolicy?: Partial<WorkspaceModelPolicy>;
-};
-
-const resolveModelProvider = (model: Model): string => {
-    if (model.id.startsWith('openrouter/')) {
-        return 'openrouter';
-    }
-
-    if (model.type === 'local-folder') {
-        return 'local';
-    }
-
-    if (typeof model.pathOrUrl === 'string' && model.pathOrUrl.includes('localhost')) {
-        return 'local';
-    }
-
-    return 'custom';
-};
-
-const getActiveWorkspaceModelPolicy = (): WorkspaceModelPolicy | null => {
-    try {
-        const activeWorkspaceId = localStorage.getItem(TEAM_WORKSPACES_ACTIVE_KEY);
-        if (!activeWorkspaceId || activeWorkspaceId.trim().length === 0) {
-            return null;
-        }
-
-        const workspacesRaw = localStorage.getItem(TEAM_WORKSPACES_STORAGE_KEY);
-        if (!workspacesRaw) return null;
-
-        const workspaces = JSON.parse(workspacesRaw) as SerializedWorkspace[];
-        if (!Array.isArray(workspaces)) return null;
-
-        const workspace = workspaces.find((entry) => entry?.id === activeWorkspaceId);
-        if (!workspace) return null;
-
-        return {
-            allowedProviders: Array.isArray(workspace.modelPolicy?.allowedProviders)
-                ? workspace.modelPolicy!.allowedProviders!
-                : [],
-            allowedModelIds: Array.isArray(workspace.modelPolicy?.allowedModelIds)
-                ? workspace.modelPolicy!.allowedModelIds!
-                : [],
-        };
-    } catch {
-        return null;
-    }
-};
-
-const filterModelsByWorkspacePolicy = (models: Model[]): Model[] => {
-    const policy = getActiveWorkspaceModelPolicy();
-    if (!policy) return models;
-
-    if (policy.allowedProviders.length === 0 && policy.allowedModelIds.length === 0) {
-        return models;
-    }
-
-    return models.filter((model) => {
-        const providerAllowed = policy.allowedProviders.length === 0
-            || policy.allowedProviders.includes(resolveModelProvider(model));
-        const modelAllowed = policy.allowedModelIds.length === 0
-            || policy.allowedModelIds.includes(model.id);
-        return providerAllowed && modelAllowed;
-    });
-};
 
 export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = true) => {
     const didBootstrapSessionsRef = useRef(false);
@@ -405,158 +276,13 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         }
     };
 
-    useEffect(() => {
-        const fetchModels = async () => {
-            let models: Model[] = [];
-            let localStatus: 'online' | 'offline' = backendHealthService.isOnline() ? 'online' : 'offline';
-            let remoteStatus: 'online' | 'offline' | 'none' = openRouterApiKey ? 'offline' : 'none';
-
-            if (backendHealthService.isOnline()) {
-                try {
-                    const res = await fetch('http://localhost:3000/v1/models', { signal: AbortSignal.timeout(3000) });
-                    const data = await res.json();
-                    if (data && Array.isArray(data.data)) {
-                        models = [...models, ...data.data];
-                        localStatus = 'online';
-                        backendHealthService.reportRequestResult(true);
-                    }
-                } catch (e) {
-                    localStatus = 'offline';
-                    backendHealthService.reportRequestResult(false);
-                }
-            } else {
-                // Shared health service handles backend recovery probing with backoff.
-                void backendHealthService.checkNow();
-            }
-
-            if (openRouterApiKey) {
-                try {
-                    const res = await fetch('https://openrouter.ai/api/v1/models', {
-                        headers: { 'Authorization': `Bearer ${openRouterApiKey}` },
-                        signal: AbortSignal.timeout(5000)
-                    });
-                    const data = await res.json();
-                    if (data && Array.isArray(data.data)) {
-                        const orModels = data.data.map((m: any) => ({
-                            id: `openrouter/${m.id}`,
-                            name: `[OR] ${m.name || m.id}`,
-                            pathOrUrl: 'https://openrouter.ai',
-                            type: 'remote-endpoint',
-                            status: 'loaded',
-                            adapter: 'openrouter',
-                            contextLength: m.context_length || m.contextLength || undefined
-                        }));
-                        models = [...models, ...orModels];
-                        remoteStatus = 'online';
-                    }
-                } catch (e) {
-                    remoteStatus = 'offline';
-                }
-            }
-            const filteredModels = hasLikelyActiveTeamWorkspace()
-                ? filterModelsByWorkspacePolicy(models)
-                : models;
-            setAvailableModels(filteredModels);
-            if (filteredModels.length === 0) {
-                setCurrentModel('');
-            }
-            setConnectionStatus({ local: localStatus, remote: remoteStatus });
-
-            // Restore last model selection from localStorage once, after models are first available.
-            if (!didApplyInitialModelSelectionRef.current && models.length > 0) {
-                didApplyInitialModelSelectionRef.current = true;
-                setCurrentModel(prevModel => {
-                    if (!prevModel) {
-                        const lastModel = localStorage.getItem('app_last_model');
-                        if (lastModel && models.some(m => m.id === lastModel)) {
-                            return lastModel;
-                        }
-                    }
-                    return prevModel;
-                });
-            }
-        };
-
-        fetchModels();
-        // Auto-reconnect / Health check interval
-        const interval = setInterval(fetchModels, 30000); // Check every 30s
-
-        const handleWorkspaceChange = () => {
-            fetchModels();
-        };
-        const handleConnectionRefresh = () => {
-            fetchModels();
-        };
-
-        if (typeof window !== 'undefined') {
-            window.addEventListener('team-workspace-changed', handleWorkspaceChange);
-            window.addEventListener('chat-refresh-connections', handleConnectionRefresh as EventListener);
-        }
-
-        return () => {
-            clearInterval(interval);
-            if (typeof window !== 'undefined') {
-                window.removeEventListener('team-workspace-changed', handleWorkspaceChange);
-                window.removeEventListener('chat-refresh-connections', handleConnectionRefresh as EventListener);
-            }
-        };
-    }, [openRouterApiKey]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    useEffect(() => {
-        if (didBootstrapSessionsRef.current) return;
-        didBootstrapSessionsRef.current = true;
-
-        setSavedSessions(HistoryService.getAllSessions());
-        const lastId = HistoryService.getLastActiveSessionId();
-        if (lastId) {
-            loadSession(lastId);
-        } else {
-            createNewSession();
-        }
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // Separate effect to handle model switching with proper history dependency
-    useEffect(() => {
-        // Only auto-select/switch model if:
-        // 1. No active generation is happening (no messages loading)
-        // 2. Models are available
-        const hasActiveGeneration = history.some(msg => msg.isLoading);
-        if (hasActiveGeneration) return; // NEVER change model during generation
-
-        const currentModelExists = availableModels.some(m => m.id === currentModel);
-
-        if (!currentModel && availableModels.length > 0) {
-            const lastModel = localStorage.getItem('app_last_model');
-            const preferredModel = lastModel && availableModels.some(m => m.id === lastModel)
-                ? lastModel
-                : (availableModels.find((m: Model) => m.id === 'local-lmstudio')?.id || availableModels[0].id);
-            setCurrentModel(preferredModel);
-            localStorage.setItem('app_last_model', preferredModel);
-        } else if (currentModel && !currentModelExists && availableModels.length > 0) {
-            // Current model no longer exists, fallback to preferred or first available
-            const lastModel = localStorage.getItem('app_last_model');
-            const preferredModel = lastModel && availableModels.some(m => m.id === lastModel)
-                ? lastModel
-                : (availableModels.find((m: Model) => m.id === 'local-lmstudio')?.id || availableModels[0].id);
-            setCurrentModel(preferredModel);
-            localStorage.setItem('app_last_model', preferredModel);
-        } else if (currentModel && currentModelExists) {
-            // Model still exists, persist it
-            localStorage.setItem('app_last_model', currentModel);
-        }
-    }, [availableModels, history, currentModel]); // Only run when these change, and history check prevents switching during generation
-
-    // Separate effect to adjust maxTokens when model changes
-    useEffect(() => {
-        if (!currentModel || availableModels.length === 0) return;
-
-        const model = availableModels.find(m => m.id === currentModel);
-        if (model?.contextLength && maxTokens > model.contextLength) {
-            // Cap maxTokens to model's context length (but allow up to 95% to leave room for input)
-            const maxAllowed = Math.floor(model.contextLength * 0.95);
-            setMaxTokens(prev => Math.min(prev, maxAllowed));
-        }
-    }, [currentModel, availableModels]); // Only adjust when model changes, not when maxTokens changes
+    useChatModelDiscovery({
+        openRouterApiKey,
+        setAvailableModels,
+        setCurrentModel,
+        setConnectionStatus,
+        didApplyInitialModelSelectionRef,
+    });
 
     // Memory monitoring for long conversations
     useEffect(() => {
@@ -580,137 +306,31 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         }
     }, [history.length, loadedMessageIndices.size, fullMessageCache.size]);
 
-    useEffect(() => {
-        if (!sessionId || !currentModel) return;
-
-        const timer = setTimeout(() => {
-            const canPersistCurrentHistoryDirectly = loadedMessageIndices.size >= history.length;
-            const needsSessionFallback = !canPersistCurrentHistoryDirectly;
-            const existingSessionMessages = needsSessionFallback
-                ? (
-                    loadedSessionIdRef.current === sessionId
-                        ? loadedSessionMessagesRef.current
-                        : (HistoryService.getSession(sessionId)?.messages ?? [])
-                )
-                : [];
-            const persistedAt = Date.now();
-            const persistedTitle = history.length > 0
-                ? (history[0].content.slice(0, 30) + (history[0].content.length > 30 ? '...' : ''))
-                : 'New Chat';
-            const messagesToSave = canPersistCurrentHistoryDirectly
-                ? history
-                : history.map((msg, index) => {
-                    // If message is in cache, use full version
-                    if (loadedMessageIndices.has(index) && fullMessageCache.has(index)) {
-                        return fullMessageCache.get(index)!;
-                    }
-                    // Otherwise, retrieve from the session snapshot loaded once for this save pass.
-                    if (existingSessionMessages[index]) {
-                        return existingSessionMessages[index];
-                    }
-                    // Fallback to current message
-                    return msg;
-                });
-
-            HistoryService.saveSession({
-                id: sessionId,
-                title: persistedTitle,
-                lastModified: persistedAt,
-                modelId: currentModel,
-                messages: messagesToSave,
-                expertMode,
-                thinkingEnabled,
-                systemPrompt,
-                temperature,
-                topP,
-                maxTokens,
-                batchSize
-            });
-            loadedSessionIdRef.current = sessionId;
-            loadedSessionMessagesRef.current = messagesToSave;
-
-            const sidebarMetadataSignature = JSON.stringify({
-                sessionId,
-                persistedTitle,
-                currentModel,
-                expertMode: expertMode ?? null,
-                thinkingEnabled: Boolean(thinkingEnabled),
-                systemPrompt,
-                temperature,
-                topP,
-                maxTokens,
-                batchSize,
-                messageCount: messagesToSave.length,
-            });
-            if (lastSidebarMetadataSignatureRef.current === sidebarMetadataSignature) {
-                return;
-            }
-            lastSidebarMetadataSignatureRef.current = sidebarMetadataSignature;
-
-            // Keep sidebar history in sync without reparsing full storage every autosave tick.
-            setSavedSessions((prev) => {
-                const metadata: ChatSession = {
-                    id: sessionId,
-                    title: persistedTitle,
-                    lastModified: persistedAt,
-                    modelId: currentModel,
-                    messages: [],
-                    expertMode,
-                    thinkingEnabled,
-                    systemPrompt,
-                    temperature,
-                    topP,
-                    maxTokens,
-                    batchSize,
-                };
-                const patch = buildSavedSessionsPatch(prev, { type: 'upsertTop', metadata });
-                return patch ?? prev;
-            });
-        }, 1000); // 1s debounce
-
-        return () => clearTimeout(timer);
-    }, [history, sessionId, currentModel, expertMode, thinkingEnabled, loadedMessageIndices, fullMessageCache]);
-
-    // Auto-save recovery state every 30 seconds
-    useEffect(() => {
-        if (!sessionId) return;
-
-        const saveRecoveryState = () => {
-            try {
-                const recoveryState = {
-                    timestamp: Date.now(),
-                    sessionId,
-                    history,
-                    currentModel,
-                    systemPrompt,
-                    temperature,
-                    topP,
-                    maxTokens,
-                    batchSize,
-                    expertMode,
-                    thinkingEnabled,
-                    battleMode,
-                    secondaryModel,
-                    autoRouting,
-                    responseFormat,
-                    input,
-                    prefill,
-                    enabledTools: Array.from(enabledTools)
-                };
-                localStorage.setItem('app_recovery_state', JSON.stringify(recoveryState));
-            } catch (e) {
-                console.error('Failed to save recovery state', e);
-            }
-        };
-
-        // Save immediately on mount
-        saveRecoveryState();
-
-        // Then save every 30 seconds
-        const interval = setInterval(saveRecoveryState, 30000);
-
-        return () => clearInterval(interval);
-    }, [sessionId, history, currentModel, systemPrompt, temperature, topP, maxTokens, batchSize, expertMode, thinkingEnabled, battleMode, secondaryModel, autoRouting, responseFormat, input, prefill, enabledTools]);
+    useChatSessionPersistence({
+        history,
+        sessionId,
+        currentModel,
+        expertMode,
+        thinkingEnabled,
+        systemPrompt,
+        temperature,
+        topP,
+        maxTokens,
+        batchSize,
+        loadedMessageIndices,
+        fullMessageCache,
+        setSavedSessions,
+        loadedSessionIdRef,
+        loadedSessionMessagesRef,
+        lastSidebarMetadataSignatureRef,
+        battleMode,
+        secondaryModel,
+        autoRouting,
+        responseFormat,
+        input,
+        prefill,
+        enabledTools,
+    });
 
     // Draft persistence - save draft message whenever input changes
     useEffect(() => {
@@ -832,6 +452,19 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
             });
         }
     };
+
+    useChatBootstrap({
+        didBootstrapSessionsRef,
+        setSavedSessions,
+        loadSession,
+        createNewSession,
+        availableModels,
+        history,
+        currentModel,
+        setCurrentModel,
+        maxTokens,
+        setMaxTokens,
+    });
 
     const deleteSession = (id: string) => {
         lastSidebarMetadataSignatureRef.current = '';
