@@ -1,14 +1,25 @@
 import type { IntegrationAvailability } from '../components/chat/ChatHeaderCluster';
 
-const parseStorageConfig = (key: string): Record<string, any> | null => {
+type StorageConfig = Record<string, unknown>;
+
+const parseStorageConfig = (key: string): StorageConfig | null => {
     try {
         const raw = localStorage.getItem(key);
         if (!raw) return null;
         const parsed = JSON.parse(raw);
-        return parsed && typeof parsed === 'object' ? (parsed as Record<string, any>) : null;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return null;
+        }
+        return parsed as StorageConfig;
     } catch {
         return null;
     }
+};
+
+const hasStringField = (config: StorageConfig | null, field: string): boolean => {
+    if (!config) return false;
+    const value = config[field];
+    return typeof value === 'string' && value.trim().length > 0;
 };
 
 export const readIntegrationAvailability = (): IntegrationAvailability => {
@@ -20,9 +31,9 @@ export const readIntegrationAvailability = (): IntegrationAvailability => {
 
     return {
         notion: notionDatabaseConfigured,
-        slack: Boolean(slackConfig?.webhookUrl || slackConfig?.apiToken),
-        discord: Boolean(discordConfig?.webhookUrl),
-        email: Boolean(emailConfig?.defaultRecipient),
-        calendar: Boolean(calendarConfig?.provider),
+        slack: hasStringField(slackConfig, 'webhookUrl') || hasStringField(slackConfig, 'apiToken'),
+        discord: hasStringField(discordConfig, 'webhookUrl'),
+        email: hasStringField(emailConfig, 'defaultRecipient'),
+        calendar: hasStringField(calendarConfig, 'provider'),
     };
 };

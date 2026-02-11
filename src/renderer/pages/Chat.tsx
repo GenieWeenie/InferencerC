@@ -19,6 +19,7 @@ import { useChatContextOptimizer } from '../hooks/useChatContextOptimizer';
 import { useChatComposerControlBar } from '../hooks/useChatComposerControlBar';
 import { useChatDevMonitors } from '../hooks/useChatDevMonitors';
 import { useChatDiagnosticsPanel } from '../hooks/useChatDiagnosticsPanel';
+import { useChatDiagnosticsPopover } from '../hooks/useChatDiagnosticsPopover';
 import { useChatExternalActions } from '../hooks/useChatExternalActions';
 import { useChatGestureInteractions } from '../hooks/useChatGestureInteractions';
 import { useChatHeaderActions } from '../hooks/useChatHeaderActions';
@@ -64,9 +65,6 @@ import {
     getMessageActionCapabilities,
 } from '../lib/chatMessageActions';
 import { useMCP } from '../hooks/useMCP';
-import {
-    ChatDiagnosticsPopover,
-} from '../components/chat/chatLazyPanels';
 
 const CHAT_PERF_HISTORY_KEY = 'chat_message_perf_benchmarks_v1';
 const ACTIVITY_LOG_COUNT_KEY = 'api_activity_log_count';
@@ -522,61 +520,30 @@ const Chat: React.FC = () => {
         currentModel,
     });
 
-    const diagnosticsPopover = React.useMemo(() => {
-        if (!showDiagnosticsPanel) {
-            return null;
-        }
-
-        return (
-            <React.Suspense fallback={null}>
-                <ChatDiagnosticsPopover
-                    ref={diagnosticsPopoverRef}
-                    position={diagnosticsPanelPosition}
-                    status={diagnosticsStatus}
-                    activePerfBenchmark={activePerfBenchmark}
-                    recentPerfBenchmarksCount={recentPerfBenchmarks.length}
-                    latestPerfBenchmark={latestPerfBenchmark}
-                    perfSummary={perfSummary}
-                    formatPerfMs={formatPerfMs}
-                    devMonitorsEnabled={devMonitorsEnabled}
-                    providerReady={providerReady}
-                    modelReady={modelReady}
-                    historyLength={history.length}
-                    promptReady={promptReady}
-                    onClose={handleCloseDiagnosticsPanel}
-                    onClearPerfHistory={clearPerfHistory}
-                    onToggleDevMonitors={handleToggleDevMonitors}
-                    onRequestConnectionRefresh={requestConnectionRefresh}
-                    onAutoSelectFirstModel={selectFirstModel}
-                    onOpenSettings={handleDiagnosticsOpenSettings}
-                    onOpenModels={handleDiagnosticsOpenModels}
-                    onInsertStarterPrompt={handleDiagnosticsInsertStarterPrompt}
-                />
-            </React.Suspense>
-        );
-    }, [
+    const diagnosticsPopover = useChatDiagnosticsPopover({
         showDiagnosticsPanel,
+        diagnosticsPopoverRef,
         diagnosticsPanelPosition,
         diagnosticsStatus,
         activePerfBenchmark,
-        recentPerfBenchmarks.length,
+        recentPerfBenchmarksCount: recentPerfBenchmarks.length,
         latestPerfBenchmark,
         perfSummary,
         formatPerfMs,
         devMonitorsEnabled,
         providerReady,
         modelReady,
-        history.length,
+        historyLength: history.length,
         promptReady,
-        handleCloseDiagnosticsPanel,
-        clearPerfHistory,
-        handleToggleDevMonitors,
-        requestConnectionRefresh,
-        selectFirstModel,
-        handleDiagnosticsOpenSettings,
-        handleDiagnosticsOpenModels,
-        handleDiagnosticsInsertStarterPrompt,
-    ]);
+        onClose: handleCloseDiagnosticsPanel,
+        onClearPerfHistory: clearPerfHistory,
+        onToggleDevMonitors: handleToggleDevMonitors,
+        onRequestConnectionRefresh: requestConnectionRefresh,
+        onAutoSelectFirstModel: selectFirstModel,
+        onOpenSettings: handleDiagnosticsOpenSettings,
+        onOpenModels: handleDiagnosticsOpenModels,
+        onInsertStarterPrompt: handleDiagnosticsInsertStarterPrompt,
+    });
 
     const {
         autoSummarizeContext,

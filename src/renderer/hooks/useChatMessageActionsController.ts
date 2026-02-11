@@ -1,13 +1,10 @@
 import React from 'react';
 import { toast } from 'sonner';
-
-interface MessageLike {
-    role: string;
-    content?: string;
-}
+import type { ChatMessage, ChatSession } from '../../shared/types';
+import { HistoryService } from '../services/history';
 
 interface UseChatMessageActionsControllerParams {
-    history: MessageLike[];
+    history: ChatMessage[];
     sessionId: string;
     currentModel: string;
     expertMode: string | null;
@@ -35,6 +32,14 @@ export const useChatMessageActionsController = ({
     setEditedMessageContent,
     handleLoadSession,
 }: UseChatMessageActionsControllerParams) => {
+    const resolveModelId = React.useCallback((candidate?: string) => {
+        return candidate && candidate.trim() ? candidate : 'local-lmstudio';
+    }, []);
+
+    const buildFallbackSessionTitle = React.useCallback((prefix: string, timestamp: number) => {
+        return `${prefix} ${new Date(timestamp).toLocaleDateString()}`;
+    }, []);
+
     const latestMessageActionsRef = React.useRef({
         history,
         sessionId,
@@ -145,43 +150,46 @@ export const useChatMessageActionsController = ({
             thinkingEnabled: currentThinkingEnabled,
         } = latestMessageActionsRef.current;
 
-        const branchHistory = currentHistory.slice(0, index + 1);
-        const newSessionId = `session-${Date.now()}`;
+        if (index < 0 || index >= currentHistory.length) {
+            return;
+        }
 
-        const currentSession = {
+        const now = Date.now();
+        const branchHistory = currentHistory.slice(0, index + 1);
+        const persistedSession = HistoryService.getSession(currentSessionId);
+        const modelId = resolveModelId(currentModelId || persistedSession?.modelId);
+
+        const currentSession: ChatSession = {
+            ...(persistedSession ?? HistoryService.createNewSession(modelId)),
             id: currentSessionId,
-            title: `Chat ${new Date().toLocaleDateString()}`,
-            lastModified: Date.now(),
-            modelId: currentModelId,
+            title: persistedSession?.title ?? buildFallbackSessionTitle('Chat', now),
+            lastModified: now,
+            modelId,
             messages: currentHistory,
             expertMode: currentExpertMode,
             thinkingEnabled: currentThinkingEnabled,
         };
 
-        const branchedSession = {
-            id: newSessionId,
-            title: `Branch from ${new Date().toLocaleDateString()}`,
-            lastModified: Date.now(),
-            modelId: currentModelId,
+        const branchSeed = HistoryService.createNewSession(modelId);
+        const branchedSession: ChatSession = {
+            ...branchSeed,
+            title: buildFallbackSessionTitle('Branch from', now),
+            lastModified: now,
             messages: branchHistory,
             expertMode: currentExpertMode,
             thinkingEnabled: currentThinkingEnabled,
         };
 
         try {
-            const sessions = JSON.parse(localStorage.getItem('app_chat_sessions') || '[]');
-            const updatedSessions = sessions.map((session: any) =>
-                session.id === currentSessionId ? currentSession : session
-            );
-            updatedSessions.push(branchedSession);
-            localStorage.setItem('app_chat_sessions', JSON.stringify(updatedSessions));
-
-            handleLoadSession(newSessionId);
+            HistoryService.saveSession(currentSession);
+            HistoryService.saveSession(branchedSession);
+            HistoryService.setLastActiveSessionId(branchedSession.id);
+            handleLoadSession(branchedSession.id);
             toast.success('Conversation branched!');
         } catch {
             toast.error('Failed to branch conversation');
         }
-    }, [handleLoadSession]);
+    }, [buildFallbackSessionTitle, handleLoadSession, resolveModelId]);
 
     return {
         handleEditMessage,
