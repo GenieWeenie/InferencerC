@@ -85,17 +85,23 @@ describe('persisted data parse guards', () => {
     it('sanitizes workspace storage and ignores invalid records', () => {
         localStorage.setItem('team_workspaces_v1', JSON.stringify([
             {
-                id: 'workspace-valid',
-                name: 'Workspace',
+                id: ' workspace-valid ',
+                name: ' Workspace ',
                 createdAt: 1,
                 updatedAt: 2,
-                members: [],
-                invites: [],
-                sharedTemplateIds: [],
-                conversationIds: [],
+                members: [
+                    { id: 'member-1', name: 'Member One', role: 'member', joinedAt: 1 },
+                    { id: 'member-1', name: 'Duplicate', role: 'member', joinedAt: 2 },
+                ],
+                invites: [
+                    { token: 'token-1', role: 'viewer', createdAt: 1, expiresAt: 2, inviteLink: 'https://example.com/invite' },
+                    { token: 'token-1', role: 'viewer', createdAt: 3, expiresAt: 4, inviteLink: 'https://example.com/invite-dup' },
+                ],
+                sharedTemplateIds: [' template-a ', 'template-a', ''],
+                conversationIds: [' convo-1 ', 'convo-1'],
                 modelPolicy: {
-                    allowedProviders: ['lm-studio'],
-                    allowedModelIds: ['model-a'],
+                    allowedProviders: [' lm-studio ', 'lm-studio'],
+                    allowedModelIds: [' model-a ', 'model-a'],
                 },
             },
             {
@@ -109,7 +115,13 @@ describe('persisted data parse guards', () => {
             const workspaces = teamWorkspacesService.getWorkspaces();
             expect(workspaces).toHaveLength(1);
             expect(workspaces[0]?.id).toBe('workspace-valid');
+            expect(workspaces[0]?.name).toBe('Workspace');
+            expect(workspaces[0]?.members).toHaveLength(1);
+            expect(workspaces[0]?.invites).toHaveLength(1);
+            expect(workspaces[0]?.sharedTemplateIds).toEqual(['template-a']);
+            expect(workspaces[0]?.conversationIds).toEqual(['convo-1']);
             expect(workspaces[0]?.modelPolicy.allowedProviders).toEqual(['lm-studio']);
+            expect(workspaces[0]?.modelPolicy.allowedModelIds).toEqual(['model-a']);
         });
     });
 

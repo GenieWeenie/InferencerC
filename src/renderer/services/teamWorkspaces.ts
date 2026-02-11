@@ -86,29 +86,50 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 const sanitizeStringArray = (value: unknown): string[] => {
     if (!Array.isArray(value)) {
         return [];
     }
-    return value.filter((entry): entry is string => typeof entry === 'string');
+    const result: string[] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < value.length; i++) {
+        const normalized = sanitizeNonEmptyString(value[i]);
+        if (!normalized || seen.has(normalized)) {
+            continue;
+        }
+        seen.add(normalized);
+        result.push(normalized);
+    }
+    return result;
 };
 
 const sanitizeWorkspaceMember = (value: unknown): WorkspaceMember | null => {
     if (!isRecord(value)) {
         return null;
     }
+    const id = sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    if (!id || !name) {
+        return null;
+    }
     if (
-        typeof value.id !== 'string'
-        || typeof value.name !== 'string'
-        || !WORKSPACE_ROLES.has(value.role as WorkspaceRole)
+        !WORKSPACE_ROLES.has(value.role as WorkspaceRole)
         || typeof value.joinedAt !== 'number'
         || !Number.isFinite(value.joinedAt)
     ) {
         return null;
     }
     return {
-        id: value.id,
-        name: value.name,
+        id,
+        name,
         role: value.role as WorkspaceRole,
         joinedAt: value.joinedAt,
     };
@@ -118,23 +139,26 @@ const sanitizeWorkspaceInvite = (value: unknown): WorkspaceInvite | null => {
     if (!isRecord(value)) {
         return null;
     }
+    const token = sanitizeNonEmptyString(value.token);
+    const inviteLink = sanitizeNonEmptyString(value.inviteLink);
+    if (!token || !inviteLink) {
+        return null;
+    }
     if (
-        typeof value.token !== 'string'
-        || !WORKSPACE_ROLES.has(value.role as WorkspaceRole)
+        !WORKSPACE_ROLES.has(value.role as WorkspaceRole)
         || typeof value.createdAt !== 'number'
         || !Number.isFinite(value.createdAt)
         || typeof value.expiresAt !== 'number'
         || !Number.isFinite(value.expiresAt)
-        || typeof value.inviteLink !== 'string'
     ) {
         return null;
     }
     return {
-        token: value.token,
+        token,
         role: value.role as WorkspaceRole,
         createdAt: value.createdAt,
         expiresAt: value.expiresAt,
-        inviteLink: value.inviteLink,
+        inviteLink,
     };
 };
 
@@ -142,10 +166,13 @@ const sanitizeWorkspace = (value: unknown): TeamWorkspace | null => {
     if (!isRecord(value)) {
         return null;
     }
+    const id = sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    if (!id || !name) {
+        return null;
+    }
     if (
-        typeof value.id !== 'string'
-        || typeof value.name !== 'string'
-        || typeof value.createdAt !== 'number'
+        typeof value.createdAt !== 'number'
         || !Number.isFinite(value.createdAt)
         || typeof value.updatedAt !== 'number'
         || !Number.isFinite(value.updatedAt)
@@ -154,18 +181,26 @@ const sanitizeWorkspace = (value: unknown): TeamWorkspace | null => {
     }
 
     const modelPolicy = isRecord(value.modelPolicy) ? value.modelPolicy : {};
+    const members = Array.isArray(value.members)
+        ? value.members.map(sanitizeWorkspaceMember).filter((member): member is WorkspaceMember => member !== null)
+        : [];
+    const invites = Array.isArray(value.invites)
+        ? value.invites.map(sanitizeWorkspaceInvite).filter((invite): invite is WorkspaceInvite => invite !== null)
+        : [];
+    const dedupedMembers = members.filter((member, index, all) => (
+        all.findIndex((candidate) => candidate.id === member.id) === index
+    ));
+    const dedupedInvites = invites.filter((invite, index, all) => (
+        all.findIndex((candidate) => candidate.token === invite.token) === index
+    ));
     return {
-        id: value.id,
-        name: value.name,
-        description: typeof value.description === 'string' ? value.description : '',
+        id,
+        name,
+        description: typeof value.description === 'string' ? value.description.trim() : '',
         createdAt: value.createdAt,
         updatedAt: value.updatedAt,
-        members: Array.isArray(value.members)
-            ? value.members.map(sanitizeWorkspaceMember).filter((member): member is WorkspaceMember => member !== null)
-            : [],
-        invites: Array.isArray(value.invites)
-            ? value.invites.map(sanitizeWorkspaceInvite).filter((invite): invite is WorkspaceInvite => invite !== null)
-            : [],
+        members: dedupedMembers,
+        invites: dedupedInvites,
         sharedTemplateIds: sanitizeStringArray(value.sharedTemplateIds),
         conversationIds: sanitizeStringArray(value.conversationIds),
         modelPolicy: {

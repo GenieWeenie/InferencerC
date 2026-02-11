@@ -46,20 +46,24 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 export const readCloudSyncAuthSnapshot = (): boolean => {
     try {
         const raw = localStorage.getItem(CLOUD_SYNC_CONFIG_KEY);
         if (!raw) return false;
         const parsed = parseJson(raw);
         if (!isRecord(parsed)) return false;
-        return Boolean(
-            typeof parsed.token === 'string'
-            && parsed.token.trim().length > 0
-            && typeof parsed.accountId === 'string'
-            && parsed.accountId.trim().length > 0
-            && typeof parsed.encryptionSalt === 'string'
-            && parsed.encryptionSalt.trim().length > 0
-        );
+        const token = sanitizeNonEmptyString(parsed.token);
+        const accountId = sanitizeNonEmptyString(parsed.accountId);
+        const encryptionSalt = sanitizeNonEmptyString(parsed.encryptionSalt);
+        return Boolean(token && accountId && encryptionSalt);
     } catch {
         return false;
     }
@@ -72,7 +76,10 @@ export const readHasConfiguredMcpServers = (): boolean => {
         const parsed = parseJson(raw);
         if (!Array.isArray(parsed)) return false;
         return parsed.some((entry) => {
-            return isRecord(entry) && typeof entry.id === 'string' && entry.id.trim().length > 0;
+            if (!isRecord(entry)) {
+                return false;
+            }
+            return Boolean(sanitizeNonEmptyString(entry.id));
         });
     } catch {
         return false;

@@ -95,9 +95,15 @@ export const parseStoredExcludedIndices = (raw: string): Set<number> => {
     if (!Array.isArray(parsed)) {
         return new Set();
     }
-    const indices = parsed
-        .filter((entry): entry is number => Number.isInteger(entry) && entry >= 0);
-    return new Set(indices);
+    const indices = new Set<number>();
+    for (let i = 0; i < parsed.length; i++) {
+        const entry = parsed[i];
+        if (!Number.isSafeInteger(entry) || entry < 0) {
+            continue;
+        }
+        indices.add(entry);
+    }
+    return indices;
 };
 
 export const useChatContextOptimizer = ({

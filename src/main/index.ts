@@ -8,6 +8,7 @@ import chokidar from 'chokidar';
 import { MCPClientManager } from './mcp-client';
 import { MCPServerConfig, JSONValue } from './mcp-types';
 import type { RecoveryState } from '../shared/types';
+import { parseWindowState, type WindowState } from './windowStateParser';
 
 interface AppUpdateCheckResponse {
   available: boolean;
@@ -150,23 +151,6 @@ const parseRecoveryState = (raw: string): RecoveryState | null => {
   };
 };
 
-const parseWindowState = (raw: string): WindowState | null => {
-  const parsed = parseJson(raw);
-  if (!isRecord(parsed)) {
-    return null;
-  }
-  if (typeof parsed.width !== 'number' || typeof parsed.height !== 'number') {
-    return null;
-  }
-  return {
-    x: typeof parsed.x === 'number' ? parsed.x : undefined,
-    y: typeof parsed.y === 'number' ? parsed.y : undefined,
-    width: parsed.width,
-    height: parsed.height,
-    isMaximized: typeof parsed.isMaximized === 'boolean' ? parsed.isMaximized : undefined,
-    isFullscreen: typeof parsed.isFullscreen === 'boolean' ? parsed.isFullscreen : undefined,
-  };
-};
 
 const loadSecureStorage = (): Record<string, string> => {
   try {
@@ -298,15 +282,6 @@ const MIN_WINDOW_WIDTH = 400;
 const MIN_WINDOW_HEIGHT = 300;
 const MAX_WINDOW_WIDTH = 4000;
 const MAX_WINDOW_HEIGHT = 3000;
-
-interface WindowState {
-  x?: number;
-  y?: number;
-  width: number;
-  height: number;
-  isMaximized?: boolean;
-  isFullscreen?: boolean;
-}
 
 function validateBounds(state: WindowState): WindowState {
   // Get the primary display dimensions

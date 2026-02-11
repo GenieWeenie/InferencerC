@@ -24,10 +24,22 @@ export const parseToolCallPayload = (value: unknown): { name: string; args: Reco
     if (!isRecord(value) || typeof value.name !== 'string') {
         return null;
     }
+    const name = value.name.trim();
+    if (!name) {
+        return null;
+    }
     const args = isRecord(value.arguments)
         ? value.arguments
         : (isRecord(value.parameters) ? value.parameters : {});
-    return { name: value.name, args };
+    return { name, args };
+};
+
+const parseToolCallPayloadFromRaw = (raw: string): { name: string; args: Record<string, unknown> } | null => {
+    const parsed = parseJson(raw);
+    if (!parsed) {
+        return null;
+    }
+    return parseToolCallPayload(parsed);
 };
 
 const getSchemaSummary = (schema: unknown): string => {
@@ -161,7 +173,7 @@ export const useMCP = (options: UseMCPOptions = {}) => {
         let match;
 
         while ((match = xmlPattern.exec(content)) !== null) {
-            const payload = parseToolCallPayload(parseJson(match[1]));
+            const payload = parseToolCallPayloadFromRaw(match[1]);
             if (!payload) {
                 continue;
             }
@@ -179,7 +191,7 @@ export const useMCP = (options: UseMCPOptions = {}) => {
         const codeBlockPattern = /```(?:tool|function)\s*\n(\{[\s\S]*?\})\s*\n```/g;
 
         while ((match = codeBlockPattern.exec(content)) !== null) {
-            const payload = parseToolCallPayload(parseJson(match[1]));
+            const payload = parseToolCallPayloadFromRaw(match[1]);
             if (!payload) {
                 continue;
             }

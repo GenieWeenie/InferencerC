@@ -5,7 +5,7 @@
 describe('hook parser guards', () => {
     it('parses and filters stored excluded indices', () => {
         const { parseStoredExcludedIndices } = require('../useChatContextOptimizer') as typeof import('../useChatContextOptimizer');
-        const parsed = parseStoredExcludedIndices('[0, 1, -1, "3", 4]');
+        const parsed = parseStoredExcludedIndices('[0, 1, -1, "3", 4, 9007199254740992]');
         expect(Array.from(parsed)).toEqual([0, 1, 4]);
     });
 
@@ -39,7 +39,7 @@ describe('hook parser guards', () => {
         });
 
         expect(parseToolCallPayload({
-            name: 'search',
+            name: '  search  ',
             parameters: { query: 'fallback' },
         })).toEqual({
             name: 'search',
@@ -47,5 +47,6 @@ describe('hook parser guards', () => {
         });
 
         expect(parseToolCallPayload({ name: 123 })).toBeNull();
+        expect(parseToolCallPayload({ name: '   ' })).toBeNull();
     });
 });

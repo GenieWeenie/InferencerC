@@ -55,23 +55,30 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 const sanitizePromptSnippet = (value: unknown): PromptSnippet | null => {
     if (!isRecord(value)) {
         return null;
     }
-    if (
-        typeof value.id !== 'string'
-        || typeof value.alias !== 'string'
-        || typeof value.title !== 'string'
-        || typeof value.content !== 'string'
-    ) {
+    const id = sanitizeNonEmptyString(value.id);
+    const alias = sanitizeNonEmptyString(value.alias);
+    const title = sanitizeNonEmptyString(value.title);
+    const content = sanitizeNonEmptyString(value.content);
+    if (!id || !alias || !title || !content) {
         return null;
     }
     return {
-        id: value.id,
-        alias: value.alias,
-        title: value.title,
-        content: value.content,
+        id,
+        alias,
+        title,
+        content,
     };
 };
 
@@ -81,11 +88,20 @@ export const parseStoredPromptSnippets = (raw: string): PromptSnippet[] | null =
         return null;
     }
     const prompts: PromptSnippet[] = [];
+    const seenIds = new Set<string>();
+    const seenAliases = new Set<string>();
     parsed.forEach((entry) => {
         const snippet = sanitizePromptSnippet(entry);
-        if (snippet) {
-            prompts.push(snippet);
+        if (!snippet) {
+            return;
         }
+        const aliasKey = snippet.alias.toLowerCase();
+        if (seenIds.has(snippet.id) || seenAliases.has(aliasKey)) {
+            return;
+        }
+        seenIds.add(snippet.id);
+        seenAliases.add(aliasKey);
+        prompts.push(snippet);
     });
     return prompts;
 };

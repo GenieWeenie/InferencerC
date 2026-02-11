@@ -66,15 +66,22 @@ describe('storage hydration guards', () => {
 
   test('parses settings storage safely', () => {
     const parsedEndpoints = parseStoredModelEndpoints(JSON.stringify([
-      { id: '1', name: 'Local', url: 'http://localhost:1234/v1', type: 'lm-studio' },
+      { id: ' 1 ', name: ' Local ', url: ' http://localhost:1234/v1 ', type: 'lm-studio' },
+      { id: '1', name: 'Duplicate', url: 'http://localhost:2234/v1', type: 'lm-studio' },
       { id: 2, name: 'Bad', url: 'http://localhost', type: 'lm-studio' },
     ]));
     expect(parsedEndpoints).toHaveLength(1);
-    expect(parsedEndpoints?.[0]?.id).toBe('1');
+    expect(parsedEndpoints?.[0]).toEqual({
+      id: '1',
+      name: 'Local',
+      url: 'http://localhost:1234/v1',
+      type: 'lm-studio',
+    });
 
     expect(parseStoredSystemPresets('{not-json')).toBeNull();
     const parsedPresets = parseStoredSystemPresets(JSON.stringify([
-      { id: 'a', name: 'Preset', prompt: 'Hello' },
+      { id: 'a', name: ' Preset ', prompt: ' Hello ' },
+      { id: 'a', name: 'Duplicate', prompt: 'Ignored' },
       { id: 'b', name: 'Bad' },
     ]));
     expect(parsedPresets).toEqual([{ id: 'a', name: 'Preset', prompt: 'Hello' }]);
@@ -92,8 +99,10 @@ describe('storage hydration guards', () => {
     expect(parseStoredUsageStats('[]')).toBeNull();
 
     localStorage.setItem('font_size', '17');
+    localStorage.setItem('font_size_invalid_zero', '0');
     localStorage.setItem('layout_mode', 'compact');
     expect(readStoredIntegerWithFallback('font_size', 13)).toBe(17);
+    expect(readStoredIntegerWithFallback('font_size_invalid_zero', 13)).toBe(13);
     expect(readStoredIntegerWithFallback('missing_font_size', 13)).toBe(13);
     expect(readStoredStringWithFallback('layout_mode', 'normal')).toBe('compact');
     expect(readStoredStringWithFallback('missing_layout_mode', 'normal')).toBe('normal');
@@ -245,15 +254,16 @@ describe('storage hydration guards', () => {
     expect(readCloudSyncAuthSnapshot()).toBe(true);
 
     localStorage.setItem('cloud_sync_config_v1', JSON.stringify({
-      token: {},
+      token: '   ',
       accountId: 'a',
       encryptionSalt: 's',
     }));
     expect(readCloudSyncAuthSnapshot()).toBe(false);
 
     localStorage.setItem('mcp_servers', JSON.stringify([
-      { id: 'server-1', name: 'Server 1' },
+      { id: '   ', name: 'invalid-id' },
       { name: 'invalid' },
+      { id: 'server-1', name: 'Server 1' },
     ]));
     expect(readHasConfiguredMcpServers()).toBe(true);
     localStorage.setItem('mcp_servers', JSON.stringify([{ name: 'invalid' }]));
@@ -275,7 +285,8 @@ describe('storage hydration guards', () => {
     expect(hasLikelyActiveTeamWorkspace()).toBe(false);
 
     const prompts = parseStoredPromptSnippets(JSON.stringify([
-      { id: '1', alias: '/code', title: 'Code', content: 'Prompt' },
+      { id: '1', alias: ' /code ', title: ' Code ', content: ' Prompt ' },
+      { id: '2', alias: '/CODE', title: 'Duplicate alias', content: 'ignored' },
       { id: '2', alias: '/bad', title: 'Bad', content: 5 },
     ]));
     expect(prompts).toEqual([{ id: '1', alias: '/code', title: 'Code', content: 'Prompt' }]);
@@ -283,7 +294,7 @@ describe('storage hydration guards', () => {
   });
 
   test('guards context/perf/bookmark stored payload parsing', () => {
-    expect(Array.from(parseStoredExcludedIndices('[1,2,"x",-1]'))).toEqual([1, 2]);
+    expect(Array.from(parseStoredExcludedIndices('[1,2,"x",-1,9007199254740992]'))).toEqual([1, 2]);
     expect(Array.from(parseStoredExcludedIndices('{bad}'))).toEqual([]);
 
     localStorage.setItem('benchmarks', JSON.stringify([

@@ -37,29 +37,43 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 export const parseStoredModelEndpoints = (raw: string): SettingsModelEndpoint[] | null => {
     const parsed = parseJson(raw);
     if (!Array.isArray(parsed)) {
         return null;
     }
     const endpoints: SettingsModelEndpoint[] = [];
+    const seenIds = new Set<string>();
     for (let index = 0; index < parsed.length; index++) {
         const endpoint = parsed[index];
         if (!isRecord(endpoint)) {
             continue;
         }
-        if (
-            typeof endpoint.id !== 'string'
-            || typeof endpoint.name !== 'string'
-            || typeof endpoint.url !== 'string'
-            || !ENDPOINT_TYPES.has(endpoint.type as SettingsModelEndpoint['type'])
-        ) {
+        const id = sanitizeNonEmptyString(endpoint.id);
+        const name = sanitizeNonEmptyString(endpoint.name);
+        const url = sanitizeNonEmptyString(endpoint.url);
+        if (!id || !name || !url) {
             continue;
         }
+        if (seenIds.has(id)) {
+            continue;
+        }
+        if (!ENDPOINT_TYPES.has(endpoint.type as SettingsModelEndpoint['type'])) {
+            continue;
+        }
+        seenIds.add(id);
         endpoints.push({
-            id: endpoint.id,
-            name: endpoint.name,
-            url: endpoint.url,
+            id,
+            name,
+            url,
             type: endpoint.type as SettingsModelEndpoint['type'],
         });
     }
@@ -72,22 +86,23 @@ export const parseStoredSystemPresets = (raw: string): SettingsSystemPreset[] | 
         return null;
     }
     const presets: SettingsSystemPreset[] = [];
+    const seenIds = new Set<string>();
     for (let index = 0; index < parsed.length; index++) {
         const preset = parsed[index];
         if (!isRecord(preset)) {
             continue;
         }
-        if (
-            typeof preset.id !== 'string'
-            || typeof preset.name !== 'string'
-            || typeof preset.prompt !== 'string'
-        ) {
+        const id = sanitizeNonEmptyString(preset.id);
+        const name = sanitizeNonEmptyString(preset.name);
+        const prompt = sanitizeNonEmptyString(preset.prompt);
+        if (!id || !name || !prompt || seenIds.has(id)) {
             continue;
         }
+        seenIds.add(id);
         presets.push({
-            id: preset.id,
-            name: preset.name,
-            prompt: preset.prompt,
+            id,
+            name,
+            prompt,
         });
     }
     return presets;
@@ -109,11 +124,12 @@ export const readStoredIntegerWithFallback = (key: string, fallback: number): nu
     try {
         const raw = localStorage.getItem(key);
         if (!raw) return fallback;
-        const parsed = Number(raw);
+        const parsed = Number(raw.trim());
         if (!Number.isFinite(parsed)) {
             return fallback;
         }
-        return Math.max(1, Math.round(parsed));
+        const normalized = Math.round(parsed);
+        return normalized >= 1 ? normalized : fallback;
     } catch {
         return fallback;
     }
