@@ -844,4 +844,136 @@ describe('storage hydration guards', () => {
       expect(agents[0]?.taskQueue).toHaveLength(1);
     });
   });
+
+  test('guards testcase/autoresponse/variables/topic/bci/macro storage payloads', () => {
+    localStorage.setItem('test_case_generations', JSON.stringify([
+      {
+        testCode: 'it(\"works\", () => {});',
+        language: 'typescript',
+        framework: 'vitest',
+        testCases: [{ name: 'works', description: 'basic', code: 'it(\"works\")' }],
+        setupCode: 'beforeEach(() => {})',
+        teardownCode: 'afterEach(() => {})',
+        generatedAt: 1,
+      },
+      { testCode: 3 },
+    ]));
+    localStorage.setItem('auto_responses', JSON.stringify([
+      {
+        id: 'resp-1',
+        name: 'Greeting',
+        triggers: [
+          { type: 'contains', value: 'hello', caseSensitive: false },
+          { type: 'bad', value: 'oops' },
+        ],
+        response: 'Hi there',
+        enabled: true,
+        priority: 1,
+        matchCount: 2,
+        createdAt: 2,
+      },
+      { id: 'resp-bad' },
+    ]));
+    localStorage.setItem('prompt_custom_variables', JSON.stringify({
+      team_name: 'Inferencer',
+      bad_number: 7,
+    }));
+    localStorage.setItem('topic_models', JSON.stringify([
+      {
+        sessionId: 'session-1',
+        topics: [
+          {
+            id: 'topic-1',
+            name: 'Code',
+            keywords: ['code', 2],
+            weight: 0.8,
+            messageIndices: [0, 1, 'x'],
+            frequency: 2,
+          },
+        ],
+        primaryTopic: {
+          id: 'topic-1',
+          name: 'Code',
+          keywords: ['code'],
+          weight: 0.8,
+          messageIndices: [0, 1],
+          frequency: 2,
+        },
+        topicDistribution: { 'topic-1': 0.8, bad: 'x' },
+        analyzedAt: 3,
+      },
+      { sessionId: 2 },
+    ]));
+    localStorage.setItem('bci_config', JSON.stringify({
+      enabled: true,
+      deviceType: 'unsupported',
+      samplingRate: 5000,
+      sensitivity: -1,
+      thoughtThreshold: 7,
+    }));
+    localStorage.setItem('bci_patterns', JSON.stringify([
+      { pattern: 'focus', meaning: 'User focused', confidence: 0.9 },
+      { pattern: 'bad', meaning: 1, confidence: 0.5 },
+    ]));
+    localStorage.setItem('macros', JSON.stringify([
+      {
+        id: 'macro-1',
+        name: 'Macro',
+        actions: [
+          { type: 'type', timestamp: 0, data: { text: 'Hello' } },
+          { type: 'unknown', timestamp: 1, data: {} },
+        ],
+        createdAt: 4,
+        playCount: 1,
+      },
+      { id: 'macro-bad' },
+    ]));
+    localStorage.setItem('macro_playbacks', JSON.stringify([
+      {
+        macroId: 'macro-1',
+        startedAt: 5,
+        completedAt: 6,
+        success: true,
+        actionsExecuted: 1,
+      },
+      { macroId: 2 },
+    ]));
+
+    jest.isolateModules(() => {
+      const { testCaseGenerationService } = require('../src/renderer/services/testCaseGeneration') as typeof import('../src/renderer/services/testCaseGeneration');
+      const { autoResponsesService } = require('../src/renderer/services/autoResponses') as typeof import('../src/renderer/services/autoResponses');
+      const promptVariablesModule = require('../src/renderer/services/promptVariables') as typeof import('../src/renderer/services/promptVariables');
+      const { topicModelingService } = require('../src/renderer/services/topicModeling') as typeof import('../src/renderer/services/topicModeling');
+      const { bciService } = require('../src/renderer/services/brainComputerInterface') as typeof import('../src/renderer/services/brainComputerInterface');
+      const { macroRecordingService } = require('../src/renderer/services/macroRecording') as typeof import('../src/renderer/services/macroRecording');
+
+      expect(testCaseGenerationService.getTestCaseHistory()).toHaveLength(1);
+      expect(testCaseGenerationService.getTestCaseHistory()[0]?.framework).toBe('vitest');
+
+      const responses = autoResponsesService.getAllResponses();
+      expect(responses).toHaveLength(1);
+      expect(responses[0]?.triggers).toHaveLength(1);
+      expect(autoResponsesService.checkAutoResponse('hello there')?.id).toBe('resp-1');
+
+      const promptVariablesService = promptVariablesModule.default;
+      const customVars = promptVariablesService.getCustomVariables();
+      expect(customVars.get('team_name')).toBe('Inferencer');
+      expect(customVars.has('bad_number')).toBe(false);
+
+      expect(topicModelingService.getAllTopicModels()).toHaveLength(1);
+      expect(topicModelingService.getTopicModel('session-1')?.topics[0]?.keywords).toEqual(['code']);
+      expect(topicModelingService.getTopicModel('session-1')?.topics[0]?.messageIndices).toEqual([0, 1]);
+
+      const bciConfig = bciService.getConfig();
+      expect(bciConfig.deviceType).toBe('simulated');
+      expect(bciConfig.samplingRate).toBe(2000);
+      expect(bciConfig.sensitivity).toBe(0);
+      expect(bciConfig.thoughtThreshold).toBe(1);
+      expect(bciService.getLearnedPatterns()).toHaveLength(1);
+
+      expect(macroRecordingService.getAllMacros()).toHaveLength(1);
+      expect(macroRecordingService.getAllMacros()[0]?.actions).toHaveLength(1);
+      expect(macroRecordingService.getPlaybackHistory()).toHaveLength(1);
+    });
+  });
 });

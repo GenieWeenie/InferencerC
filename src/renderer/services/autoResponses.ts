@@ -35,6 +35,88 @@ export interface AutoResponseMatch {
     responseSent: boolean;
 }
 
+const TRIGGER_TYPES = new Set<ResponseTrigger['type']>([
+    'exact',
+    'contains',
+    'starts-with',
+    'ends-with',
+    'regex',
+    'intent',
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeTrigger = (value: unknown): ResponseTrigger | null => {
+    if (!isRecord(value)
+        || !TRIGGER_TYPES.has(value.type as ResponseTrigger['type'])
+        || typeof value.value !== 'string') {
+        return null;
+    }
+
+    return {
+        type: value.type as ResponseTrigger['type'],
+        value: value.value,
+        caseSensitive: typeof value.caseSensitive === 'boolean' ? value.caseSensitive : undefined,
+    };
+};
+
+const sanitizeResponse = (value: unknown): AutoResponse | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || !Array.isArray(value.triggers)
+        || typeof value.response !== 'string'
+        || typeof value.enabled !== 'boolean'
+        || typeof value.priority !== 'number'
+        || typeof value.matchCount !== 'number'
+        || typeof value.createdAt !== 'number') {
+        return null;
+    }
+
+    const triggers = value.triggers
+        .map((entry) => sanitizeTrigger(entry))
+        .filter((entry): entry is ResponseTrigger => entry !== null);
+    if (triggers.length === 0) {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        name: value.name,
+        description: typeof value.description === 'string' ? value.description : undefined,
+        triggers,
+        response: value.response,
+        systemPrompt: typeof value.systemPrompt === 'string' ? value.systemPrompt : undefined,
+        modelId: typeof value.modelId === 'string' ? value.modelId : undefined,
+        enabled: value.enabled,
+        priority: value.priority,
+        matchCount: value.matchCount,
+        lastMatched: typeof value.lastMatched === 'number' ? value.lastMatched : undefined,
+        createdAt: value.createdAt,
+    };
+};
+
+const parseStoredResponses = (raw: string): AutoResponse[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeResponse(entry))
+        .filter((entry): entry is AutoResponse => entry !== null);
+};
+
 export class AutoResponsesService {
     private static instance: AutoResponsesService;
     private readonly STORAGE_KEY = 'auto_responses';
@@ -126,8 +208,12 @@ export class AutoResponsesService {
      * Create an auto-response
      */
     createResponse(response: Omit<AutoResponse, 'id' | 'createdAt' | 'matchCount'>): AutoResponse {
+        const sanitizedTriggers = response.triggers
+            .map((trigger) => sanitizeTrigger(trigger))
+            .filter((trigger): trigger is ResponseTrigger => trigger !== null);
         const newResponse: AutoResponse = {
             ...response,
+            triggers: sanitizedTriggers,
             id: crypto.randomUUID(),
             createdAt: Date.now(),
             matchCount: 0,
@@ -144,7 +230,7 @@ export class AutoResponsesService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
-            return JSON.parse(stored);
+            return parseStoredResponses(stored);
         } catch (error) {
             console.error('Failed to load auto-responses:', error);
             return [];
@@ -166,7 +252,18 @@ export class AutoResponsesService {
         const response = this.getResponse(id);
         if (!response) return false;
 
-        const updated = { ...response, ...updates };
+        const updated = sanitizeResponse({
+            ...response,
+            ...updates,
+            triggers: typeof updates.triggers !== 'undefined'
+                ? updates.triggers
+                    .map((trigger) => sanitizeTrigger(trigger))
+                    .filter((trigger): trigger is ResponseTrigger => trigger !== null)
+                : response.triggers,
+        });
+        if (!updated) {
+            return false;
+        }
         this.saveResponse(updated);
         return true;
     }

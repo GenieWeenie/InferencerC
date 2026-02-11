@@ -42,6 +42,32 @@ export interface ParsedVariable {
 const CUSTOM_VARIABLES_KEY = 'prompt_custom_variables';
 const USER_NAME_KEY = 'prompt_user_name';
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeCustomVariableRecord = (value: unknown): Record<string, string> => {
+    if (!isRecord(value)) {
+        return {};
+    }
+
+    const sanitized: Record<string, string> = {};
+    Object.entries(value).forEach(([key, entry]) => {
+        if (typeof entry === 'string') {
+            sanitized[key] = entry;
+        }
+    });
+    return sanitized;
+};
+
 // Built-in variables
 const builtInVariables: PromptVariable[] = [
     // DateTime variables
@@ -230,7 +256,7 @@ export class PromptVariableService {
         try {
             const stored = localStorage.getItem(CUSTOM_VARIABLES_KEY);
             if (stored) {
-                const parsed = JSON.parse(stored) as Record<string, string>;
+                const parsed = sanitizeCustomVariableRecord(parseJson(stored));
                 Object.entries(parsed).forEach(([key, value]) => {
                     this.customVariables.set(key, value);
                 });
@@ -358,6 +384,9 @@ export class PromptVariableService {
      */
     static setCustomVariable(name: string, value: string): void {
         this.init();
+        if (!name) {
+            return;
+        }
         this.customVariables.set(name, value);
         this.persistCustomVariables();
     }
@@ -386,14 +415,16 @@ export class PromptVariableService {
      * Set user name
      */
     static setUserName(name: string): void {
-        localStorage.setItem(USER_NAME_KEY, name);
+        const normalized = name.trim();
+        localStorage.setItem(USER_NAME_KEY, normalized || 'User');
     }
 
     /**
      * Get user name
      */
     static getUserName(): string {
-        return localStorage.getItem(USER_NAME_KEY) || 'User';
+        const stored = localStorage.getItem(USER_NAME_KEY);
+        return stored && stored.trim() ? stored : 'User';
     }
 
     /**
@@ -469,12 +500,13 @@ export class PromptVariableService {
      * Import custom variables from JSON
      */
     static importVariables(json: string): { imported: number; errors: string[] } {
+        this.init();
         const errors: string[] = [];
         let imported = 0;
 
         try {
-            const data = JSON.parse(json);
-            if (typeof data !== 'object' || data === null) {
+            const data = parseJson(json);
+            if (!isRecord(data)) {
                 errors.push('Invalid JSON format');
                 return { imported, errors };
             }

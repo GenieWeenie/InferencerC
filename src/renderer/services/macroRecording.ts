@@ -29,6 +29,107 @@ export interface MacroPlayback {
     actionsExecuted: number;
 }
 
+const ACTION_TYPES = new Set<MacroAction['type']>([
+    'type',
+    'click',
+    'keypress',
+    'wait',
+    'select-model',
+    'set-parameter',
+    'send-message',
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeAction = (value: unknown): MacroAction | null => {
+    if (!isRecord(value)
+        || !ACTION_TYPES.has(value.type as MacroAction['type'])
+        || typeof value.timestamp !== 'number'
+        || !isRecord(value.data)) {
+        return null;
+    }
+
+    return {
+        type: value.type as MacroAction['type'],
+        timestamp: value.timestamp,
+        data: value.data,
+    };
+};
+
+const sanitizeMacro = (value: unknown): Macro | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || !Array.isArray(value.actions)
+        || typeof value.createdAt !== 'number'
+        || typeof value.playCount !== 'number') {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        name: value.name,
+        description: typeof value.description === 'string' ? value.description : undefined,
+        actions: value.actions
+            .map((entry) => sanitizeAction(entry))
+            .filter((entry): entry is MacroAction => entry !== null),
+        createdAt: value.createdAt,
+        lastPlayed: typeof value.lastPlayed === 'number' ? value.lastPlayed : undefined,
+        playCount: value.playCount,
+    };
+};
+
+const parseStoredMacros = (raw: string): Macro[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeMacro(entry))
+        .filter((entry): entry is Macro => entry !== null);
+};
+
+const sanitizePlayback = (value: unknown): MacroPlayback | null => {
+    if (!isRecord(value)
+        || typeof value.macroId !== 'string'
+        || typeof value.startedAt !== 'number'
+        || typeof value.success !== 'boolean'
+        || typeof value.actionsExecuted !== 'number') {
+        return null;
+    }
+
+    return {
+        macroId: value.macroId,
+        startedAt: value.startedAt,
+        completedAt: typeof value.completedAt === 'number' ? value.completedAt : undefined,
+        success: value.success,
+        error: typeof value.error === 'string' ? value.error : undefined,
+        actionsExecuted: value.actionsExecuted,
+    };
+};
+
+const parseStoredPlaybacks = (raw: string): MacroPlayback[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizePlayback(entry))
+        .filter((entry): entry is MacroPlayback => entry !== null);
+};
+
 export class MacroRecordingService {
     private static instance: MacroRecordingService;
     private readonly STORAGE_KEY = 'macros';
@@ -233,8 +334,12 @@ export class MacroRecordingService {
      * Create a macro
      */
     createMacro(macro: Omit<Macro, 'id' | 'createdAt' | 'playCount'>): Macro {
+        const sanitizedActions = macro.actions
+            .map((entry) => sanitizeAction(entry))
+            .filter((entry): entry is MacroAction => entry !== null);
         const newMacro: Macro = {
             ...macro,
+            actions: sanitizedActions,
             id: crypto.randomUUID(),
             createdAt: Date.now(),
             playCount: 0,
@@ -251,7 +356,7 @@ export class MacroRecordingService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
-            return JSON.parse(stored);
+            return parseStoredMacros(stored);
         } catch (error) {
             console.error('Failed to load macros:', error);
             return [];
@@ -273,7 +378,18 @@ export class MacroRecordingService {
         const macro = this.getMacro(id);
         if (!macro) return false;
 
-        const updated = { ...macro, ...updates };
+        const updated = sanitizeMacro({
+            ...macro,
+            ...updates,
+            actions: typeof updates.actions !== 'undefined'
+                ? updates.actions
+                    .map((entry) => sanitizeAction(entry))
+                    .filter((entry): entry is MacroAction => entry !== null)
+                : macro.actions,
+        });
+        if (!updated) {
+            return false;
+        }
         this.saveMacro(updated);
         return true;
     }
@@ -310,7 +426,7 @@ export class MacroRecordingService {
     private savePlayback(playback: MacroPlayback): void {
         try {
             const stored = localStorage.getItem(this.PLAYBACKS_KEY);
-            const playbacks: MacroPlayback[] = stored ? JSON.parse(stored) : [];
+            const playbacks = stored ? parseStoredPlaybacks(stored) : [];
             playbacks.push(playback);
             // Keep only last 50 playbacks
             if (playbacks.length > 50) {
@@ -329,7 +445,7 @@ export class MacroRecordingService {
         try {
             const stored = localStorage.getItem(this.PLAYBACKS_KEY);
             if (!stored) return [];
-            const playbacks: MacroPlayback[] = JSON.parse(stored);
+            const playbacks = parseStoredPlaybacks(stored);
             return playbacks
                 .sort((a, b) => (b.startedAt) - a.startedAt)
                 .slice(0, limit);

@@ -27,6 +27,81 @@ export interface ThoughtPattern {
     timestamp: number;
 }
 
+const DEVICE_TYPES = new Set<BCIConfig['deviceType']>(['emotiv', 'neurosky', 'openbci', 'simulated']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
+const getDefaultConfig = (): BCIConfig => ({
+    enabled: false,
+    deviceType: 'simulated',
+    samplingRate: 256,
+    sensitivity: 0.5,
+    thoughtThreshold: 0.7,
+});
+
+const sanitizeConfig = (value: unknown): BCIConfig => {
+    const defaults = getDefaultConfig();
+    if (!isRecord(value)) {
+        return defaults;
+    }
+
+    return {
+        enabled: typeof value.enabled === 'boolean' ? value.enabled : defaults.enabled,
+        deviceType: DEVICE_TYPES.has(value.deviceType as BCIConfig['deviceType'])
+            ? value.deviceType as BCIConfig['deviceType']
+            : defaults.deviceType,
+        samplingRate: typeof value.samplingRate === 'number'
+            ? clamp(value.samplingRate, 1, 2000)
+            : defaults.samplingRate,
+        sensitivity: typeof value.sensitivity === 'number'
+            ? clamp(value.sensitivity, 0, 1)
+            : defaults.sensitivity,
+        thoughtThreshold: typeof value.thoughtThreshold === 'number'
+            ? clamp(value.thoughtThreshold, 0, 1)
+            : defaults.thoughtThreshold,
+    };
+};
+
+const sanitizeLearnedPattern = (
+    value: unknown
+): { pattern: string; meaning: string; confidence: number } | null => {
+    if (!isRecord(value)
+        || typeof value.pattern !== 'string'
+        || typeof value.meaning !== 'string'
+        || typeof value.confidence !== 'number') {
+        return null;
+    }
+
+    return {
+        pattern: value.pattern,
+        meaning: value.meaning,
+        confidence: clamp(value.confidence, 0, 1),
+    };
+};
+
+const parseStoredPatterns = (raw: string): Array<{ pattern: string; meaning: string; confidence: number }> => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeLearnedPattern(entry))
+        .filter((entry): entry is { pattern: string; meaning: string; confidence: number } => entry !== null);
+};
+
 export class BrainComputerInterfaceService {
     private static instance: BrainComputerInterfaceService;
     private readonly STORAGE_KEY = 'bci_config';
@@ -55,26 +130,20 @@ export class BrainComputerInterfaceService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                return JSON.parse(stored);
+                return sanitizeConfig(parseJson(stored));
             }
         } catch (error) {
             console.error('Failed to load BCI config:', error);
         }
 
-        return {
-            enabled: false,
-            deviceType: 'simulated',
-            samplingRate: 256,
-            sensitivity: 0.5,
-            thoughtThreshold: 0.7,
-        };
+        return getDefaultConfig();
     }
 
     /**
      * Save BCI configuration
      */
     saveConfig(config: Partial<BCIConfig>): void {
-        this.config = { ...this.config, ...config };
+        this.config = sanitizeConfig({ ...this.config, ...config });
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.config));
     }
 
@@ -176,7 +245,10 @@ export class BrainComputerInterfaceService {
         try {
             const stored = localStorage.getItem(this.PATTERNS_KEY);
             if (stored) {
-                return JSON.parse(stored);
+                const parsed = parseStoredPatterns(stored);
+                if (parsed.length > 0) {
+                    return parsed;
+                }
             }
         } catch (error) {
             console.error('Failed to load patterns:', error);
@@ -195,7 +267,11 @@ export class BrainComputerInterfaceService {
      */
     learnPattern(pattern: string, meaning: string, confidence: number = 0.5): void {
         const patterns = this.getLearnedPatterns();
-        patterns.push({ pattern, meaning, confidence });
+        patterns.push({
+            pattern,
+            meaning,
+            confidence: clamp(confidence, 0, 1),
+        });
         localStorage.setItem(this.PATTERNS_KEY, JSON.stringify(patterns));
     }
 

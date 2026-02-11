@@ -26,6 +26,68 @@ export interface TestCaseResult {
     generatedAt: number;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeCaseEntry = (
+    value: unknown
+): { name: string; description: string; code: string } | null => {
+    if (!isRecord(value)
+        || typeof value.name !== 'string'
+        || typeof value.description !== 'string'
+        || typeof value.code !== 'string') {
+        return null;
+    }
+
+    return {
+        name: value.name,
+        description: value.description,
+        code: value.code,
+    };
+};
+
+const sanitizeResult = (value: unknown): TestCaseResult | null => {
+    if (!isRecord(value)
+        || typeof value.testCode !== 'string'
+        || typeof value.language !== 'string'
+        || !Array.isArray(value.testCases)
+        || typeof value.generatedAt !== 'number') {
+        return null;
+    }
+
+    return {
+        testCode: value.testCode,
+        language: value.language,
+        framework: typeof value.framework === 'string' ? value.framework : undefined,
+        testCases: value.testCases
+            .map((entry) => sanitizeCaseEntry(entry))
+            .filter((entry): entry is { name: string; description: string; code: string } => entry !== null),
+        setupCode: typeof value.setupCode === 'string' ? value.setupCode : undefined,
+        teardownCode: typeof value.teardownCode === 'string' ? value.teardownCode : undefined,
+        generatedAt: value.generatedAt,
+    };
+};
+
+const parseStoredResults = (raw: string): TestCaseResult[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeResult(entry))
+        .filter((entry): entry is TestCaseResult => entry !== null);
+};
+
 export class TestCaseGenerationService {
     private static instance: TestCaseGenerationService;
     private readonly STORAGE_KEY = 'test_case_generations';
@@ -192,7 +254,7 @@ export class TestCaseGenerationService {
     private saveTestCases(testResult: TestCaseResult): void {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
-            const testResults: TestCaseResult[] = stored ? JSON.parse(stored) : [];
+            const testResults = stored ? parseStoredResults(stored) : [];
             testResults.push(testResult);
             // Keep only last 50
             if (testResults.length > 50) {
@@ -211,7 +273,7 @@ export class TestCaseGenerationService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
-            const testResults: TestCaseResult[] = JSON.parse(stored);
+            const testResults = parseStoredResults(stored);
             return testResults.slice(-limit).reverse();
         } catch (error) {
             console.error('Failed to load test case history:', error);

@@ -32,6 +32,94 @@ export interface TopicCluster {
     similarity: number; // Average similarity between sessions
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeNumberArray = (value: unknown): number[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.filter((entry): entry is number => typeof entry === 'number');
+};
+
+const sanitizeTopic = (value: unknown): Topic | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || !Array.isArray(value.keywords)
+        || typeof value.weight !== 'number'
+        || !Array.isArray(value.messageIndices)
+        || typeof value.frequency !== 'number') {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        name: value.name,
+        keywords: value.keywords.filter((entry): entry is string => typeof entry === 'string'),
+        weight: value.weight,
+        messageIndices: sanitizeNumberArray(value.messageIndices),
+        frequency: value.frequency,
+    };
+};
+
+const sanitizeTopicDistribution = (value: unknown): Record<string, number> => {
+    if (!isRecord(value)) {
+        return {};
+    }
+
+    const distribution: Record<string, number> = {};
+    Object.entries(value).forEach(([key, entry]) => {
+        if (typeof entry === 'number') {
+            distribution[key] = entry;
+        }
+    });
+    return distribution;
+};
+
+const sanitizeTopicModel = (value: unknown): TopicModel | null => {
+    if (!isRecord(value)
+        || typeof value.sessionId !== 'string'
+        || !Array.isArray(value.topics)
+        || typeof value.analyzedAt !== 'number') {
+        return null;
+    }
+
+    const topics = value.topics
+        .map((entry) => sanitizeTopic(entry))
+        .filter((entry): entry is Topic => entry !== null);
+
+    const primaryTopic = sanitizeTopic(value.primaryTopic);
+
+    return {
+        sessionId: value.sessionId,
+        topics,
+        primaryTopic,
+        topicDistribution: sanitizeTopicDistribution(value.topicDistribution),
+        analyzedAt: value.analyzedAt,
+    };
+};
+
+const parseStoredModels = (raw: string): TopicModel[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeTopicModel(entry))
+        .filter((entry): entry is TopicModel => entry !== null);
+};
+
 export class TopicModelingService {
     private static instance: TopicModelingService;
     private readonly STORAGE_KEY = 'topic_models';
@@ -223,7 +311,7 @@ export class TopicModelingService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return null;
-            const models: TopicModel[] = JSON.parse(stored);
+            const models = parseStoredModels(stored);
             return models.find(m => m.sessionId === sessionId) || null;
         } catch (error) {
             console.error('Failed to load topic model:', error);
@@ -238,7 +326,7 @@ export class TopicModelingService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
-            return JSON.parse(stored);
+            return parseStoredModels(stored);
         } catch (error) {
             console.error('Failed to load topic models:', error);
             return [];
@@ -251,7 +339,7 @@ export class TopicModelingService {
     private saveTopicModel(model: TopicModel): void {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
-            const models: TopicModel[] = stored ? JSON.parse(stored) : [];
+            const models = stored ? parseStoredModels(stored) : [];
             const index = models.findIndex(m => m.sessionId === model.sessionId);
             if (index >= 0) {
                 models[index] = model;
