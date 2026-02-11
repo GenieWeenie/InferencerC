@@ -26,6 +26,7 @@ const VALID_COMMAND_CATEGORIES = new Set<CommandCategory>([
     'View',
     'Help',
 ]);
+const PLUGIN_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -37,6 +38,28 @@ const parseJson = (raw: string): unknown | null => {
     } catch {
         return null;
     }
+};
+
+const isFiniteNumber = (value: unknown): value is number => (
+    typeof value === 'number' && Number.isFinite(value)
+);
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const output: string[] = [];
+    for (let i = 0; i < value.length; i++) {
+        if (typeof value[i] !== 'string') {
+            continue;
+        }
+        const item = value[i].trim();
+        if (!item || output.includes(item)) {
+            continue;
+        }
+        output.push(item);
+    }
+    return output;
 };
 
 export interface PluginManifest {
@@ -216,11 +239,15 @@ export class PluginSystemService {
                     if (!isRecord(entry) || !this.validateManifest(entry.manifest)) {
                         return;
                     }
+                    const manifest = this.normalizeManifest(entry.manifest);
+                    const installedAt = this.normalizeTimestamp(entry.installedAt);
                     const hydrated: Plugin = {
-                        manifest: this.normalizeManifest(entry.manifest),
+                        manifest,
                         enabled: typeof entry.enabled === 'boolean' ? entry.enabled : false,
-                        installedAt: typeof entry.installedAt === 'number' ? entry.installedAt : Date.now(),
-                        lastUpdated: typeof entry.lastUpdated === 'number' ? entry.lastUpdated : undefined,
+                        installedAt,
+                        lastUpdated: isFiniteNumber(entry.lastUpdated)
+                            ? this.normalizeTimestamp(entry.lastUpdated)
+                            : undefined,
                     };
                     this.plugins.set(hydrated.manifest.id, hydrated);
                     if (hydrated.enabled) {
@@ -305,14 +332,101 @@ export class PluginSystemService {
     }
 
     private normalizeManifest(manifest: PluginManifest): PluginManifest {
+        const permissions = (manifest.permissions || [])
+            .filter((permission) => VALID_PERMISSIONS.has(permission.type))
+            .map((permission) => ({
+                type: permission.type,
+                scope: typeof permission.scope === 'string' && permission.scope.trim()
+                    ? permission.scope.trim()
+                    : undefined,
+            }));
+
+        const commands = (manifest.commands || [])
+            .filter((command) => typeof command.id === 'string' && typeof command.label === 'string')
+            .map((command) => ({
+                ...command,
+                id: command.id.trim(),
+                label: command.label.trim(),
+                description: typeof command.description === 'string' ? command.description.trim() : undefined,
+                keywords: sanitizeStringArray(command.keywords),
+                category: VALID_COMMAND_CATEGORIES.has(command.category || 'Actions')
+                    ? command.category
+                    : 'Actions',
+            }))
+            .filter((command) => Boolean(command.id && command.label));
+
+        const exportFormats = (manifest.exportFormats || [])
+            .filter((format) => typeof format.id === 'string'
+                && typeof format.label === 'string'
+                && typeof format.description === 'string'
+                && typeof format.fileExtension === 'string'
+                && typeof format.mimeType === 'string')
+            .map((format) => ({
+                ...format,
+                id: format.id.trim(),
+                label: format.label.trim(),
+                description: format.description.trim(),
+                fileExtension: format.fileExtension.trim(),
+                mimeType: format.mimeType.trim(),
+            }))
+            .filter((format) => Boolean(format.id && format.label && format.fileExtension && format.mimeType));
+
+        const uiExtensions = (manifest.uiExtensions || [])
+            .filter((extension) => extension
+                && typeof extension.id === 'string'
+                && typeof extension.type === 'string'
+                && typeof extension.title === 'string')
+            .map((extension) => ({
+                ...extension,
+                id: extension.id.trim(),
+                title: extension.title.trim(),
+                description: typeof extension.description === 'string' ? extension.description.trim() : undefined,
+            }))
+            .filter((extension) => Boolean(extension.id && extension.title));
+
         return {
             ...manifest,
-            apiVersion: manifest.apiVersion || '1.0.0',
-            permissions: manifest.permissions || [],
-            commands: manifest.commands || [],
-            exportFormats: manifest.exportFormats || [],
-            uiExtensions: manifest.uiExtensions || [],
+            id: manifest.id.trim(),
+            name: manifest.name.trim(),
+            version: manifest.version.trim(),
+            description: manifest.description.trim(),
+            author: manifest.author.trim(),
+            entryPoint: manifest.entryPoint.trim(),
+            apiVersion: manifest.apiVersion?.trim() || '1.0.0',
+            permissions,
+            commands,
+            exportFormats,
+            uiExtensions,
         };
+    }
+
+    private normalizeTimestamp(value: unknown, fallback: number = Date.now()): number {
+        return isFiniteNumber(value) ? Math.max(0, Math.floor(value)) : fallback;
+    }
+
+    private buildPluginStoragePrefix(pluginId: string): string {
+        return `plugin:${pluginId}:`;
+    }
+
+    private buildPluginStorageKey(pluginId: string, key: string): string {
+        return `${this.buildPluginStoragePrefix(pluginId)}${key}`;
+    }
+
+    private decodePluginStorageKey(storageKey: string): { pluginId: string; userKey: string } | null {
+        if (!storageKey.startsWith('plugin:')) {
+            return null;
+        }
+        const rest = storageKey.slice('plugin:'.length);
+        const separatorIndex = rest.indexOf(':');
+        if (separatorIndex <= 0) {
+            return null;
+        }
+        const pluginId = rest.slice(0, separatorIndex).trim();
+        const userKey = rest.slice(separatorIndex + 1);
+        if (!PLUGIN_ID_PATTERN.test(pluginId) || !userKey) {
+            return null;
+        }
+        return { pluginId, userKey };
     }
 
     /**
@@ -384,7 +498,8 @@ export class PluginSystemService {
 
         this.plugins.delete(pluginId);
         this.storageKeys().forEach(key => {
-            if (key.startsWith(`plugin:${pluginId}:`)) {
+            const decoded = this.decodePluginStorageKey(key);
+            if (decoded?.pluginId === pluginId) {
                 this.storageRemove(key);
             }
         });
@@ -653,7 +768,7 @@ export class PluginSystemService {
             storage: {
                 get: async (key: string) => {
                     this.assertPermission(manifest, 'storage');
-                    const stored = this.storageGet(`plugin:${manifest.id}:${key}`);
+                    const stored = this.storageGet(this.buildPluginStorageKey(manifest.id, key));
                     if (!stored) {
                         return null;
                     }
@@ -661,17 +776,18 @@ export class PluginSystemService {
                 },
                 set: async (key: string, value: unknown) => {
                     this.assertPermission(manifest, 'storage');
-                    this.storageSet(`plugin:${manifest.id}:${key}`, JSON.stringify(value));
+                    this.storageSet(this.buildPluginStorageKey(manifest.id, key), JSON.stringify(value));
                 },
                 delete: async (key: string) => {
                     this.assertPermission(manifest, 'storage');
-                    this.storageRemove(`plugin:${manifest.id}:${key}`);
+                    this.storageRemove(this.buildPluginStorageKey(manifest.id, key));
                 },
                 clear: async () => {
                     this.assertPermission(manifest, 'storage');
                     const keys = this.storageKeys();
                     keys.forEach(key => {
-                        if (key.startsWith(`plugin:${manifest.id}:`)) {
+                        const decoded = this.decodePluginStorageKey(key);
+                        if (decoded?.pluginId === manifest.id) {
                             this.storageRemove(key);
                         }
                     });
@@ -844,11 +960,18 @@ export class PluginSystemService {
 
         return (
             typeof m.id === 'string' &&
+            m.id.trim().length > 0 &&
+            PLUGIN_ID_PATTERN.test(m.id.trim()) &&
             typeof m.name === 'string' &&
+            m.name.trim().length > 0 &&
             typeof m.version === 'string' &&
+            m.version.trim().length > 0 &&
             typeof m.description === 'string' &&
+            m.description.trim().length > 0 &&
             typeof m.author === 'string' &&
+            m.author.trim().length > 0 &&
             typeof m.entryPoint === 'string' &&
+            m.entryPoint.trim().length > 0 &&
             (typeof m.apiVersion === 'string' || typeof m.apiVersion === 'undefined') &&
             permissions.every(permission => {
                 if (!permission || typeof permission !== 'object') return false;
@@ -864,10 +987,14 @@ export class PluginSystemService {
                 const typedCommand = command as Record<string, unknown>;
                 return (
                     typeof typedCommand.id === 'string' &&
+                    typedCommand.id.trim().length > 0 &&
                     typeof typedCommand.label === 'string' &&
+                    typedCommand.label.trim().length > 0 &&
                     (typeof typedCommand.description === 'undefined' || typeof typedCommand.description === 'string') &&
                     (typeof typedCommand.category === 'undefined' || VALID_COMMAND_CATEGORIES.has(typedCommand.category as CommandCategory)) &&
-                    (typeof typedCommand.keywords === 'undefined' || Array.isArray(typedCommand.keywords))
+                    (typeof typedCommand.keywords === 'undefined'
+                        || (Array.isArray(typedCommand.keywords)
+                            && typedCommand.keywords.every((keyword) => typeof keyword === 'string')))
                 );
             }) &&
             exportFormats.every(format => {
@@ -875,10 +1002,15 @@ export class PluginSystemService {
                 const typedFormat = format as Record<string, unknown>;
                 return (
                     typeof typedFormat.id === 'string' &&
+                    typedFormat.id.trim().length > 0 &&
                     typeof typedFormat.label === 'string' &&
+                    typedFormat.label.trim().length > 0 &&
                     typeof typedFormat.description === 'string' &&
+                    typedFormat.description.trim().length > 0 &&
                     typeof typedFormat.fileExtension === 'string' &&
+                    typedFormat.fileExtension.trim().length > 0 &&
                     typeof typedFormat.mimeType === 'string' &&
+                    typedFormat.mimeType.trim().length > 0 &&
                     (typeof typedFormat.strategy === 'undefined' ||
                         typedFormat.strategy === 'plain-text' ||
                         typedFormat.strategy === 'jsonl' ||

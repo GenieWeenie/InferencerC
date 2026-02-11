@@ -19,6 +19,10 @@ import { parseBookmarkedMessageIndices } from '../src/renderer/hooks/useChatGest
 class MockLocalStorage {
   private store = new Map<string, string>();
 
+  get length(): number {
+    return this.store.size;
+  }
+
   getItem(key: string): string | null {
     return this.store.has(key) ? this.store.get(key)! : null;
   }
@@ -29,6 +33,13 @@ class MockLocalStorage {
 
   removeItem(key: string): void {
     this.store.delete(key);
+  }
+
+  key(index: number): string | null {
+    if (index < 0 || index >= this.store.size) {
+      return null;
+    }
+    return Array.from(this.store.keys())[index] ?? null;
   }
 
   clear(): void {
@@ -1084,5 +1095,228 @@ describe('storage hydration guards', () => {
 
     const cacheStats = ragDocumentChatService.getEmbeddingCacheStats();
     expect(cacheStats.entries).toBe(1);
+  });
+
+  test('guards enterprise compliance storage hydration for sso/session/retention/audit logs', () => {
+    const now = Date.now();
+    localStorage.setItem('enterprise_sso_config_v1', JSON.stringify({
+      saml: { enabled: true, entryPoint: ' https://sso.example.com ', issuer: ' issuer ', certificate: 7, relayState: ' rel ' },
+      oidc: { enabled: true, issuerUrl: ' https://issuer.example.com ', authorizationEndpoint: ' https://issuer.example.com/auth ', tokenEndpoint: ' https://issuer.example.com/token ', clientId: ' client ', scopes: ['openid', 'email', 'openid', 2] },
+      allowPasswordFallback: 'yes',
+    }));
+    localStorage.setItem('enterprise_retention_policy_v1', JSON.stringify({
+      enabled: true,
+      retentionDays: -2,
+      anonymizePII: false,
+      purgeIntervalHours: 0,
+    }));
+    localStorage.setItem('enterprise_audit_logs_v1', JSON.stringify([
+      {
+        id: 'log-1',
+        timestamp: now,
+        category: 'enterprise.sso',
+        action: 'login',
+        result: 'success',
+        actor: { id: 'user-1', name: 'Alice', role: 'admin' },
+        details: { ipAddress: '127.0.0.1' },
+        piiFields: ['ipAddress', 2],
+      },
+      { id: 'bad-log', timestamp: 'x' },
+    ]));
+    localStorage.setItem('enterprise_sso_session_v1', JSON.stringify({
+      sessionId: ' session-1 ',
+      protocol: 'saml2',
+      userId: ' user-1 ',
+      email: ' USER@EXAMPLE.COM ',
+      displayName: ' Alice ',
+      issuedAt: now - 1000,
+      expiresAt: now + 60_000,
+    }));
+
+    jest.isolateModules(() => {
+      const { enterpriseComplianceService } = require('../src/renderer/services/enterpriseCompliance') as typeof import('../src/renderer/services/enterpriseCompliance');
+
+      const ssoConfig = enterpriseComplianceService.getSSOConfig();
+      expect(ssoConfig.saml.entryPoint).toBe('https://sso.example.com');
+      expect(ssoConfig.saml.issuer).toBe('issuer');
+      expect(ssoConfig.oidc.scopes).toEqual(['openid', 'email']);
+      expect(ssoConfig.allowPasswordFallback).toBe(true);
+
+      const retentionPolicy = enterpriseComplianceService.getRetentionPolicy();
+      expect(retentionPolicy.retentionDays).toBe(1);
+      expect(retentionPolicy.purgeIntervalHours).toBe(1);
+      expect(retentionPolicy.anonymizePII).toBe(false);
+
+      const logs = enterpriseComplianceService.getAuditLogs();
+      expect(logs).toHaveLength(1);
+      expect(logs[0]?.piiFields).toEqual(['ipAddress']);
+
+      const session = enterpriseComplianceService.getSSOSession();
+      expect(session?.sessionId).toBe('session-1');
+      expect(session?.email).toBe('user@example.com');
+      expect(session?.displayName).toBe('Alice');
+    });
+  });
+
+  test('guards cloud sync config/state hydration and collaboration payload decoding', async () => {
+    localStorage.setItem('cloud_sync_config_v1', JSON.stringify({
+      enabled: 'yes',
+      baseUrl: ' https://sync.example.com/ ',
+      token: ' token-1 ',
+      accountId: ' acct-1 ',
+      email: ' user@example.com ',
+      encryptionSalt: ' c2FsdA== ',
+      deviceId: '',
+      syncSettings: 'true',
+      syncTemplates: false,
+      selectedConversationIds: ['session-1', 2, ' session-2 ', 'session-1'],
+    }));
+    localStorage.setItem('cloud_sync_state_v1_acct-1', JSON.stringify({
+      accountId: 9,
+      lastSyncedAt: 'bad',
+      conversations: {
+        'session-1': { serverVersion: 2, lastSyncedHash: 'hash-1' },
+        'session-bad': { serverVersion: 'x', lastSyncedHash: 'bad' },
+      },
+      settings: { serverVersion: 4, lastSyncedHash: 'settings-hash' },
+      templates: { serverVersion: 'x', lastSyncedHash: 'templates-hash' },
+    }));
+    localStorage.setItem('collaboration_config', JSON.stringify({
+      enabled: true,
+      baseUrl: ' https://collab.example.com/ ',
+      displayName: '  Dev User  ',
+      pollTimeoutMs: 999999,
+      autoJoin: 'yes',
+    }));
+
+    const originalFetch = globalThis.fetch;
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ participantId: 3, eventCursor: 1, session: {} }),
+    });
+    Object.defineProperty(globalThis, 'fetch', {
+      value: fetchMock,
+      configurable: true,
+      writable: true,
+    });
+
+    try {
+      let cloudSyncService: typeof import('../src/renderer/services/cloudSync').cloudSyncService;
+      let realTimeCollaborationService: typeof import('../src/renderer/services/realTimeCollaboration').realTimeCollaborationService;
+
+      jest.isolateModules(() => {
+        ({ cloudSyncService } = require('../src/renderer/services/cloudSync') as typeof import('../src/renderer/services/cloudSync'));
+        ({ realTimeCollaborationService } = require('../src/renderer/services/realTimeCollaboration') as typeof import('../src/renderer/services/realTimeCollaboration'));
+      });
+
+      const cloudConfig = cloudSyncService.getConfig();
+      expect(cloudConfig.baseUrl).toBe('https://sync.example.com');
+      expect(cloudConfig.accountId).toBe('acct-1');
+      expect(cloudConfig.selectedConversationIds).toEqual(['session-1', 'session-2']);
+      expect(cloudConfig.syncSettings).toBe(true);
+
+      const syncStatus = cloudSyncService.getSyncStatus();
+      expect(syncStatus).not.toBeNull();
+      expect(syncStatus?.syncedConversationCount).toBe(1);
+      expect(syncStatus?.syncedSettings).toBe(true);
+      expect(syncStatus?.syncedTemplates).toBe(false);
+
+      const collaborationConfig = realTimeCollaborationService.getConfig();
+      expect(collaborationConfig.baseUrl).toBe('https://collab.example.com');
+      expect(collaborationConfig.displayName).toBe('Dev User');
+      expect(collaborationConfig.pollTimeoutMs).toBe(30000);
+      expect(collaborationConfig.autoJoin).toBe(false);
+
+      await expect(realTimeCollaborationService.createSession('Team')).rejects.toThrow('Invalid collaboration create-session response');
+    } finally {
+      Object.defineProperty(globalThis, 'fetch', {
+        value: originalFetch,
+        configurable: true,
+        writable: true,
+      });
+    }
+  });
+
+  test('guards plugin storage hydration and uses shared recovery-state sanitizer across services', () => {
+    localStorage.setItem('plugins', JSON.stringify([
+      {
+        manifest: {
+          id: 'safe.plugin',
+          name: ' Safe Plugin ',
+          version: ' 1.0.0 ',
+          description: ' Plugin desc ',
+          author: ' Dev ',
+          entryPoint: ' plugin.js ',
+          permissions: [{ type: 'storage', scope: ' cache ' }],
+          apiVersion: ' 1.0.0 ',
+          commands: [{ id: ' run ', label: ' Run ', keywords: ['alpha', 'alpha'] }],
+        },
+        enabled: true,
+        installedAt: 12.9,
+        lastUpdated: 'bad',
+      },
+      {
+        manifest: {
+          id: 'bad:plugin',
+          name: 'Bad',
+          version: '1.0.0',
+          description: 'Bad',
+          author: 'Bad',
+          entryPoint: 'bad.js',
+          permissions: [],
+          apiVersion: '1.0.0',
+        },
+        enabled: true,
+        installedAt: 1,
+      },
+    ]));
+    localStorage.setItem('app_recovery_state', JSON.stringify({
+      sessionId: '   ',
+      timestamp: Date.now(),
+      draftMessage: 'draft',
+    }));
+
+    jest.isolateModules(() => {
+      const { pluginSystemService } = require('../src/renderer/services/pluginSystem') as typeof import('../src/renderer/services/pluginSystem');
+      const { crashRecoveryService } = require('../src/renderer/services/crashRecovery') as typeof import('../src/renderer/services/crashRecovery');
+      const { HistoryService } = require('../src/renderer/services/history') as typeof import('../src/renderer/services/history');
+
+      const plugins = pluginSystemService.getAllPlugins();
+      expect(plugins).toHaveLength(1);
+      expect(plugins[0]?.manifest.id).toBe('safe.plugin');
+      expect(plugins[0]?.manifest.name).toBe('Safe Plugin');
+      expect(plugins[0]?.manifest.permissions[0]?.scope).toBe('cache');
+      expect(plugins[0]?.manifest.commands?.[0]?.keywords).toEqual(['alpha']);
+      expect(plugins[0]?.installedAt).toBe(12);
+
+      expect(crashRecoveryService.getRecoveryState()).toBeNull();
+      expect(HistoryService.getRecoveryState()).toBeNull();
+
+      crashRecoveryService.saveRecoveryState({
+        sessionId: ' session-1 ',
+        timestamp: 10.7,
+        draftMessage: '',
+        pendingResponse: true,
+      });
+      expect(HistoryService.getRecoveryState()).toEqual({
+        sessionId: 'session-1',
+        timestamp: 10,
+        draftMessage: undefined,
+        pendingResponse: true,
+      });
+
+      HistoryService.saveRecoveryState({
+        sessionId: ' session-2 ',
+        timestamp: 23.2,
+        draftMessage: 'hello',
+        pendingResponse: false,
+      });
+      expect(crashRecoveryService.getRecoveryState()).toEqual({
+        sessionId: 'session-2',
+        timestamp: 23,
+        draftMessage: 'hello',
+        pendingResponse: false,
+      });
+    });
   });
 });

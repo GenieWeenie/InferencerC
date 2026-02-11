@@ -25,6 +25,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 };
 
+const isFiniteNumber = (value: unknown): value is number => (
+    typeof value === 'number' && Number.isFinite(value)
+);
+
+const normalizeTimestamp = (value: unknown, fallback: number = 0): number => (
+    isFiniteNumber(value) ? Math.max(0, Math.floor(value)) : fallback
+);
+
 const parseJson = (raw: string): unknown | null => {
     try {
         return JSON.parse(raw);
@@ -48,13 +56,23 @@ const parseStringRecord = (raw: string): Record<string, string> | null => {
 const parseChatSession = (raw: string): ChatSession | null => {
     const parsed = parseJson(raw);
     if (!isRecord(parsed)) return null;
-    if (typeof parsed.id !== 'string' || typeof parsed.title !== 'string' || typeof parsed.modelId !== 'string') {
+    if (typeof parsed.id !== 'string'
+        || typeof parsed.title !== 'string'
+        || typeof parsed.modelId !== 'string'
+        || !isFiniteNumber(parsed.lastModified)) {
         return null;
     }
     if (!Array.isArray(parsed.messages)) {
         return null;
     }
-    return parsed as ChatSession;
+    return {
+        ...(parsed as ChatSession),
+        id: parsed.id.trim(),
+        title: parsed.title.trim() || 'Recovered Conversation',
+        modelId: parsed.modelId.trim(),
+        lastModified: normalizeTimestamp(parsed.lastModified, Date.now()),
+        messages: parsed.messages,
+    };
 };
 
 type EncryptedPayload = { v: number; iv: string; ct: string };
@@ -62,10 +80,247 @@ type EncryptedPayload = { v: number; iv: string; ct: string };
 const parseEncryptedPayload = (ciphertext: string): EncryptedPayload | null => {
     const parsed = parseJson(ciphertext);
     if (!isRecord(parsed)) return null;
-    if (typeof parsed.v !== 'number' || typeof parsed.iv !== 'string' || typeof parsed.ct !== 'string') {
+    if (!Number.isInteger(parsed.v)
+        || parsed.v <= 0
+        || typeof parsed.iv !== 'string'
+        || typeof parsed.ct !== 'string') {
         return null;
     }
-    return { v: parsed.v, iv: parsed.iv, ct: parsed.ct };
+    const iv = parsed.iv.trim();
+    const ct = parsed.ct.trim();
+    if (!iv || !ct) {
+        return null;
+    }
+    return { v: parsed.v, iv, ct };
+};
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const output: string[] = [];
+    for (let i = 0; i < value.length; i++) {
+        if (typeof value[i] !== 'string') {
+            continue;
+        }
+        const item = value[i].trim();
+        if (!item || output.includes(item)) {
+            continue;
+        }
+        output.push(item);
+    }
+    return output;
+};
+
+const sanitizeSyncItemState = (value: unknown): SyncItemState | null => {
+    if (!isRecord(value)
+        || !isFiniteNumber(value.serverVersion)
+        || typeof value.lastSyncedHash !== 'string') {
+        return null;
+    }
+    const lastSyncedHash = value.lastSyncedHash.trim();
+    if (!lastSyncedHash) {
+        return null;
+    }
+    return {
+        serverVersion: Math.max(0, Math.floor(value.serverVersion)),
+        lastSyncedHash,
+    };
+};
+
+const sanitizeCloudSyncState = (
+    value: unknown,
+    accountId: string
+): CloudSyncState => {
+    if (!isRecord(value)) {
+        return {
+            accountId,
+            lastSyncedAt: 0,
+            conversations: {},
+        };
+    }
+
+    const conversations: Record<string, SyncItemState> = {};
+    if (isRecord(value.conversations)) {
+        Object.entries(value.conversations).forEach(([sessionId, item]) => {
+            if (!sessionId.trim()) {
+                return;
+            }
+            const sanitized = sanitizeSyncItemState(item);
+            if (!sanitized) {
+                return;
+            }
+            conversations[sessionId] = sanitized;
+        });
+    }
+
+    return {
+        accountId: typeof value.accountId === 'string' && value.accountId.trim()
+            ? value.accountId.trim()
+            : accountId,
+        lastSyncedAt: normalizeTimestamp(value.lastSyncedAt, 0),
+        conversations,
+        settings: sanitizeSyncItemState(value.settings) || undefined,
+        templates: sanitizeSyncItemState(value.templates) || undefined,
+    };
+};
+
+const sanitizeConversationRecord = (value: unknown): CloudSyncConversationRecord | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.ciphertext !== 'string'
+        || typeof value.hash !== 'string'
+        || !isFiniteNumber(value.version)
+        || !isFiniteNumber(value.updatedAt)
+        || !isFiniteNumber(value.size)) {
+        return null;
+    }
+
+    const id = value.id.trim();
+    const ciphertext = value.ciphertext.trim();
+    const hash = value.hash.trim();
+    if (!id || !ciphertext || !hash) {
+        return null;
+    }
+
+    return {
+        id,
+        ciphertext,
+        hash,
+        version: Math.max(0, Math.floor(value.version)),
+        updatedAt: normalizeTimestamp(value.updatedAt, 0),
+        size: Math.max(0, Math.floor(value.size)),
+    };
+};
+
+const sanitizeBlobRecord = (value: unknown): CloudSyncBlobRecord | null => {
+    if (!isRecord(value)
+        || typeof value.ciphertext !== 'string'
+        || typeof value.hash !== 'string'
+        || !isFiniteNumber(value.version)
+        || !isFiniteNumber(value.updatedAt)
+        || !isFiniteNumber(value.size)) {
+        return null;
+    }
+
+    const ciphertext = value.ciphertext.trim();
+    const hash = value.hash.trim();
+    if (!ciphertext || !hash) {
+        return null;
+    }
+
+    return {
+        ciphertext,
+        hash,
+        version: Math.max(0, Math.floor(value.version)),
+        updatedAt: normalizeTimestamp(value.updatedAt, 0),
+        size: Math.max(0, Math.floor(value.size)),
+    };
+};
+
+const sanitizeCloudSyncSyncResponse = (value: unknown): CloudSyncSyncResponse | null => {
+    if (!isRecord(value)
+        || !isFiniteNumber(value.serverRevision)
+        || !isFiniteNumber(value.serverTime)
+        || !isRecord(value.pull)
+        || !isRecord(value.accepted)
+        || !isRecord(value.conflicts)
+        || !isRecord(value.stats)) {
+        return null;
+    }
+
+    const pullConversations = Array.isArray(value.pull.conversations)
+        ? value.pull.conversations
+            .map((entry) => sanitizeConversationRecord(entry))
+            .filter((entry): entry is CloudSyncConversationRecord => entry !== null)
+        : [];
+    const deletedConversationIds = sanitizeStringArray(value.pull.deletedConversationIds);
+
+    const acceptedConversations = Array.isArray(value.accepted.conversations)
+        ? value.accepted.conversations
+            .map((entry) => {
+                if (!isRecord(entry)
+                    || typeof entry.id !== 'string'
+                    || !isFiniteNumber(entry.version)
+                    || typeof entry.hash !== 'string') {
+                    return null;
+                }
+                const id = entry.id.trim();
+                const hash = entry.hash.trim();
+                if (!id || !hash) {
+                    return null;
+                }
+                return {
+                    id,
+                    version: Math.max(0, Math.floor(entry.version)),
+                    hash,
+                };
+            })
+            .filter((entry): entry is { id: string; version: number; hash: string } => entry !== null)
+        : [];
+
+    const sanitizeAcceptedBlob = (
+        blobValue: unknown
+    ): { version: number; hash: string } | null => {
+        if (!isRecord(blobValue)
+            || !isFiniteNumber(blobValue.version)
+            || typeof blobValue.hash !== 'string') {
+            return null;
+        }
+        const hash = blobValue.hash.trim();
+        if (!hash) {
+            return null;
+        }
+        return {
+            version: Math.max(0, Math.floor(blobValue.version)),
+            hash,
+        };
+    };
+
+    const conflictConversations = Array.isArray(value.conflicts.conversations)
+        ? value.conflicts.conversations
+            .map((entry) => {
+                if (!isRecord(entry) || typeof entry.id !== 'string') {
+                    return null;
+                }
+                const id = entry.id.trim();
+                const serverRecord = sanitizeConversationRecord(entry.serverRecord);
+                if (!id || !serverRecord) {
+                    return null;
+                }
+                return { id, serverRecord };
+            })
+            .filter((entry): entry is { id: string; serverRecord: CloudSyncConversationRecord } => entry !== null)
+        : [];
+
+    if (!isFiniteNumber(value.stats.uploadedBytes) || !isFiniteNumber(value.stats.downloadedBytes)) {
+        return null;
+    }
+
+    return {
+        serverRevision: Math.max(0, Math.floor(value.serverRevision)),
+        serverTime: normalizeTimestamp(value.serverTime, 0),
+        pull: {
+            conversations: pullConversations,
+            deletedConversationIds,
+            settings: sanitizeBlobRecord(value.pull.settings),
+            templates: sanitizeBlobRecord(value.pull.templates),
+        },
+        accepted: {
+            conversations: acceptedConversations,
+            settings: sanitizeAcceptedBlob(value.accepted.settings),
+            templates: sanitizeAcceptedBlob(value.accepted.templates),
+        },
+        conflicts: {
+            conversations: conflictConversations,
+            settings: sanitizeBlobRecord(value.conflicts.settings),
+            templates: sanitizeBlobRecord(value.conflicts.templates),
+        },
+        stats: {
+            uploadedBytes: Math.max(0, Math.floor(value.stats.uploadedBytes)),
+            downloadedBytes: Math.max(0, Math.floor(value.stats.downloadedBytes)),
+        },
+    };
 };
 
 const logComplianceEvent = (event: ComplianceEventInput): void => {
@@ -204,19 +459,29 @@ class CloudSyncService {
             if (raw) {
                 const parsedUnknown = parseJson(raw);
                 const parsed = isRecord(parsedUnknown) ? parsedUnknown : {};
+                const selectedConversationIds = sanitizeStringArray(parsed.selectedConversationIds);
+                const baseUrl = typeof parsed.baseUrl === 'string'
+                    ? parsed.baseUrl.trim().replace(/\/$/, '')
+                    : 'http://localhost:3000';
                 return {
                     enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : true,
-                    baseUrl: (typeof parsed.baseUrl === 'string' ? parsed.baseUrl : 'http://localhost:3000').replace(/\/$/, ''),
-                    token: typeof parsed.token === 'string' ? parsed.token : undefined,
-                    accountId: typeof parsed.accountId === 'string' ? parsed.accountId : undefined,
-                    email: typeof parsed.email === 'string' ? parsed.email : undefined,
-                    encryptionSalt: typeof parsed.encryptionSalt === 'string' ? parsed.encryptionSalt : undefined,
+                    baseUrl: baseUrl || 'http://localhost:3000',
+                    token: typeof parsed.token === 'string' && parsed.token.trim()
+                        ? parsed.token.trim()
+                        : undefined,
+                    accountId: typeof parsed.accountId === 'string' && parsed.accountId.trim()
+                        ? parsed.accountId.trim()
+                        : undefined,
+                    email: typeof parsed.email === 'string' && parsed.email.trim()
+                        ? parsed.email.trim()
+                        : undefined,
+                    encryptionSalt: typeof parsed.encryptionSalt === 'string' && parsed.encryptionSalt.trim()
+                        ? parsed.encryptionSalt.trim()
+                        : undefined,
                     deviceId: typeof parsed.deviceId === 'string' && parsed.deviceId.trim().length > 0 ? parsed.deviceId : crypto.randomUUID(),
                     syncSettings: typeof parsed.syncSettings === 'boolean' ? parsed.syncSettings : true,
                     syncTemplates: typeof parsed.syncTemplates === 'boolean' ? parsed.syncTemplates : true,
-                    selectedConversationIds: Array.isArray(parsed.selectedConversationIds)
-                        ? parsed.selectedConversationIds.filter((id): id is string => typeof id === 'string')
-                        : [],
+                    selectedConversationIds,
                 };
             }
         } catch (error) {
@@ -245,13 +510,15 @@ class CloudSyncService {
     }
 
     updateConfig(partial: Partial<CloudSyncConfig>): CloudSyncConfig {
+        const selectedConversationIds = partial.selectedConversationIds
+            ? sanitizeStringArray(partial.selectedConversationIds)
+            : this.config.selectedConversationIds;
+        const normalizedBaseUrl = (partial.baseUrl ?? this.config.baseUrl).trim().replace(/\/$/, '');
         this.config = {
             ...this.config,
             ...partial,
-            baseUrl: (partial.baseUrl ?? this.config.baseUrl).replace(/\/$/, ''),
-            selectedConversationIds: partial.selectedConversationIds
-                ? [...partial.selectedConversationIds]
-                : this.config.selectedConversationIds,
+            baseUrl: normalizedBaseUrl || 'http://localhost:3000',
+            selectedConversationIds,
         };
         this.saveConfig();
         return this.getConfig();
@@ -443,40 +710,8 @@ class CloudSyncService {
         try {
             const raw = localStorage.getItem(key);
             if (raw) {
-                const parsedUnknown = parseJson(raw);
-                const parsed = isRecord(parsedUnknown) ? parsedUnknown : {};
-                return {
-                    accountId: typeof parsed.accountId === 'string' ? parsed.accountId : this.config.accountId!,
-                    lastSyncedAt: typeof parsed.lastSyncedAt === 'number' ? parsed.lastSyncedAt : 0,
-                    conversations: isRecord(parsed.conversations)
-                        ? Object.fromEntries(
-                            Object.entries(parsed.conversations)
-                                .filter(([, value]) => isRecord(value)
-                                    && typeof value.serverVersion === 'number'
-                                    && typeof value.lastSyncedHash === 'string')
-                                .map(([sessionId, value]) => [sessionId, {
-                                    serverVersion: (value as SyncItemState).serverVersion,
-                                    lastSyncedHash: (value as SyncItemState).lastSyncedHash,
-                                }])
-                        )
-                        : {},
-                    settings: isRecord(parsed.settings)
-                        && typeof parsed.settings.serverVersion === 'number'
-                        && typeof parsed.settings.lastSyncedHash === 'string'
-                        ? {
-                            serverVersion: parsed.settings.serverVersion,
-                            lastSyncedHash: parsed.settings.lastSyncedHash,
-                        }
-                        : undefined,
-                    templates: isRecord(parsed.templates)
-                        && typeof parsed.templates.serverVersion === 'number'
-                        && typeof parsed.templates.lastSyncedHash === 'string'
-                        ? {
-                            serverVersion: parsed.templates.serverVersion,
-                            lastSyncedHash: parsed.templates.lastSyncedHash,
-                        }
-                        : undefined,
-                };
+                const parsed = parseJson(raw);
+                return sanitizeCloudSyncState(parsed, this.config.accountId!);
             }
         } catch (error) {
             console.error('Failed to load cloud sync state:', error);
@@ -490,7 +725,8 @@ class CloudSyncService {
     }
 
     private saveState(state: CloudSyncState): void {
-        localStorage.setItem(this.getStateKey(), JSON.stringify(state));
+        const sanitized = sanitizeCloudSyncState(state, this.config.accountId!);
+        localStorage.setItem(this.getStateKey(), JSON.stringify(sanitized));
     }
 
     private base64Encode(bytes: Uint8Array): string {
@@ -699,7 +935,7 @@ class CloudSyncService {
             }
         }
 
-        const response = await this.request<CloudSyncSyncResponse>(
+        const rawSyncResponse = await this.request<unknown>(
             '/v1/cloud-sync/sync',
             {
                 method: 'POST',
@@ -721,6 +957,10 @@ class CloudSyncService {
             },
             true
         );
+        const response = sanitizeCloudSyncSyncResponse(rawSyncResponse);
+        if (!response) {
+            throw new Error('Invalid cloud sync response payload');
+        }
 
         let conflictsResolved = 0;
 

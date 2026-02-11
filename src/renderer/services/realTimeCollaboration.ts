@@ -94,9 +94,29 @@ interface ServiceState {
     eventCursor: number;
 }
 
+const VALID_EVENT_TYPES = new Set<CollaborationEventType>([
+    'session-created',
+    'participant-joined',
+    'participant-left',
+    'participant-updated',
+    'participant-kicked',
+    'host-transferred',
+    'message-added',
+    'message-edited',
+    'message-conflict',
+]);
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 };
+
+const isFiniteNumber = (value: unknown): value is number => (
+    typeof value === 'number' && Number.isFinite(value)
+);
+
+const normalizeTimestamp = (value: unknown, fallback: number = Date.now()): number => (
+    isFiniteNumber(value) ? Math.max(0, Math.floor(value)) : fallback
+);
 
 const parseJson = (raw: string): unknown | null => {
     try {
@@ -104,6 +124,194 @@ const parseJson = (raw: string): unknown | null => {
     } catch {
         return null;
     }
+};
+
+const sanitizeCursorPosition = (value: unknown): CollaborationCursorPosition | undefined => {
+    if (!isRecord(value) || !isFiniteNumber(value.line) || !isFiniteNumber(value.column)) {
+        return undefined;
+    }
+    return {
+        line: Math.max(1, Math.floor(value.line)),
+        column: Math.max(1, Math.floor(value.column)),
+    };
+};
+
+const sanitizeParticipant = (value: unknown): CollaborationParticipant | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || typeof value.isHost !== 'boolean'
+        || typeof value.isTyping !== 'boolean'
+        || !isFiniteNumber(value.lastSeen)) {
+        return null;
+    }
+
+    const id = value.id.trim();
+    const name = value.name.trim();
+    if (!id || !name) {
+        return null;
+    }
+
+    return {
+        id,
+        name,
+        isHost: value.isHost,
+        isTyping: value.isTyping,
+        cursorPosition: sanitizeCursorPosition(value.cursorPosition),
+        lastSeen: normalizeTimestamp(value.lastSeen, 0),
+    };
+};
+
+const sanitizeConversationMessage = (value: unknown): CollaborationConversationMessage | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.sessionId !== 'string'
+        || typeof value.authorId !== 'string'
+        || typeof value.authorName !== 'string'
+        || typeof value.content !== 'string'
+        || !isFiniteNumber(value.createdAt)
+        || !isFiniteNumber(value.updatedAt)
+        || !isFiniteNumber(value.version)) {
+        return null;
+    }
+
+    const id = value.id.trim();
+    const sessionId = value.sessionId.trim();
+    const authorId = value.authorId.trim();
+    const authorName = value.authorName.trim();
+    if (!id || !sessionId || !authorId || !authorName) {
+        return null;
+    }
+
+    return {
+        id,
+        sessionId,
+        authorId,
+        authorName,
+        content: value.content,
+        createdAt: normalizeTimestamp(value.createdAt, 0),
+        updatedAt: normalizeTimestamp(value.updatedAt, 0),
+        version: Math.max(0, Math.floor(value.version)),
+        lastEditedBy: typeof value.lastEditedBy === 'string' ? value.lastEditedBy.trim() : undefined,
+        hasConflict: typeof value.hasConflict === 'boolean' ? value.hasConflict : undefined,
+    };
+};
+
+const sanitizeEvent = (value: unknown): CollaborationEvent | null => {
+    if (!isRecord(value)
+        || !isFiniteNumber(value.seq)
+        || typeof value.sessionId !== 'string'
+        || !VALID_EVENT_TYPES.has(value.type as CollaborationEventType)
+        || !isFiniteNumber(value.timestamp)
+        || !isRecord(value.payload)) {
+        return null;
+    }
+
+    const sessionId = value.sessionId.trim();
+    if (!sessionId) {
+        return null;
+    }
+
+    return {
+        seq: Math.max(0, Math.floor(value.seq)),
+        sessionId,
+        type: value.type as CollaborationEventType,
+        timestamp: normalizeTimestamp(value.timestamp, 0),
+        actorId: typeof value.actorId === 'string' ? value.actorId.trim() : undefined,
+        payload: { ...value.payload },
+    };
+};
+
+const sanitizeSession = (value: unknown): CollaborationSession | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || typeof value.hostId !== 'string'
+        || !Array.isArray(value.participants)
+        || !Array.isArray(value.messages)
+        || !isFiniteNumber(value.createdAt)
+        || !isFiniteNumber(value.updatedAt)
+        || typeof value.isActive !== 'boolean'
+        || !isFiniteNumber(value.revision)) {
+        return null;
+    }
+
+    const id = value.id.trim();
+    const name = value.name.trim();
+    const hostId = value.hostId.trim();
+    if (!id || !name || !hostId) {
+        return null;
+    }
+
+    const participants = value.participants
+        .map((entry) => sanitizeParticipant(entry))
+        .filter((entry): entry is CollaborationParticipant => entry !== null);
+    const messages = value.messages
+        .map((entry) => sanitizeConversationMessage(entry))
+        .filter((entry): entry is CollaborationConversationMessage => entry !== null);
+
+    return {
+        id,
+        name,
+        hostId,
+        participants,
+        messages,
+        createdAt: normalizeTimestamp(value.createdAt, 0),
+        updatedAt: normalizeTimestamp(value.updatedAt, 0),
+        isActive: value.isActive,
+        revision: Math.max(0, Math.floor(value.revision)),
+    };
+};
+
+const sanitizeJoinPayload = (value: unknown): JoinPayload | null => {
+    if (!isRecord(value)
+        || typeof value.participantId !== 'string'
+        || !isFiniteNumber(value.eventCursor)) {
+        return null;
+    }
+    const participantId = value.participantId.trim();
+    const session = sanitizeSession(value.session);
+    if (!participantId || !session) {
+        return null;
+    }
+    return {
+        participantId,
+        session,
+        eventCursor: Math.max(0, Math.floor(value.eventCursor)),
+    };
+};
+
+const sanitizePollPayload = (value: unknown): PollPayload | null => {
+    if (!isRecord(value)
+        || !Array.isArray(value.events)
+        || !isFiniteNumber(value.cursor)) {
+        return null;
+    }
+    const session = sanitizeSession(value.session);
+    if (!session) {
+        return null;
+    }
+    return {
+        events: value.events
+            .map((entry) => sanitizeEvent(entry))
+            .filter((entry): entry is CollaborationEvent => entry !== null),
+        cursor: Math.max(0, Math.floor(value.cursor)),
+        session,
+    };
+};
+
+const sanitizeEditResult = (value: unknown): CollaborationEditResult | null => {
+    if (!isRecord(value) || typeof value.conflict !== 'boolean') {
+        return null;
+    }
+    const message = sanitizeConversationMessage(value.message);
+    if (!message) {
+        return null;
+    }
+    return {
+        conflict: value.conflict,
+        message,
+    };
 };
 
 class RealTimeCollaborationService {
@@ -131,16 +339,17 @@ class RealTimeCollaborationService {
             if (raw) {
                 const parsed = parseJson(raw);
                 const data = isRecord(parsed) ? parsed : {};
+                const baseUrl = typeof data.baseUrl === 'string'
+                    ? data.baseUrl.trim().replace(/\/$/, '')
+                    : 'http://localhost:3000';
                 return {
                     enabled: typeof data.enabled === 'boolean' ? data.enabled : true,
-                    baseUrl: typeof data.baseUrl === 'string' && data.baseUrl.trim().length > 0
-                        ? data.baseUrl.trim().replace(/\/$/, '')
-                        : 'http://localhost:3000',
+                    baseUrl: baseUrl || 'http://localhost:3000',
                     displayName: typeof data.displayName === 'string' && data.displayName.trim().length > 0
-                        ? data.displayName
+                        ? data.displayName.trim()
                         : (localStorage.getItem('user_name') || 'User'),
-                    pollTimeoutMs: typeof data.pollTimeoutMs === 'number' && Number.isFinite(data.pollTimeoutMs)
-                        ? Math.max(5000, Math.min(30000, Number(data.pollTimeoutMs)))
+                    pollTimeoutMs: isFiniteNumber(data.pollTimeoutMs)
+                        ? Math.max(5000, Math.min(30000, Math.floor(data.pollTimeoutMs)))
                         : 20000,
                     autoJoin: typeof data.autoJoin === 'boolean' ? data.autoJoin : false,
                 };
@@ -167,6 +376,7 @@ class RealTimeCollaborationService {
         next.baseUrl = next.baseUrl.trim().replace(/\/$/, '') || 'http://localhost:3000';
         next.displayName = next.displayName.trim() || 'User';
         next.pollTimeoutMs = Math.max(5000, Math.min(30000, Number(next.pollTimeoutMs) || 20000));
+        next.autoJoin = Boolean(next.autoJoin);
 
         this.config = next;
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(next));
@@ -232,13 +442,17 @@ class RealTimeCollaborationService {
     }
 
     async createSession(name: string): Promise<CollaborationSession> {
-        const created = await this.request<JoinPayload>('/v1/collaboration/sessions', {
+        const createdRaw = await this.request<unknown>('/v1/collaboration/sessions', {
             method: 'POST',
             body: JSON.stringify({
                 name,
                 hostName: this.config.displayName,
             }),
         });
+        const created = sanitizeJoinPayload(createdRaw);
+        if (!created) {
+            throw new Error('Invalid collaboration create-session response');
+        }
 
         this.state = {
             session: created.session,
@@ -251,10 +465,14 @@ class RealTimeCollaborationService {
     }
 
     async joinSession(sessionId: string): Promise<CollaborationSession> {
-        const joined = await this.request<JoinPayload>(`/v1/collaboration/sessions/${encodeURIComponent(sessionId)}/join`, {
+        const joinedRaw = await this.request<unknown>(`/v1/collaboration/sessions/${encodeURIComponent(sessionId)}/join`, {
             method: 'POST',
             body: JSON.stringify({ name: this.config.displayName }),
         });
+        const joined = sanitizeJoinPayload(joinedRaw);
+        if (!joined) {
+            throw new Error('Invalid collaboration join-session response');
+        }
 
         this.state = {
             session: joined.session,
@@ -275,13 +493,17 @@ class RealTimeCollaborationService {
         const participantId = this.state.participantId;
         const query = participantId ? `?participantId=${encodeURIComponent(participantId)}` : '';
 
-        const result = await this.request<{ session: CollaborationSession }>(
+        const resultRaw = await this.request<unknown>(
             `/v1/collaboration/sessions/${encodeURIComponent(this.state.session.id)}${query}`
         );
+        const result = isRecord(resultRaw) ? sanitizeSession(resultRaw.session) : null;
+        if (!result) {
+            throw new Error('Invalid collaboration refresh-session response');
+        }
 
-        this.state.session = result.session;
+        this.state.session = result;
         this.notifySessionUpdate();
-        return result.session;
+        return result;
     }
 
     async leaveSession(): Promise<void> {
@@ -310,7 +532,7 @@ class RealTimeCollaborationService {
             throw new Error('Join a collaboration session first');
         }
 
-        const result = await this.request<{ message: CollaborationConversationMessage }>(
+        const resultRaw = await this.request<unknown>(
             `/v1/collaboration/sessions/${encodeURIComponent(this.state.session.id)}/messages`,
             {
                 method: 'POST',
@@ -320,8 +542,11 @@ class RealTimeCollaborationService {
                 }),
             }
         );
-
-        return result.message;
+        const message = isRecord(resultRaw) ? sanitizeConversationMessage(resultRaw.message) : null;
+        if (!message) {
+            throw new Error('Invalid collaboration send-message response');
+        }
+        return message;
     }
 
     async editMessage(messageId: string, content: string, baseVersion: number): Promise<CollaborationEditResult> {
@@ -329,7 +554,7 @@ class RealTimeCollaborationService {
             throw new Error('Join a collaboration session first');
         }
 
-        return this.request<CollaborationEditResult>(
+        const resultRaw = await this.request<unknown>(
             `/v1/collaboration/sessions/${encodeURIComponent(this.state.session.id)}/messages/${encodeURIComponent(messageId)}`,
             {
                 method: 'PUT',
@@ -340,6 +565,11 @@ class RealTimeCollaborationService {
                 }),
             }
         );
+        const result = sanitizeEditResult(resultRaw);
+        if (!result) {
+            throw new Error('Invalid collaboration edit-message response');
+        }
+        return result;
     }
 
     async kickParticipant(targetParticipantId: string): Promise<CollaborationSession> {
@@ -347,17 +577,21 @@ class RealTimeCollaborationService {
             throw new Error('Join a collaboration session first');
         }
 
-        const result = await this.request<{ session: CollaborationSession }>(
+        const resultRaw = await this.request<unknown>(
             `/v1/collaboration/sessions/${encodeURIComponent(this.state.session.id)}/participants/${encodeURIComponent(targetParticipantId)}/kick`,
             {
                 method: 'POST',
                 body: JSON.stringify({ requesterId: this.state.participantId }),
             }
         );
+        const nextSession = isRecord(resultRaw) ? sanitizeSession(resultRaw.session) : null;
+        if (!nextSession) {
+            throw new Error('Invalid collaboration kick response');
+        }
 
-        this.state.session = result.session;
+        this.state.session = nextSession;
         this.notifySessionUpdate();
-        return result.session;
+        return nextSession;
     }
 
     async updatePresence(options: {
@@ -435,7 +669,7 @@ class RealTimeCollaborationService {
             this.pollingAbortController = controller;
 
             try {
-                const payload = await this.request<PollPayload>(
+                const payloadRaw = await this.request<unknown>(
                     `/v1/collaboration/sessions/${encodeURIComponent(this.state.session.id)}/events`
                     + `?participantId=${encodeURIComponent(this.state.participantId)}`
                     + `&since=${this.state.eventCursor}`
@@ -445,6 +679,10 @@ class RealTimeCollaborationService {
                         signal: controller.signal,
                     }
                 );
+                const payload = sanitizePollPayload(payloadRaw);
+                if (!payload) {
+                    throw new Error('Invalid collaboration poll payload');
+                }
 
                 this.state.session = payload.session;
                 this.state.eventCursor = payload.cursor;

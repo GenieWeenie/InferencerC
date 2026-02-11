@@ -1,4 +1,5 @@
 import { Message, TokenLogprob, ChatMessage, ChatSession, RecoveryState } from '../../shared/types';
+import { parseRecoveryStateFromRaw, sanitizeRecoveryState } from '../lib/recoveryStateStorage';
 
 export interface ExportedChatHistory {
   version: string;
@@ -157,19 +158,6 @@ const parsePasswordHashes = (raw: string | null): Record<string, string> => {
   return hashes;
 };
 
-const parseRecoveryState = (raw: string | null): RecoveryState | null => {
-  if (!raw) return null;
-  const parsed = parseJson(raw);
-  if (!isRecord(parsed) || typeof parsed.sessionId !== 'string' || typeof parsed.timestamp !== 'number') {
-    return null;
-  }
-  return {
-    sessionId: parsed.sessionId,
-    timestamp: parsed.timestamp,
-    draftMessage: typeof parsed.draftMessage === 'string' ? parsed.draftMessage : undefined,
-    pendingResponse: typeof parsed.pendingResponse === 'boolean' ? parsed.pendingResponse : undefined,
-  };
-};
 const sessionDataCache = new Map<string, SessionDataCacheEntry>();
 
 const loadEncryptionService = async (): Promise<EncryptionServiceType> => {
@@ -1176,7 +1164,11 @@ export const HistoryService = {
    */
   saveRecoveryState: (state: RecoveryState) => {
     try {
-      localStorage.setItem(RECOVERY_STATE_KEY, JSON.stringify(state));
+      const sanitized = sanitizeRecoveryState(state);
+      if (!sanitized) {
+        return;
+      }
+      localStorage.setItem(RECOVERY_STATE_KEY, JSON.stringify(sanitized));
     } catch (e) {
       console.error("Failed to save recovery state", e);
     }
@@ -1188,7 +1180,7 @@ export const HistoryService = {
   getRecoveryState: (): RecoveryState | null => {
     try {
       const raw = localStorage.getItem(RECOVERY_STATE_KEY);
-      return parseRecoveryState(raw);
+      return parseRecoveryStateFromRaw(raw);
     } catch (e) {
       console.error("Failed to load recovery state", e);
       return null;

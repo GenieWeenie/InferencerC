@@ -139,6 +139,212 @@ const DEFAULT_ACTOR: AuditActor = {
 };
 
 const PII_FIELD_HINTS = ['email', 'ip', 'token', 'password', 'secret', 'key', 'authorization'];
+const VALID_PROTOCOLS = new Set<SSOProtocol>(['saml2', 'oidc']);
+const VALID_AUDIT_RESULTS = new Set<AuditResult>(['success', 'failure', 'info']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const isFiniteNumber = (value: unknown): value is number => (
+    typeof value === 'number' && Number.isFinite(value)
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeString = (value: unknown, fallback: string = ''): string => (
+    typeof value === 'string' ? value.trim() : fallback
+);
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const output: string[] = [];
+    for (let i = 0; i < value.length; i++) {
+        if (typeof value[i] !== 'string') {
+            continue;
+        }
+        const item = value[i].trim();
+        if (!item || output.includes(item)) {
+            continue;
+        }
+        output.push(item);
+    }
+    return output;
+};
+
+const sanitizeSamlConfig = (value: unknown): SAMLConfig => {
+    const parsed = isRecord(value) ? value : {};
+    return {
+        enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : DEFAULT_SSO_CONFIG.saml.enabled,
+        entryPoint: sanitizeString(parsed.entryPoint),
+        issuer: sanitizeString(parsed.issuer),
+        certificate: sanitizeString(parsed.certificate),
+        relayState: sanitizeString(parsed.relayState),
+    };
+};
+
+const sanitizeOidcConfig = (value: unknown): OIDCConfig => {
+    const parsed = isRecord(value) ? value : {};
+    const scopes = sanitizeStringArray(parsed.scopes);
+    return {
+        enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : DEFAULT_SSO_CONFIG.oidc.enabled,
+        issuerUrl: sanitizeString(parsed.issuerUrl),
+        authorizationEndpoint: sanitizeString(parsed.authorizationEndpoint),
+        tokenEndpoint: sanitizeString(parsed.tokenEndpoint),
+        clientId: sanitizeString(parsed.clientId),
+        scopes: scopes.length > 0 ? scopes : [...DEFAULT_SSO_CONFIG.oidc.scopes],
+    };
+};
+
+const sanitizeEnterpriseSSOConfig = (value: unknown): EnterpriseSSOConfig => {
+    const parsed = isRecord(value) ? value : {};
+    return {
+        saml: sanitizeSamlConfig(parsed.saml),
+        oidc: sanitizeOidcConfig(parsed.oidc),
+        allowPasswordFallback: typeof parsed.allowPasswordFallback === 'boolean'
+            ? parsed.allowPasswordFallback
+            : DEFAULT_SSO_CONFIG.allowPasswordFallback,
+    };
+};
+
+const sanitizeRetentionPolicy = (value: unknown): RetentionPolicy => {
+    const parsed = isRecord(value) ? value : {};
+    return {
+        enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : DEFAULT_RETENTION_POLICY.enabled,
+        retentionDays: isFiniteNumber(parsed.retentionDays)
+            ? Math.max(1, Math.floor(parsed.retentionDays))
+            : DEFAULT_RETENTION_POLICY.retentionDays,
+        anonymizePII: typeof parsed.anonymizePII === 'boolean'
+            ? parsed.anonymizePII
+            : DEFAULT_RETENTION_POLICY.anonymizePII,
+        purgeIntervalHours: isFiniteNumber(parsed.purgeIntervalHours)
+            ? Math.max(1, Math.floor(parsed.purgeIntervalHours))
+            : DEFAULT_RETENTION_POLICY.purgeIntervalHours,
+    };
+};
+
+const sanitizeAuditActor = (value: unknown): AuditActor | null => {
+    if (!isRecord(value) || typeof value.id !== 'string' || typeof value.name !== 'string') {
+        return null;
+    }
+    const id = value.id.trim();
+    const name = value.name.trim();
+    if (!id || !name) {
+        return null;
+    }
+    return {
+        id,
+        name,
+        role: typeof value.role === 'string' ? value.role.trim() : undefined,
+    };
+};
+
+const sanitizeAuditResult = (value: unknown): AuditResult => (
+    VALID_AUDIT_RESULTS.has(value as AuditResult) ? value as AuditResult : 'info'
+);
+
+const sanitizeAuditLogEntry = (value: unknown): AuditLogEntry | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || !isFiniteNumber(value.timestamp)
+        || typeof value.category !== 'string'
+        || typeof value.action !== 'string'
+        || !isRecord(value.details)) {
+        return null;
+    }
+
+    const actor = sanitizeAuditActor(value.actor) || DEFAULT_ACTOR;
+    const id = value.id.trim();
+    const category = value.category.trim();
+    const action = value.action.trim();
+    if (!id || !category || !action) {
+        return null;
+    }
+
+    return {
+        id,
+        timestamp: Math.max(0, Math.floor(value.timestamp)),
+        category,
+        action,
+        result: sanitizeAuditResult(value.result),
+        actor,
+        resourceType: typeof value.resourceType === 'string' ? value.resourceType.trim() : undefined,
+        resourceId: typeof value.resourceId === 'string' ? value.resourceId.trim() : undefined,
+        details: { ...value.details },
+        piiFields: sanitizeStringArray(value.piiFields),
+    };
+};
+
+const sanitizeAuditLogs = (value: unknown): AuditLogEntry[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value
+        .map((entry) => sanitizeAuditLogEntry(entry))
+        .filter((entry): entry is AuditLogEntry => entry !== null);
+};
+
+const sanitizeSSOStartRequest = (value: unknown): SSOStartRequest | null => {
+    if (!isRecord(value)
+        || !VALID_PROTOCOLS.has(value.protocol as SSOProtocol)
+        || typeof value.state !== 'string'
+        || typeof value.redirectUrl !== 'string'
+        || !isFiniteNumber(value.expiresAt)) {
+        return null;
+    }
+
+    const state = value.state.trim();
+    const redirectUrl = value.redirectUrl.trim();
+    if (!state || !redirectUrl) {
+        return null;
+    }
+
+    return {
+        protocol: value.protocol as SSOProtocol,
+        state,
+        redirectUrl,
+        expiresAt: Math.max(0, Math.floor(value.expiresAt)),
+    };
+};
+
+const sanitizeSSOSession = (value: unknown): SSOSession | null => {
+    if (!isRecord(value)
+        || typeof value.sessionId !== 'string'
+        || !VALID_PROTOCOLS.has(value.protocol as SSOProtocol)
+        || typeof value.userId !== 'string'
+        || typeof value.email !== 'string'
+        || typeof value.displayName !== 'string'
+        || !isFiniteNumber(value.issuedAt)
+        || !isFiniteNumber(value.expiresAt)) {
+        return null;
+    }
+
+    const sessionId = value.sessionId.trim();
+    const userId = value.userId.trim();
+    const email = value.email.trim().toLowerCase();
+    const displayName = value.displayName.trim();
+    if (!sessionId || !userId || !email || !displayName) {
+        return null;
+    }
+
+    return {
+        sessionId,
+        protocol: value.protocol as SSOProtocol,
+        userId,
+        email,
+        displayName,
+        issuedAt: Math.max(0, Math.floor(value.issuedAt)),
+        expiresAt: Math.max(0, Math.floor(value.expiresAt)),
+    };
+};
 
 class EnterpriseComplianceService {
     private listeners = new Set<() => void>();
@@ -208,7 +414,8 @@ class EnterpriseComplianceService {
         try {
             const raw = this.getStorageValue(key);
             if (!raw) return fallback;
-            return JSON.parse(raw) as T;
+            const parsed = parseJson(raw);
+            return (parsed ?? fallback) as T;
         } catch {
             return fallback;
         }
@@ -219,26 +426,13 @@ class EnterpriseComplianceService {
     }
 
     getSSOConfig(): EnterpriseSSOConfig {
-        const parsed = this.readJson<Partial<EnterpriseSSOConfig>>(SSO_CONFIG_KEY, DEFAULT_SSO_CONFIG);
-        return {
-            saml: {
-                ...DEFAULT_SSO_CONFIG.saml,
-                ...(parsed.saml || {}),
-            },
-            oidc: {
-                ...DEFAULT_SSO_CONFIG.oidc,
-                ...(parsed.oidc || {}),
-                scopes: Array.isArray(parsed.oidc?.scopes)
-                    ? Array.from(new Set(parsed.oidc!.scopes.map(scope => String(scope).trim()).filter(Boolean)))
-                    : [...DEFAULT_SSO_CONFIG.oidc.scopes],
-            },
-            allowPasswordFallback: parsed.allowPasswordFallback ?? DEFAULT_SSO_CONFIG.allowPasswordFallback,
-        };
+        const parsed = this.readJson<unknown>(SSO_CONFIG_KEY, null);
+        return sanitizeEnterpriseSSOConfig(parsed);
     }
 
     updateSSOConfig(partial: Partial<EnterpriseSSOConfig>): EnterpriseSSOConfig {
         const current = this.getSSOConfig();
-        const updated: EnterpriseSSOConfig = {
+        const updated = sanitizeEnterpriseSSOConfig({
             ...current,
             ...partial,
             saml: {
@@ -248,11 +442,8 @@ class EnterpriseComplianceService {
             oidc: {
                 ...current.oidc,
                 ...(partial.oidc || {}),
-                scopes: partial.oidc?.scopes
-                    ? Array.from(new Set(partial.oidc.scopes.map(scope => scope.trim()).filter(Boolean)))
-                    : current.oidc.scopes,
             },
-        };
+        });
 
         this.writeJson(SSO_CONFIG_KEY, updated);
         this.logEvent({
@@ -270,23 +461,16 @@ class EnterpriseComplianceService {
     }
 
     getRetentionPolicy(): RetentionPolicy {
-        const parsed = this.readJson<Partial<RetentionPolicy>>(RETENTION_POLICY_KEY, DEFAULT_RETENTION_POLICY);
-        return {
-            enabled: parsed.enabled ?? DEFAULT_RETENTION_POLICY.enabled,
-            retentionDays: Math.max(1, parsed.retentionDays ?? DEFAULT_RETENTION_POLICY.retentionDays),
-            anonymizePII: parsed.anonymizePII ?? DEFAULT_RETENTION_POLICY.anonymizePII,
-            purgeIntervalHours: Math.max(1, parsed.purgeIntervalHours ?? DEFAULT_RETENTION_POLICY.purgeIntervalHours),
-        };
+        const parsed = this.readJson<unknown>(RETENTION_POLICY_KEY, null);
+        return sanitizeRetentionPolicy(parsed);
     }
 
     updateRetentionPolicy(partial: Partial<RetentionPolicy>): RetentionPolicy {
         const current = this.getRetentionPolicy();
-        const updated: RetentionPolicy = {
+        const updated = sanitizeRetentionPolicy({
             ...current,
             ...partial,
-            retentionDays: Math.max(1, partial.retentionDays ?? current.retentionDays),
-            purgeIntervalHours: Math.max(1, partial.purgeIntervalHours ?? current.purgeIntervalHours),
-        };
+        });
 
         this.writeJson(RETENTION_POLICY_KEY, updated);
         this.logEvent({
@@ -300,11 +484,15 @@ class EnterpriseComplianceService {
     }
 
     private getStateRecord(stateKey: string): SSOStartRequest | null {
-        return this.readJson<SSOStartRequest | null>(`${SSO_STATE_PREFIX}${stateKey}`, null);
+        return sanitizeSSOStartRequest(this.readJson<unknown>(`${SSO_STATE_PREFIX}${stateKey}`, null));
     }
 
     private saveStateRecord(record: SSOStartRequest): void {
-        this.writeJson(`${SSO_STATE_PREFIX}${record.state}`, record);
+        const sanitized = sanitizeSSOStartRequest(record);
+        if (!sanitized) {
+            return;
+        }
+        this.writeJson(`${SSO_STATE_PREFIX}${sanitized.state}`, sanitized);
     }
 
     private clearStateRecord(state: string): void {
@@ -429,7 +617,7 @@ class EnterpriseComplianceService {
     }
 
     getSSOSession(): SSOSession | null {
-        const session = this.readJson<SSOSession | null>(SSO_SESSION_KEY, null);
+        const session = sanitizeSSOSession(this.readJson<unknown>(SSO_SESSION_KEY, null));
         if (!session) return null;
 
         if (session.expiresAt < Date.now()) {
@@ -464,8 +652,8 @@ class EnterpriseComplianceService {
     }
 
     private loadLogs(): AuditLogEntry[] {
-        const logs = this.readJson<AuditLogEntry[]>(AUDIT_LOGS_KEY, []);
-        return Array.isArray(logs) ? logs : [];
+        const logs = this.readJson<unknown>(AUDIT_LOGS_KEY, []);
+        return sanitizeAuditLogs(logs);
     }
 
     private saveLogs(logs: AuditLogEntry[]): void {
