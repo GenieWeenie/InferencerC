@@ -1,5 +1,5 @@
 import React from 'react';
-import { Send, Clock, Plus, Trash2, X, Globe, Settings, Activity, AlertTriangle, ChevronRight, Check, AlertCircle, Brain, Users, Plug, Wrench, Copy, Eraser, Download, Edit2, Search, ChevronUp, ChevronDown, Star, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, GitBranch, Network, HelpCircle, Maximize2, Minimize2, RefreshCw, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
+import { Clock, Plus, X, Globe, Settings, Activity, AlertTriangle, ChevronRight, Check, AlertCircle, Brain, Users, Wrench, Eraser, Download, Search, ChevronUp, ChevronDown, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, Network, HelpCircle, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChatComposerShell } from '../components/chat/ChatComposerShell';
@@ -12,12 +12,22 @@ import {
     TopHeaderSecondaryActions,
     type ExperimentalFeatureAction,
     type HeaderPrimaryActionConfig,
+    type IntegrationAvailability,
 } from '../components/chat/ChatHeaderCluster';
 import {
     ChatInspectorTabPanel,
     ComposerAttachmentsPanel,
     ComposerAuxPanels,
 } from '../components/chat/ChatInspectorComposerPanels';
+import {
+    ComposerActionButtons,
+    ComposerControlPills,
+    LongPressActionMenu,
+    SidebarTabsHeader,
+    type ComposerControlPillActionConfig,
+    type ComposerVariableContext,
+    type SidebarTab,
+} from '../components/chat/ChatInlinePanels';
 import { ChatMessageRow } from '../components/chat/ChatMessageRow';
 import { ChatOverlays } from '../components/chat/ChatOverlays';
 import { ChatSearchPanel, SearchResultRow } from '../components/chat/ChatSearchPanel';
@@ -32,18 +42,21 @@ const PromptManager = React.lazy(() => import('../components/PromptManager'));
 import { useChat } from '../hooks/useChat';
 import { usePrompts, PromptSnippet } from '../hooks/usePrompts';
 import { useConversationTree } from '../hooks/useConversationTree';
+import { useChatComposerInteractions } from '../hooks/useChatComposerInteractions';
 import { useLongPress, usePinchZoom, useSwipeNavigation } from '../hooks/useGestures';
-import { compressImage } from '../lib/chatDisplayUtils';
+import { useChatMessageListSearch } from '../hooks/useChatMessageListSearch';
+import { formatPerfMs, useChatPerfBenchmarks } from '../hooks/useChatPerfBenchmarks';
+import { useChatSessionIntegrations } from '../hooks/useChatSessionIntegrations';
+import { buildReadinessSteps, getDiagnosticsStatus } from '../lib/chatDiagnosticsModels';
+import { readIntegrationAvailability } from '../lib/chatIntegrations';
 import {
     areSearchResultIndicesEqual,
     findChatSearchMatches,
     normalizeChatSearchQuery,
 } from '../lib/chatSearch';
 import {
-    buildSearchResultRows,
     createChatRowMetadataCacheState,
     EXPERIMENTAL_FEATURE_MENU_ITEMS,
-    getCachedChatRowMetadata,
     type ExperimentalFeatureMenuItem,
     type SearchResultPreviewCacheEntry,
 } from '../lib/chatRenderModels';
@@ -57,21 +70,13 @@ import {
     applyPromptSnippetAtSlash,
     buildContextTrimSuggestionRows,
     buildComposerControlPillDescriptors,
-    buildLongPressMenuActionItems,
     buildRecentContextMessageRows,
     type ComposerControlPillDescriptor,
     type ComposerControlPillKey,
     getMaxTokensSliderConfig,
-    getWrappedSearchResultIndex,
     type RecentContextMessageRow,
     toggleToolNameInSet,
 } from '../lib/chatUiModels';
-import {
-    analyzeComposerInput,
-    collectPastedImageFiles,
-    describeDroppedFiles,
-    resolveComposerKeyAction,
-} from '../lib/chatComposerHandlers';
 import {
     dispatchChatShortcutAction,
     isTypingShortcutTarget,
@@ -96,7 +101,6 @@ const GlobalSearchDialog = React.lazy(() => import('../components/GlobalSearchDi
 const ConversationSummaryPanel = React.lazy(() => import('../components/ConversationSummaryPanel'));
 const TemplateLibraryDialog = React.lazy(() => import('../components/TemplateLibraryDialog'));
 const RecoveryDialog = React.lazy(() => import('../components/RecoveryDialog'));
-const VariableInsertMenu = React.lazy(() => import('../components/VariableInsertMenu'));
 const ChatEmptyState = React.lazy(() => import('../components/ChatEmptyState'));
 const ChatDiagnosticsPopover = React.lazy(() => import('../components/ChatDiagnosticsPopover'));
 const PerformanceMonitorOverlay = React.lazy(() =>
@@ -388,37 +392,6 @@ const getFallbackResponsiveConfig = (): ResponsiveConfig => {
     };
 };
 
-type ChatPerfMode = 'single' | 'battle';
-
-interface ChatPerfSample {
-    timestamp: number;
-    modelId: string;
-    mode: ChatPerfMode;
-    inputChars: number;
-    inputToRenderMs: number;
-    inputToFirstTokenMs: number | null;
-}
-
-interface PendingChatPerfBenchmark {
-    startedAt: number;
-    baselineHistoryLength: number;
-    assistantTargets: number[];
-    initialContentLengthByTarget: Record<number, number>;
-    modelId: string;
-    mode: ChatPerfMode;
-    inputChars: number;
-    inputToRenderMs?: number;
-    inputToFirstTokenMs?: number;
-}
-
-interface IntegrationAvailability {
-    notion: boolean;
-    slack: boolean;
-    discord: boolean;
-    email: boolean;
-    calendar: boolean;
-}
-
 const EMPTY_INTEGRATION_AVAILABILITY: IntegrationAvailability = {
     notion: false,
     slack: false,
@@ -438,341 +411,6 @@ const EXPERIMENTAL_FEATURE_ICON_MAP: Record<ExperimentalFeatureMenuItem['icon'],
     agents: Bot,
     federated: Shield,
 };
-
-const parseStorageConfig = (key: string): Record<string, any> | null => {
-    try {
-        const raw = localStorage.getItem(key);
-        if (!raw) return null;
-        const parsed = JSON.parse(raw);
-        return parsed && typeof parsed === 'object' ? parsed as Record<string, any> : null;
-    } catch {
-        return null;
-    }
-};
-
-const readIntegrationAvailability = (): IntegrationAvailability => {
-    const notionDatabaseConfigured = Boolean(localStorage.getItem('notion_database_id'));
-    const slackConfig = parseStorageConfig('slack_config');
-    const discordConfig = parseStorageConfig('discord_config');
-    const emailConfig = parseStorageConfig('email_config');
-    const calendarConfig = parseStorageConfig('calendar_config');
-
-    return {
-        notion: notionDatabaseConfigured,
-        slack: Boolean(slackConfig?.webhookUrl || slackConfig?.apiToken),
-        discord: Boolean(discordConfig?.webhookUrl),
-        email: Boolean(emailConfig?.defaultRecipient),
-        calendar: Boolean(calendarConfig?.provider),
-    };
-};
-
-interface LongPressActionMenuProps {
-    menuRef: React.RefObject<HTMLDivElement | null>;
-    menuPosition: { x: number; y: number } | null;
-    messageIndex: number;
-    isBookmarked: boolean;
-    capabilities: ChatMessageActionCapabilities;
-    onAction: (action: ChatMessageAction) => void;
-}
-
-const LONG_PRESS_ACTION_ICON_MAP: Record<ChatMessageAction, React.ComponentType<{ size?: number; className?: string }>> = {
-    copy: Copy,
-    bookmark: Star,
-    edit: Edit2,
-    regenerate: RefreshCw,
-    branch: GitBranch,
-    delete: Trash2,
-};
-
-const LONG_PRESS_ACTION_ICON_CLASS_MAP: Record<ChatMessageAction, string> = {
-    copy: 'text-blue-400',
-    bookmark: 'text-yellow-400',
-    edit: 'text-green-400',
-    regenerate: 'text-purple-400',
-    branch: 'text-yellow-400',
-    delete: '',
-};
-
-const LongPressActionMenu: React.FC<LongPressActionMenuProps> = React.memo(({
-    menuRef,
-    menuPosition,
-    messageIndex,
-    isBookmarked,
-    capabilities,
-    onAction,
-}) => {
-    const visibleItems = React.useMemo(
-        () => buildLongPressMenuActionItems(capabilities, isBookmarked).filter((item) => item.visible),
-        [capabilities, isBookmarked]
-    );
-    const regularItems = React.useMemo(
-        () => visibleItems.filter((item) => !item.destructive),
-        [visibleItems]
-    );
-    const destructiveItems = React.useMemo(
-        () => visibleItems.filter((item) => item.destructive),
-        [visibleItems]
-    );
-
-    if (!menuPosition) {
-        return null;
-    }
-
-    return (
-        <motion.div
-            ref={menuRef}
-            initial={{ opacity: 0, scale: 0.95, y: 4 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 4 }}
-            transition={{ duration: 0.15 }}
-            className="fixed z-40 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl min-w-[220px] overflow-hidden"
-            style={{ left: menuPosition.x, top: menuPosition.y }}
-            data-long-press-message-index={messageIndex}
-        >
-            {regularItems.map((item) => {
-                const Icon = LONG_PRESS_ACTION_ICON_MAP[item.action];
-                return (
-                    <button
-                        key={item.action}
-                        onClick={() => onAction(item.action)}
-                        className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-slate-700/50 text-slate-200 text-sm transition-colors"
-                    >
-                        <Icon size={14} className={LONG_PRESS_ACTION_ICON_CLASS_MAP[item.action]} />
-                        <span>{item.label}</span>
-                    </button>
-                );
-            })}
-            {destructiveItems.length > 0 && regularItems.length > 0 && (
-                <div className="border-t border-slate-700/50" />
-            )}
-            {destructiveItems.map((item) => {
-                const Icon = LONG_PRESS_ACTION_ICON_MAP[item.action];
-                return (
-                    <button
-                        key={item.action}
-                        onClick={() => onAction(item.action)}
-                        className="touch-target w-full px-3 py-2 flex items-center gap-2 hover:bg-red-500/20 text-red-400 text-sm transition-colors"
-                    >
-                        <Icon size={14} />
-                        <span>{item.label}</span>
-                    </button>
-                );
-            })}
-        </motion.div>
-    );
-}, (prev, next) => (
-    prev.menuRef === next.menuRef &&
-    prev.menuPosition === next.menuPosition &&
-    prev.messageIndex === next.messageIndex &&
-    prev.isBookmarked === next.isBookmarked &&
-    prev.capabilities.canCopy === next.capabilities.canCopy &&
-    prev.capabilities.canBookmark === next.capabilities.canBookmark &&
-    prev.capabilities.canEdit === next.capabilities.canEdit &&
-    prev.capabilities.canRegenerate === next.capabilities.canRegenerate &&
-    prev.capabilities.canBranch === next.capabilities.canBranch &&
-    prev.capabilities.canDelete === next.capabilities.canDelete &&
-    prev.onAction === next.onAction
-));
-
-interface ComposerActionButtonsProps {
-    showBottomControls: boolean;
-    showSuggestions: boolean;
-    canToggleSuggestions: boolean;
-    canSend: boolean;
-    onToggleBottomControls: () => void;
-    onToggleSuggestions: () => void;
-    onSend: () => void;
-}
-
-const ComposerActionButtons: React.FC<ComposerActionButtonsProps> = React.memo(({
-    showBottomControls,
-    showSuggestions,
-    canToggleSuggestions,
-    canSend,
-    onToggleBottomControls,
-    onToggleSuggestions,
-    onSend,
-}) => (
-    <div className="flex flex-col gap-2">
-        <button
-            onClick={onToggleBottomControls}
-            title={showBottomControls ? 'Hide bottom controls' : 'Show bottom controls'}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-all border border-slate-700"
-        >
-            {showBottomControls ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-        </button>
-        <button
-            onClick={onToggleSuggestions}
-            disabled={!canToggleSuggestions}
-            title={showSuggestions ? 'Hide smart suggestions' : 'Smart Suggestions'}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed border border-slate-700"
-        >
-            <Sparkles size={16} />
-        </button>
-        <button
-            onClick={onSend}
-            disabled={!canSend}
-            className="p-2 bg-primary text-white rounded-lg hover:brightness-110 transition-all disabled:opacity-50 disabled:grayscale shadow-lg shadow-primary/20"
-        >
-            <Send size={18} fill="currentColor" />
-        </button>
-    </div>
-), (prev, next) => (
-    prev.showBottomControls === next.showBottomControls &&
-    prev.showSuggestions === next.showSuggestions &&
-    prev.canToggleSuggestions === next.canToggleSuggestions &&
-    prev.canSend === next.canSend &&
-    prev.onToggleBottomControls === next.onToggleBottomControls &&
-    prev.onToggleSuggestions === next.onToggleSuggestions &&
-    prev.onSend === next.onSend
-));
-
-type SidebarTab = 'inspector' | 'controls' | 'prompts' | 'documents';
-
-interface ComposerControlPillActionConfig {
-    key: ComposerControlPillKey;
-    label: string;
-    icon: React.ReactNode;
-    className: string;
-    title?: string;
-    onClick: () => void;
-}
-
-interface ComposerVariableContext {
-    modelId: string;
-    modelName: string;
-    sessionId: string;
-    sessionTitle: string;
-    messageCount: number;
-}
-
-interface ComposerControlPillsProps {
-    actions: ComposerControlPillActionConfig[];
-    mcpAvailable: boolean;
-    mcpConnectedCount: number;
-    mcpToolCount: number;
-    showExpertMenu: boolean;
-    onSelectExpert: (mode: string | null) => void;
-    showVariableMenu: boolean;
-    onCloseVariableMenu: () => void;
-    onInsertVariable: (variable: string) => void;
-    variableContext: ComposerVariableContext;
-}
-
-const ComposerControlPills: React.FC<ComposerControlPillsProps> = React.memo(({
-    actions,
-    mcpAvailable,
-    mcpConnectedCount,
-    mcpToolCount,
-    showExpertMenu,
-    onSelectExpert,
-    showVariableMenu,
-    onCloseVariableMenu,
-    onInsertVariable,
-    variableContext,
-}) => (
-    <div className="px-4 py-3 bg-slate-950/50 border-t border-slate-800/50 flex flex-wrap gap-2 items-center relative rounded-b-2xl">
-        {actions.map((action) => (
-            <button
-                key={action.key}
-                onClick={action.onClick}
-                className={action.className}
-                title={action.title}
-            >
-                {action.icon} {action.label}
-            </button>
-        ))}
-        <div
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${mcpAvailable
-                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                : 'bg-slate-800/50 text-slate-500 border-slate-700/50'
-                }`}
-            title={mcpAvailable ? `${mcpConnectedCount} server(s), ${mcpToolCount} tools` : 'No MCP servers connected'}
-        >
-            <Plug size={12} strokeWidth={2.5} />
-            {mcpAvailable ? (
-                <span className="flex items-center gap-1">
-                    MCP
-                    <span className="bg-emerald-500/30 text-emerald-300 text-[10px] px-1 rounded">{mcpToolCount}</span>
-                </span>
-            ) : (
-                <span className="opacity-50">MCP</span>
-            )}
-        </div>
-
-        {showExpertMenu && (
-            <div className="absolute bottom-12 right-4 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 z-50">
-                <div className="p-2 border-b border-slate-800 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Select Expert Persona</div>
-                <button onClick={() => onSelectExpert(null)} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">None (Default)</button>
-                <button onClick={() => onSelectExpert('coding')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">👨‍💻 Coding Expert</button>
-                <button onClick={() => onSelectExpert('reasoning')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">🧠 Logic & Reasoning</button>
-                <button onClick={() => onSelectExpert('creative')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">🎨 Creative Writer</button>
-                <button onClick={() => onSelectExpert('math')} className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">📐 Mathematician</button>
-            </div>
-        )}
-
-        {showVariableMenu && (
-            <React.Suspense fallback={null}>
-                <VariableInsertMenu
-                    isOpen={showVariableMenu}
-                    onClose={onCloseVariableMenu}
-                    onInsert={onInsertVariable}
-                    context={variableContext}
-                />
-            </React.Suspense>
-        )}
-    </div>
-), (prev, next) => (
-    prev.actions === next.actions &&
-    prev.mcpAvailable === next.mcpAvailable &&
-    prev.mcpConnectedCount === next.mcpConnectedCount &&
-    prev.mcpToolCount === next.mcpToolCount &&
-    prev.showExpertMenu === next.showExpertMenu &&
-    prev.onSelectExpert === next.onSelectExpert &&
-    prev.showVariableMenu === next.showVariableMenu &&
-    prev.onCloseVariableMenu === next.onCloseVariableMenu &&
-    prev.onInsertVariable === next.onInsertVariable &&
-    prev.variableContext === next.variableContext
-));
-
-interface SidebarTabsHeaderProps {
-    activeTab: SidebarTab;
-    onSelectInspectorTab: () => void;
-    onSelectControlsTab: () => void;
-    onSelectPromptsTab: () => void;
-    onSelectDocumentsTab: () => void;
-    onCloseSidebar: () => void;
-}
-
-const SidebarTabsHeader: React.FC<SidebarTabsHeaderProps> = React.memo(({
-    activeTab,
-    onSelectInspectorTab,
-    onSelectControlsTab,
-    onSelectPromptsTab,
-    onSelectDocumentsTab,
-    onCloseSidebar,
-}) => (
-    <div className="flex border-b border-slate-800 relative">
-        <button onClick={onSelectInspectorTab} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'inspector' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Inspector</button>
-        <button onClick={onSelectControlsTab} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'controls' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Controls</button>
-        <button onClick={onSelectPromptsTab} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'prompts' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Prompts</button>
-        <button onClick={onSelectDocumentsTab} className={`flex-1 py-3 text-xs uppercase font-bold tracking-wider transition-colors border-b-2 ${activeTab === 'documents' ? 'text-primary border-primary bg-slate-900/50' : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/30'}`}>Docs</button>
-        <button
-            onClick={onCloseSidebar}
-            className="absolute top-2 right-2 p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition-colors"
-            title="Close Sidebar"
-        >
-            <X size={14} />
-        </button>
-    </div>
-), (prev, next) => (
-    prev.activeTab === next.activeTab &&
-    prev.onSelectInspectorTab === next.onSelectInspectorTab &&
-    prev.onSelectControlsTab === next.onSelectControlsTab &&
-    prev.onSelectPromptsTab === next.onSelectPromptsTab &&
-    prev.onSelectDocumentsTab === next.onSelectDocumentsTab &&
-    prev.onCloseSidebar === next.onCloseSidebar
-));
 
 const readPersistedApiLogCount = (): number => {
     try {
@@ -943,27 +581,6 @@ const Chat: React.FC = () => {
     const [hasCompletedLaunchChecklist, setHasCompletedLaunchChecklist] = React.useState<boolean>(() => {
         return localStorage.getItem('chat_launch_checklist_completed') === '1';
     });
-    const [recentPerfBenchmarks, setRecentPerfBenchmarks] = React.useState<ChatPerfSample[]>(() => {
-        try {
-            const raw = localStorage.getItem(CHAT_PERF_HISTORY_KEY);
-            if (!raw) return [];
-            const parsed = JSON.parse(raw) as ChatPerfSample[];
-            if (!Array.isArray(parsed)) return [];
-            return parsed
-                .filter((item) =>
-                    item &&
-                    Number.isFinite(item.timestamp) &&
-                    typeof item.modelId === 'string' &&
-                    (item.mode === 'single' || item.mode === 'battle') &&
-                    Number.isFinite(item.inputChars) &&
-                    Number.isFinite(item.inputToRenderMs)
-                )
-                .slice(0, 5);
-        } catch {
-            return [];
-        }
-    });
-    const [activePerfBenchmark, setActivePerfBenchmark] = React.useState<PendingChatPerfBenchmark | null>(null);
     const [showBottomControls, setShowBottomControls] = React.useState<boolean>(() => {
         const stored = localStorage.getItem('chat_show_bottom_controls');
         return stored !== '0';
@@ -1051,7 +668,6 @@ const Chat: React.FC = () => {
     const diagnosticsPanelRef = React.useRef<HTMLDivElement | null>(null);
     const diagnosticsButtonRef = React.useRef<HTMLButtonElement | null>(null);
     const diagnosticsPopoverRef = React.useRef<HTMLDivElement | null>(null);
-    const pendingPerfBenchmarkRef = React.useRef<PendingChatPerfBenchmark | null>(null);
 
     const [conversationFontSize, setConversationFontSize] = React.useState<number>(() => {
         const stored = Number(localStorage.getItem('chat_font_size'));
@@ -1311,14 +927,6 @@ const Chat: React.FC = () => {
             cancelled = true;
         };
     }, [history.length, showSearchResultsList, searchResults.length, VirtuosoComponent]);
-
-    React.useEffect(() => {
-        try {
-            localStorage.setItem(CHAT_PERF_HISTORY_KEY, JSON.stringify(recentPerfBenchmarks.slice(0, 5)));
-        } catch {
-            // Ignore persistence failures for perf diagnostics.
-        }
-    }, [recentPerfBenchmarks]);
 
     React.useEffect(() => {
         if (history.length === 0) {
@@ -1695,65 +1303,31 @@ const Chat: React.FC = () => {
     const providerReady = connectionStatus.local === 'online' || connectionStatus.remote === 'online';
     const modelReady = Boolean(currentModel);
     const promptReady = input.trim().length > 0;
-    const readinessSteps = React.useMemo<LaunchReadinessStep[]>(() => ([
-        {
-            id: 'provider',
-            title: 'Provider Reachable',
-            description: providerReady
-                ? (connectionStatus.local === 'online' ? 'Local provider online.' : 'Remote provider online.')
-                : (connectionStatus.local === 'checking' || connectionStatus.remote === 'checking'
-                    ? 'Checking provider status...'
-                    : 'No reachable provider yet. Start local backend or configure OpenRouter API key.'),
-            complete: providerReady,
-        },
-        {
-            id: 'model',
-            title: 'Model Selected',
-            description: modelReady
-                ? `Selected: ${currentModelObj?.name || currentModel}`
-                : 'Pick a model from the top model selector.',
-            complete: modelReady,
-        },
-        {
-            id: 'prompt',
-            title: 'Prompt Drafted',
-            description: promptReady
-                ? 'Prompt ready. Press Send to get your first response.'
-                : 'Use a starter prompt below or type your own.',
-            complete: promptReady,
-        },
-    ]), [providerReady, connectionStatus.local, connectionStatus.remote, modelReady, currentModelObj, currentModel, promptReady]);
+    const readinessSteps = React.useMemo<LaunchReadinessStep[]>(
+        () =>
+            buildReadinessSteps({
+                providerReady,
+                localStatus: connectionStatus.local,
+                remoteStatus: connectionStatus.remote,
+                modelReady,
+                modelLabel: currentModelObj?.name || currentModel,
+                promptReady,
+            }),
+        [providerReady, connectionStatus.local, connectionStatus.remote, modelReady, currentModelObj, currentModel, promptReady]
+    );
     const readinessCompletedCount = readinessSteps.filter(step => step.complete).length;
     const launchChecklistComplete = readinessCompletedCount === readinessSteps.length;
     const shouldShowLaunchChecklist = !hasCompletedLaunchChecklist && !launchChecklistComplete;
-    const diagnosticsStatus = React.useMemo(() => {
-        if (!providerReady) {
-            return {
-                label: 'Provider Issue',
-                detail: 'No online provider detected.',
-                className: 'text-red-300 border-red-700/70 bg-red-900/20',
-            };
-        }
-        if (!modelReady) {
-            return {
-                label: 'Model Needed',
-                detail: 'Provider is online, but no model is selected.',
-                className: 'text-amber-300 border-amber-700/70 bg-amber-900/20',
-            };
-        }
-        if (history.length === 0 && !promptReady) {
-            return {
-                label: 'Ready for Prompt',
-                detail: 'Setup is healthy. Draft your first prompt.',
-                className: 'text-cyan-300 border-cyan-700/70 bg-cyan-900/20',
-            };
-        }
-        return {
-            label: 'Healthy',
-            detail: 'Provider and model checks look good.',
-            className: 'text-emerald-300 border-emerald-700/70 bg-emerald-900/20',
-        };
-    }, [providerReady, modelReady, history.length, promptReady]);
+    const diagnosticsStatus = React.useMemo(
+        () =>
+            getDiagnosticsStatus({
+                providerReady,
+                modelReady,
+                historyLength: history.length,
+                promptReady,
+            }),
+        [providerReady, modelReady, history.length, promptReady]
+    );
     React.useEffect(() => {
         if (!launchChecklistComplete || hasCompletedLaunchChecklist) return;
         setHasCompletedLaunchChecklist(true);
@@ -1817,6 +1391,24 @@ const Chat: React.FC = () => {
         setShowDiagnosticsPanel(false);
     }, [insertStarterPrompt]);
 
+    const {
+        recentPerfBenchmarks,
+        activePerfBenchmark,
+        latestPerfBenchmark,
+        perfSummary,
+        beginPerfBenchmark,
+        clearPerfHistory,
+    } = useChatPerfBenchmarks({
+        storageKey: CHAT_PERF_HISTORY_KEY,
+        history,
+        attachmentsLength: attachments.length,
+        imageAttachmentsLength: imageAttachments.length,
+        battleMode,
+        secondaryModel,
+        prefill,
+        currentModel,
+    });
+
     const diagnosticsPopover = React.useMemo(() => {
         if (!showDiagnosticsPanel) {
             return null;
@@ -1872,131 +1464,6 @@ const Chat: React.FC = () => {
         handleDiagnosticsOpenModels,
         handleDiagnosticsInsertStarterPrompt,
     ]);
-
-    const finalizePerfBenchmark = React.useCallback((pending: PendingChatPerfBenchmark) => {
-        if (pendingPerfBenchmarkRef.current !== pending || pending.inputToRenderMs === undefined) return;
-
-        const sample: ChatPerfSample = {
-            timestamp: Date.now(),
-            modelId: pending.modelId,
-            mode: pending.mode,
-            inputChars: pending.inputChars,
-            inputToRenderMs: pending.inputToRenderMs,
-            inputToFirstTokenMs: pending.inputToFirstTokenMs ?? null,
-        };
-
-        setRecentPerfBenchmarks(prev => [sample, ...prev].slice(0, 5));
-        pendingPerfBenchmarkRef.current = null;
-        setActivePerfBenchmark(null);
-    }, []);
-
-    const beginPerfBenchmark = React.useCallback((pendingInput: string) => {
-        if (!pendingInput.trim() && attachments.length === 0 && imageAttachments.length === 0) {
-            return;
-        }
-
-        const baselineHistoryLength = history.length;
-        const isBattleRequest = battleMode && Boolean(secondaryModel);
-        const assistantTargets = isBattleRequest
-            ? [baselineHistoryLength + 1, baselineHistoryLength + 2]
-            : [baselineHistoryLength + 1];
-        const initialContentLengthByTarget: Record<number, number> = {};
-        assistantTargets.forEach((targetIndex, targetOrder) => {
-            initialContentLengthByTarget[targetIndex] = !isBattleRequest && targetOrder === 0 ? (prefill?.length || 0) : 0;
-        });
-
-        const pending: PendingChatPerfBenchmark = {
-            startedAt: performance.now(),
-            baselineHistoryLength,
-            assistantTargets,
-            initialContentLengthByTarget,
-            modelId: currentModel || 'unknown',
-            mode: isBattleRequest ? 'battle' : 'single',
-            inputChars: pendingInput.trim().length,
-        };
-
-        pendingPerfBenchmarkRef.current = pending;
-        setActivePerfBenchmark(pending);
-    }, [attachments.length, imageAttachments.length, history.length, battleMode, secondaryModel, prefill, currentModel]);
-
-    React.useEffect(() => {
-        const pending = pendingPerfBenchmarkRef.current;
-        if (!pending) return;
-
-        const targetsInRange = pending.assistantTargets.filter(index => index < history.length);
-        if (targetsInRange.length === 0) return;
-
-        if (pending.inputToRenderMs === undefined) {
-            window.requestAnimationFrame(() => {
-                const current = pendingPerfBenchmarkRef.current;
-                if (!current || current !== pending || current.inputToRenderMs !== undefined) return;
-                current.inputToRenderMs = performance.now() - current.startedAt;
-                setActivePerfBenchmark({ ...current });
-            });
-        }
-
-        if (pending.inputToFirstTokenMs === undefined) {
-            for (const targetIndex of targetsInRange) {
-                const targetMessage = history[targetIndex];
-                if (!targetMessage) continue;
-                const initialLength = pending.initialContentLengthByTarget[targetIndex] || 0;
-                if ((targetMessage.content || '').length > initialLength) {
-                    pending.inputToFirstTokenMs = performance.now() - pending.startedAt;
-                    setActivePerfBenchmark({ ...pending });
-                    break;
-                }
-            }
-        }
-
-        const allTargetsDone = pending.assistantTargets.every((targetIndex) => {
-            const targetMessage = history[targetIndex];
-            return Boolean(targetMessage) && !targetMessage.isLoading;
-        });
-
-        if (pending.inputToRenderMs !== undefined && (pending.inputToFirstTokenMs !== undefined || allTargetsDone)) {
-            finalizePerfBenchmark(pending);
-        }
-    }, [history, finalizePerfBenchmark]);
-
-    const latestPerfBenchmark = recentPerfBenchmarks[0] || null;
-    const formatPerfMs = React.useCallback((value?: number | null) => {
-        if (value === null) return 'n/a';
-        if (value === undefined) return '...';
-        return `${Math.round(value)}ms`;
-    }, []);
-    const computePerfStat = React.useCallback((values: number[], kind: 'avg' | 'p95'): number | null => {
-        if (values.length === 0) return null;
-        if (kind === 'avg') {
-            return values.reduce((sum, value) => sum + value, 0) / values.length;
-        }
-        const sorted = [...values].sort((a, b) => a - b);
-        const index = Math.max(0, Math.min(sorted.length - 1, Math.ceil(0.95 * sorted.length) - 1));
-        return sorted[index];
-    }, []);
-    const perfSummary = React.useMemo(() => {
-        const renderValues = recentPerfBenchmarks.map(sample => sample.inputToRenderMs);
-        const firstTokenValues = recentPerfBenchmarks
-            .map(sample => sample.inputToFirstTokenMs)
-            .filter((value): value is number => value !== null);
-        return {
-            sampleCount: recentPerfBenchmarks.length,
-            firstTokenSampleCount: firstTokenValues.length,
-            renderAvg: computePerfStat(renderValues, 'avg'),
-            renderP95: computePerfStat(renderValues, 'p95'),
-            firstTokenAvg: computePerfStat(firstTokenValues, 'avg'),
-            firstTokenP95: computePerfStat(firstTokenValues, 'p95'),
-        };
-    }, [recentPerfBenchmarks, computePerfStat]);
-    const clearPerfHistory = React.useCallback(() => {
-        pendingPerfBenchmarkRef.current = null;
-        setActivePerfBenchmark(null);
-        setRecentPerfBenchmarks([]);
-        try {
-            localStorage.removeItem(CHAT_PERF_HISTORY_KEY);
-        } catch {
-            // Ignore storage failures for perf diagnostics.
-        }
-    }, []);
 
     const contextWindowTokens = currentModelObj?.contextLength || 32768;
     const excludedContextKey = React.useMemo(
@@ -2698,153 +2165,23 @@ const Chat: React.FC = () => {
         setShowCloudSync(true);
     }, []);
 
-    const handleOpenCodeIntegration = React.useCallback(() => {
-        const lastMessage = history[history.length - 1];
-        if (!lastMessage?.content) {
-            return;
-        }
-
-        const codeBlockMatch = lastMessage.content.match(/```(\w+)?\n([\s\S]*?)```/);
-        if (codeBlockMatch) {
-            setSelectedCode({
-                code: codeBlockMatch[2],
-                language: codeBlockMatch[1] || 'javascript',
-            });
-        } else {
-            setSelectedCode({
-                code: lastMessage.content,
-                language: 'javascript',
-            });
-        }
-        setShowCodeIntegration(true);
-    }, [history]);
-
-    const handleOpenExportDialog = React.useCallback(() => {
-        setShowExportDialog(true);
-    }, []);
-
-    const handleExportSessionToObsidian = React.useCallback(() => {
-        try {
-            HistoryService.exportSessionToObsidian(sessionId);
-            toast.success('Chat exported as Obsidian markdown');
-        } catch (error: any) {
-            toast.error(error.message || 'Failed to export');
-        }
-    }, [sessionId]);
-
-    const getCurrentSessionForIntegration = React.useCallback(() => {
-        const session = HistoryService.getSession(sessionId);
-        if (!session) {
-            toast.error('Session not found');
-            return null;
-        }
-        return session;
-    }, [sessionId]);
-
-    const mapSessionMessagesForExternalShare = React.useCallback((sessionMessages: Array<{ role: string; content?: string }>) => {
-        return sessionMessages.map((message) => ({
-            role: message.role,
-            content: message.content || '',
-        }));
-    }, []);
-
-    const handleSaveSessionToNotion = React.useCallback(async () => {
-        const session = getCurrentSessionForIntegration();
-        if (!session) return;
-
-        try {
-            const { notionService } = await import('../services/notion');
-            const result = await notionService.saveConversation(
-                session.title,
-                session.messages,
-                {
-                    model: session.modelId,
-                    date: new Date(session.lastModified).toLocaleString(),
-                }
-            );
-
-            if (result.success && result.page) {
-                toast.success('Saved to Notion!', {
-                    action: {
-                        label: 'Open',
-                        onClick: () => window.open(result.page!.url, '_blank'),
-                    },
-                });
-                return;
-            }
-
-            toast.error(result.error || 'Failed to save to Notion');
-        } catch (error: any) {
-            toast.error(error.message || 'Failed to save to Notion');
-        }
-    }, [getCurrentSessionForIntegration]);
-
-    const handleSendSessionToSlack = React.useCallback(async () => {
-        const session = getCurrentSessionForIntegration();
-        if (!session) return;
-
-        try {
-            const { slackService } = await import('../services/slack');
-            const result = await slackService.sendConversation(
-                session.title,
-                mapSessionMessagesForExternalShare(session.messages)
-            );
-
-            if (result.success) {
-                toast.success('Sent to Slack!');
-            } else {
-                toast.error(result.error || 'Failed to send to Slack');
-            }
-        } catch (error: any) {
-            toast.error(error.message || 'Failed to send to Slack');
-        }
-    }, [getCurrentSessionForIntegration, mapSessionMessagesForExternalShare]);
-
-    const handleSendSessionToDiscord = React.useCallback(async () => {
-        const session = getCurrentSessionForIntegration();
-        if (!session) return;
-
-        try {
-            const { discordService } = await import('../services/discord');
-            const result = await discordService.sendConversation(
-                session.title,
-                mapSessionMessagesForExternalShare(session.messages)
-            );
-
-            if (result.success) {
-                toast.success('Sent to Discord!');
-            } else {
-                toast.error(result.error || 'Failed to send to Discord');
-            }
-        } catch (error: any) {
-            toast.error(error.message || 'Failed to send to Discord');
-        }
-    }, [getCurrentSessionForIntegration, mapSessionMessagesForExternalShare]);
-
-    const handleSendSessionByEmail = React.useCallback(async () => {
-        const session = getCurrentSessionForIntegration();
-        if (!session) return;
-
-        try {
-            const { emailService } = await import('../services/email');
-            const result = await emailService.sendConversation(
-                session.title,
-                mapSessionMessagesForExternalShare(session.messages)
-            );
-
-            if (result.success) {
-                toast.success('Email client opened!');
-            } else {
-                toast.error(result.error || 'Failed to open email');
-            }
-        } catch (error: any) {
-            toast.error(error.message || 'Failed to send email');
-        }
-    }, [getCurrentSessionForIntegration, mapSessionMessagesForExternalShare]);
-
-    const handleOpenCalendarSchedule = React.useCallback(() => {
-        setShowCalendarSchedule(true);
-    }, []);
+    const {
+        handleOpenCodeIntegration,
+        handleOpenExportDialog,
+        handleExportSessionToObsidian,
+        handleSaveSessionToNotion,
+        handleSendSessionToSlack,
+        handleSendSessionToDiscord,
+        handleSendSessionByEmail,
+        handleOpenCalendarSchedule,
+    } = useChatSessionIntegrations({
+        sessionId,
+        history,
+        setSelectedCode,
+        setShowCodeIntegration,
+        setShowExportDialog,
+        setShowCalendarSchedule,
+    });
 
     const topHeaderPrimaryActions = React.useMemo<HeaderPrimaryActionConfig[]>(() => ([
         {
@@ -3362,121 +2699,34 @@ const Chat: React.FC = () => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
-    const searchResultSet = React.useMemo(() => new Set(searchResults), [searchResults]);
-    const activeSearchMessageIndex = React.useMemo(
-        () => (currentSearchIndex >= 0 ? searchResults[currentSearchIndex] : undefined),
-        [searchResults, currentSearchIndex]
-    );
-    const searchResultRows = React.useMemo(() => {
-        const { rows, nextPreviewCache } = buildSearchResultRows({
-            searchResults,
-            history,
-            previewCache: searchResultPreviewCacheRef.current,
-        });
-        searchResultPreviewCacheRef.current = nextPreviewCache;
-        return rows;
-    }, [searchResults, history]);
-    const loadMessageAtIndex = React.useCallback((messageIndex: number) => {
-        loadMessageRange(messageIndex, messageIndex);
-    }, [loadMessageRange]);
-    const onEditingContentChange = React.useCallback((value: string) => {
-        setEditedMessageContent(value);
-    }, []);
-    const handleToggleSearchResultsList = React.useCallback(() => {
-        setShowSearchResultsList((prev) => !prev);
-    }, []);
-    const handleSearchQueryChange = React.useCallback((value: string) => {
-        setSearchQuery(value);
-    }, []);
-    const handlePreviousSearchResult = React.useCallback(() => {
-        setCurrentSearchIndex((prev) => getWrappedSearchResultIndex(prev, searchResults.length, 'previous'));
-    }, [searchResults.length]);
-    const handleNextSearchResult = React.useCallback(() => {
-        setCurrentSearchIndex((prev) => getWrappedSearchResultIndex(prev, searchResults.length, 'next'));
-    }, [searchResults.length]);
-    const handleCloseSearchPanel = React.useCallback(() => {
-        setShowSearch(false);
-        setSearchQuery('');
-        setShowSearchResultsList(false);
-    }, []);
-    const rowMetadataByIndex = React.useMemo(() => getCachedChatRowMetadata({
+    const {
+        handleToggleSearchResultsList,
+        handleSearchQueryChange,
+        handlePreviousSearchResult,
+        handleNextSearchResult,
+        handleCloseSearchPanel,
+        renderItemContent,
+        renderSearchResultItem,
+    } = useChatMessageListSearch({
         history,
-        editingMessageIndex,
-        searchResultSet,
-        activeSearchMessageIndex,
-        comparisonIndex,
-        bookmarkedMessages,
-        selectedToken,
-        messageRatings,
-        editedMessageContent,
-        loadedMessageIndices,
-    }, rowMetadataCacheRef.current), [
-        history,
-        editingMessageIndex,
-        searchResultSet,
-        activeSearchMessageIndex,
-        comparisonIndex,
-        bookmarkedMessages,
-        selectedToken,
-        messageRatings,
-        editedMessageContent,
-        loadedMessageIndices,
-    ]);
-
-    // Memoized itemContent callback to prevent recreation on every render
-    const renderItemContent = React.useCallback((index: number, msg: any) => {
-        const rowMetadata = rowMetadataByIndex[index];
-        if (!rowMetadata) {
-            return null;
-        }
-
-        return (
-            <ChatMessageRow
-                index={index}
-                msg={msg}
-                isLoadingMessages={isLoadingMessages}
-                isSearchResult={rowMetadata.isSearchResult}
-                isCurrentSearchResult={rowMetadata.isCurrentSearchResult}
-                isLastMessage={rowMetadata.isLastMessage}
-                previousMessage={rowMetadata.previousMessage}
-                nextMessage={rowMetadata.nextMessage}
-                isShowingComparison={rowMetadata.isShowingComparison}
-                isComparisonPartnerHidden={rowMetadata.isComparisonPartnerHidden}
-                isBookmarked={rowMetadata.isBookmarked}
-                deleteMessage={deleteMessage}
-                handleEditMessage={handleEditMessage}
-                handleRegenerateResponse={handleRegenerateResponse}
-                handleBranchConversation={handleBranchConversation}
-                mcpAvailable={mcpAvailable}
-                handleInsertToFile={handleInsertToFile}
-                selectedTokenForMessage={rowMetadata.selectedTokenForMessage}
-                setSelectedToken={setSelectedToken}
-                setActiveTab={setActiveTab}
-                setComparisonIndex={setComparisonIndex}
-                modelNameById={modelNameById}
-                currentModel={currentModel}
-                secondaryModel={secondaryModel}
-                handleRateMessage={handleRateMessage}
-                messageRating={rowMetadata.messageRating}
-                showInspector={showInspector}
-                textareaRef={textareaRef}
-                setInput={setInput}
-                isEditingRow={rowMetadata.isEditingRow}
-                editingContentForRow={rowMetadata.editingContentForRow}
-                onEditingContentChange={onEditingContentChange}
-                handleCancelEdit={handleCancelEdit}
-                handleSaveEdit={handleSaveEdit}
-                selectChoice={selectChoice}
-                toggleBookmark={toggleBookmark}
-                conversationFontSize={conversationFontSize}
-                isCompactViewport={isCompactViewport}
-                isLazyLoaded={rowMetadata.isLazyLoaded}
-                loadMessageAtIndex={loadMessageAtIndex}
-            />
-        );
-    }, [
         isLoadingMessages,
-        rowMetadataByIndex,
+        searchResults,
+        currentSearchIndex,
+        editingMessageIndex,
+        comparisonIndex,
+        bookmarkedMessages,
+        selectedToken,
+        messageRatings,
+        editedMessageContent,
+        loadedMessageIndices,
+        rowMetadataCacheRef,
+        searchResultPreviewCacheRef,
+        loadMessageRange,
+        setEditedMessageContent,
+        setShowSearchResultsList,
+        setSearchQuery,
+        setCurrentSearchIndex,
+        setShowSearch,
         deleteMessage,
         handleEditMessage,
         handleRegenerateResponse,
@@ -3493,33 +2743,14 @@ const Chat: React.FC = () => {
         showInspector,
         textareaRef,
         setInput,
-        onEditingContentChange,
         handleCancelEdit,
         handleSaveEdit,
         selectChoice,
         toggleBookmark,
         conversationFontSize,
         isCompactViewport,
-        loadMessageAtIndex,
-    ]);
-
-    const renderSearchResultItem = React.useCallback((resultIndex: number) => {
-        const row = searchResultRows[resultIndex];
-        if (!row) {
-            return null;
-        }
-        return (
-            <SearchResultRow
-                resultIndex={row.resultIndex}
-                messageIndex={row.messageIndex}
-                preview={row.preview}
-                roleLabel={row.roleLabel}
-                roleClass={row.roleClass}
-                isActive={resultIndex === currentSearchIndex}
-                onNavigate={navigateToSearchResult}
-            />
-        );
-    }, [searchResultRows, currentSearchIndex, navigateToSearchResult]);
+        navigateToSearchResult,
+    });
 
     const longPressMessage = longPressMenu ? history[longPressMenu.messageIndex] : null;
     const longPressMessageCapabilities = React.useMemo(
@@ -3530,211 +2761,57 @@ const Chat: React.FC = () => {
         () => Boolean(longPressMenu && bookmarkedMessages.has(longPressMenu.messageIndex)),
         [bookmarkedMessages, longPressMenu]
     );
-    const handleToggleBottomControls = React.useCallback(() => {
-        setShowBottomControls((prev) => !prev);
-    }, []);
-    const handleToggleSuggestions = React.useCallback(() => {
-        setShowSuggestions((prev) => !prev);
-    }, []);
-    const handleSendComposerMessage = React.useCallback(() => {
-        sendMessageWithContext();
-    }, [sendMessageWithContext]);
-    const handleComposerDragOver = React.useCallback((event: React.DragEvent<HTMLDivElement>) => {
-        event.preventDefault();
-        event.stopPropagation();
-        setIsDragging(true);
-    }, []);
-    const handleComposerDragLeave = React.useCallback((event: React.DragEvent<HTMLDivElement>) => {
-        event.preventDefault();
-        event.stopPropagation();
-        setIsDragging(false);
-    }, []);
-    const handleComposerDrop = React.useCallback(async (event: React.DragEvent<HTMLDivElement>) => {
-        event.preventDefault();
-        event.stopPropagation();
-        setIsDragging(false);
-
-        const files = Array.from(event.dataTransfer.files);
-        if (files.length === 0) return;
-
-        for (const { file, kind } of describeDroppedFiles(files)) {
-            if (kind === 'image') {
-                try {
-                    const { base64, thumbnailUrl } = await compressImage(file);
-                    addImageAttachment({
-                        name: file.name,
-                        mimeType: 'image/webp',
-                        base64,
-                        thumbnailUrl,
-                    });
-                } catch (error) {
-                    console.error('Failed to read/compress image', file.name, error);
-                    toast.error(`Failed to process image: ${file.name}`);
-                }
-                continue;
-            }
-
-            if (kind === 'text') {
-                try {
-                    const text = await file.text();
-                    addAttachment({ name: file.name, content: text });
-                } catch (error) {
-                    console.error('Failed to read file', file.name, error);
-                }
-            }
-        }
-    }, [addAttachment, addImageAttachment]);
-    const handleComposerInputChange = React.useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const newValue = event.target.value;
-        const analysis = analyzeComposerInput(
-            newValue,
-            event.target.selectionEnd ?? newValue.length,
-            event.target.scrollHeight
-        );
-
-        if (analysis.slashMatch) {
-            setSlashMatch(analysis.slashMatch);
-            setActivePromptIndex(0);
-        } else {
-            setSlashMatch(null);
-        }
-
-        setInput(newValue);
-        event.target.style.height = 'auto';
-        event.target.style.height = `${analysis.autoHeightPx}px`;
-    }, [setInput]);
-    const handleComposerInputPaste = React.useCallback(async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-        const imageFiles = collectPastedImageFiles(Array.from(event.clipboardData.items));
-        for (const file of imageFiles) {
-            event.preventDefault();
-            try {
-                const { base64, thumbnailUrl } = await compressImage(file);
-                addImageAttachment({
-                    name: file.name || `pasted-${Date.now()}.png`,
-                    mimeType: 'image/webp',
-                    base64,
-                    thumbnailUrl,
-                });
-                toast.success('Image pasted');
-            } catch (error) {
-                console.error('Paste failed', error);
-                toast.error('Failed to paste image');
-            }
-        }
-    }, [addImageAttachment]);
-    const handleComposerInputKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        const action = resolveComposerKeyAction({
-            key: event.key,
-            shiftKey: event.shiftKey,
-            slashMenuOpen: Boolean(slashMatch),
-            filteredPromptCount: filteredPrompts.length,
-        });
-
-        switch (action) {
-            case 'navigate-up':
-                event.preventDefault();
-                setActivePromptIndex((prev) => Math.max(0, prev - 1));
-                return;
-            case 'navigate-down':
-                event.preventDefault();
-                setActivePromptIndex((prev) => Math.min(filteredPrompts.length - 1, prev + 1));
-                return;
-            case 'insert-prompt':
-                event.preventDefault();
-                insertPrompt(filteredPrompts[activePromptIndex]);
-                return;
-            case 'dismiss-slash':
-                event.preventDefault();
-                setSlashMatch(null);
-                return;
-            case 'send-message':
-                event.preventDefault();
-                sendMessageWithContext();
-                return;
-            default:
-                return;
-        }
-    }, [activePromptIndex, filteredPrompts, insertPrompt, sendMessageWithContext, slashMatch]);
-    const handleSelectSuggestion = React.useCallback((suggestion: string) => {
-        setInput(suggestion);
-        setShowSuggestions(false);
-        textareaRef.current?.focus();
-    }, [setInput]);
-    const handleCloseSuggestionsPanel = React.useCallback(() => {
-        setShowSuggestions(false);
-    }, []);
-    const handlePrefillChange = React.useCallback((value: string) => {
-        setPrefill(value);
-    }, [setPrefill]);
-    const handleUrlInputChange = React.useCallback((value: string) => {
-        setUrlInput(value);
-    }, [setUrlInput]);
-    const handleUrlInputKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
-        if (event.key === 'Enter') {
-            executeWebFetch();
-        }
-    }, [executeWebFetch]);
-    const handleGithubUrlChange = React.useCallback((value: string) => {
-        setGithubUrl(value);
-    }, []);
-    const handleGithubInputKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
-        if (event.key === 'Enter') {
-            executeGithubFetch();
-        }
-    }, [executeGithubFetch]);
-    const handleToggleIncludeContextInMessages = React.useCallback(() => {
-        setIncludeContextInMessages((prev) => !prev);
-    }, []);
-    const handleClearProjectContext = React.useCallback(() => {
-        void loadProjectContextService()
-            .then((projectContextService) => {
-                projectContextService.clearContext();
-                toast.success('Project context cleared');
-            })
-            .catch(() => {
-                toast.error('Failed to clear project context');
-            });
-    }, []);
-    const handleStartWatchingProjectContext = React.useCallback(() => {
-        void (async () => {
-            enableProjectContextFeature();
-            const projectContextService = await loadProjectContextService();
-            const success = await projectContextService.startWatching();
-            if (success) {
-                toast.success('Started watching folder for changes');
-            } else {
-                toast.error('Failed to start watching');
-            }
-        })();
-    }, [enableProjectContextFeature]);
-    const handleTogglePrefill = React.useCallback(() => {
-        setPrefill((prev) => (prev === null ? '' : null));
-    }, []);
-    const handleToggleUrlInput = React.useCallback(() => {
-        setShowUrlInput((prev) => !prev);
-    }, []);
-    const handleToggleGithubInput = React.useCallback(() => {
-        setShowGithubInput((prev) => !prev);
-    }, []);
-    const handleProjectContextControlClick = React.useCallback(async () => {
-        enableProjectContextFeature();
-        const projectContextService = await loadProjectContextService();
-        if (projectContext) {
-            projectContextService.clearContext();
-            toast.success('Project context cleared');
-            return;
-        }
-
-        const success = await projectContextService.selectFolder();
-        if (success) {
-            toast.success('Project folder loaded');
-            setTimeout(async () => {
-                await projectContextService.startWatching();
-            }, 500);
-        } else {
-            toast.error('Failed to select folder');
-        }
-    }, [projectContext]);
+    const {
+        handleToggleBottomControls,
+        handleToggleSuggestions,
+        handleSendComposerMessage,
+        handleComposerDragOver,
+        handleComposerDragLeave,
+        handleComposerDrop,
+        handleComposerInputChange,
+        handleComposerInputPaste,
+        handleComposerInputKeyDown,
+        handleSelectSuggestion,
+        handleCloseSuggestionsPanel,
+        handlePrefillChange,
+        handleUrlInputChange,
+        handleUrlInputKeyDown,
+        handleGithubUrlChange,
+        handleGithubInputKeyDown,
+        handleToggleIncludeContextInMessages,
+        handleClearProjectContext,
+        handleStartWatchingProjectContext,
+        handleTogglePrefill,
+        handleToggleUrlInput,
+        handleToggleGithubInput,
+        handleProjectContextControlClick,
+    } = useChatComposerInteractions({
+        setShowBottomControls,
+        setShowSuggestions,
+        setIsDragging,
+        setSlashMatch,
+        setActivePromptIndex,
+        setInput,
+        setPrefill,
+        setShowUrlInput,
+        setShowGithubInput,
+        setUrlInput,
+        setGithubUrl,
+        setIncludeContextInMessages,
+        textareaRef,
+        slashMatch,
+        filteredPrompts,
+        activePromptIndex,
+        executeWebFetch,
+        executeGithubFetch,
+        sendMessageWithContext,
+        insertPrompt,
+        addAttachment,
+        addImageAttachment,
+        projectContext,
+        enableProjectContextFeature,
+        loadProjectContextService,
+    });
     const handleToggleThinking = React.useCallback(() => {
         setThinkingEnabled((prev) => !prev);
     }, [setThinkingEnabled]);
