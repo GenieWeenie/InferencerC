@@ -1,7 +1,7 @@
 import React from 'react';
 import { Clock, Plus, X, Globe, Settings, Activity, AlertTriangle, ChevronRight, Check, AlertCircle, Brain, Users, Wrench, Eraser, Download, Search, ChevronUp, ChevronDown, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, Network, HelpCircle, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import { ChatComposerShell } from '../components/chat/ChatComposerShell';
 import { ChatControlsTabPanel } from '../components/chat/ChatControlsTabPanel';
 import {
@@ -23,14 +23,11 @@ import {
     SidebarTabsHeader,
     type SidebarTab,
 } from '../components/chat/ChatInlinePanels';
-import { ChatMessageRow } from '../components/chat/ChatMessageRow';
-import { ChatOverlays } from '../components/chat/ChatOverlays';
-import { ChatSearchPanel, SearchResultRow } from '../components/chat/ChatSearchPanel';
+import { ChatOverlaySlots } from '../components/chat/ChatOverlaySlots';
+import { ChatSearchPanel } from '../components/chat/ChatSearchPanel';
 import { ChatSidebar, type ChatSidebarPanels } from '../components/chat/ChatSidebar';
 import { ChatWorkspaceShell } from '../components/chat/ChatWorkspaceShell';
-import type { LaunchReadinessStep } from '../components/ChatEmptyState';
 import type { LogEntry } from '../components/RequestResponseLog';
-const PromptManager = React.lazy(() => import('../components/PromptManager'));
 import { useChat } from '../hooks/useChat';
 import { usePrompts } from '../hooks/usePrompts';
 import { useConversationTree } from '../hooks/useConversationTree';
@@ -47,14 +44,17 @@ import { useChatKeyboardController } from '../hooks/useChatKeyboardController';
 import { useChatMessageActionsController } from '../hooks/useChatMessageActionsController';
 import { useChatHeaderUtilityControls } from '../hooks/useChatHeaderUtilityControls';
 import { useChatMessageListSearch } from '../hooks/useChatMessageListSearch';
+import { useChatLaunchReadiness } from '../hooks/useChatLaunchReadiness';
+import { useChatPageEffects } from '../hooks/useChatPageEffects';
 import { useChatPanelsState } from '../hooks/useChatPanelsState';
 import { formatPerfMs, useChatPerfBenchmarks } from '../hooks/useChatPerfBenchmarks';
 import { useChatRuntimeServices } from '../hooks/useChatRuntimeServices';
+import { useChatSearchState } from '../hooks/useChatSearchState';
 import { useChatSendPipeline } from '../hooks/useChatSendPipeline';
 import { useChatSessionIntegrations } from '../hooks/useChatSessionIntegrations';
 import { useChatSlashPrompts } from '../hooks/useChatSlashPrompts';
 import { useChatStartupRecovery } from '../hooks/useChatStartupRecovery';
-import { buildReadinessSteps, getDiagnosticsStatus } from '../lib/chatDiagnosticsModels';
+import { getDiagnosticsStatus } from '../lib/chatDiagnosticsModels';
 import {
     loadActivityLogService,
     loadAutoCategorizationService,
@@ -66,11 +66,6 @@ import {
     loadWorkflowsService,
 } from '../lib/chatLazyServices';
 import {
-    areSearchResultIndicesEqual,
-    findChatSearchMatches,
-    normalizeChatSearchQuery,
-} from '../lib/chatSearch';
-import {
     createChatRowMetadataCacheState,
     type SearchResultPreviewCacheEntry,
 } from '../lib/chatRenderModels';
@@ -81,86 +76,14 @@ import {
 import { useMCP } from '../hooks/useMCP';
 import type { UsageStatsRecord } from '../services/analyticsStore';
 import type { ProjectContext } from '../services/projectContext';
-import type { ConversationTemplate } from '../services/templates';
-
-const KeyboardShortcutsModal = React.lazy(() => import('../components/KeyboardShortcutsModal'));
-const RequestResponseLog = React.lazy(() => import('../components/RequestResponseLog'));
-const AnalyticsDashboard = React.lazy(() => import('../components/AnalyticsDashboard'));
-const SidebarHistory = React.lazy(() => import('../components/SidebarHistory'));
-const ConversationTreeView = React.lazy(() => import('../components/ConversationTreeView'));
-const ExportDialog = React.lazy(() => import('../components/ExportDialog'));
-const GlobalSearchDialog = React.lazy(() => import('../components/GlobalSearchDialog'));
-const ConversationSummaryPanel = React.lazy(() => import('../components/ConversationSummaryPanel'));
-const TemplateLibraryDialog = React.lazy(() => import('../components/TemplateLibraryDialog'));
-const RecoveryDialog = React.lazy(() => import('../components/RecoveryDialog'));
-const ChatEmptyState = React.lazy(() => import('../components/ChatEmptyState'));
-const ChatDiagnosticsPopover = React.lazy(() => import('../components/ChatDiagnosticsPopover'));
-const PerformanceMonitorOverlay = React.lazy(() =>
-    import('../components/PerformanceMonitorOverlay').then((mod) => ({ default: mod.PerformanceMonitorOverlay }))
-);
-const DocumentChatPanel = React.lazy(() =>
-    import('../components/DocumentChatPanel').then((mod) => ({ default: mod.DocumentChatPanel }))
-);
-const ABTestingPanel = React.lazy(() =>
-    import('../components/ABTestingPanel').then((mod) => ({ default: mod.ABTestingPanel }))
-);
-const PromptOptimizationPanel = React.lazy(() =>
-    import('../components/PromptOptimizationPanel').then((mod) => ({ default: mod.PromptOptimizationPanel }))
-);
-const CalendarScheduleDialog = React.lazy(() =>
-    import('../components/CalendarScheduleDialog').then((mod) => ({ default: mod.CalendarScheduleDialog }))
-);
-const ConversationRecommendationsPanel = React.lazy(() =>
-    import('../components/ConversationRecommendationsPanel').then((mod) => ({ default: mod.ConversationRecommendationsPanel }))
-);
-const WorkflowsManager = React.lazy(() =>
-    import('../components/WorkflowsManager').then((mod) => ({ default: mod.WorkflowsManager }))
-);
-const APIPlayground = React.lazy(() =>
-    import('../components/APIPlayground').then((mod) => ({ default: mod.APIPlayground }))
-);
-const DeveloperDocumentationPanel = React.lazy(() =>
-    import('../components/DeveloperDocumentationPanel').then((mod) => ({ default: mod.DeveloperDocumentationPanel }))
-);
-const PluginManager = React.lazy(() =>
-    import('../components/PluginManager').then((mod) => ({ default: mod.PluginManager }))
-);
-const CodeIntegrationPanel = React.lazy(() =>
-    import('../components/CodeIntegrationPanel').then((mod) => ({ default: mod.CodeIntegrationPanel }))
-);
-const WorkspaceViewsPanel = React.lazy(() =>
-    import('../components/WorkspaceViewsPanel').then((mod) => ({ default: mod.WorkspaceViewsPanel }))
-);
-const InteractiveTutorial = React.lazy(() =>
-    import('../components/InteractiveTutorial').then((mod) => ({ default: mod.InteractiveTutorial }))
-);
-const BCIPanel = React.lazy(() =>
-    import('../components/BCIPanel').then((mod) => ({ default: mod.BCIPanel }))
-);
-const MultiModalAIPanel = React.lazy(() =>
-    import('../components/MultiModalAIPanel').then((mod) => ({ default: mod.MultiModalAIPanel }))
-);
-const RealTimeCollaborationPanel = React.lazy(() =>
-    import('../components/RealTimeCollaborationPanel').then((mod) => ({ default: mod.RealTimeCollaborationPanel }))
-);
-const CloudSyncPanel = React.lazy(() =>
-    import('../components/CloudSyncPanel').then((mod) => ({ default: mod.CloudSyncPanel }))
-);
-const TeamWorkspacesPanel = React.lazy(() =>
-    import('../components/TeamWorkspacesPanel').then((mod) => ({ default: mod.TeamWorkspacesPanel }))
-);
-const EnterpriseCompliancePanel = React.lazy(() =>
-    import('../components/EnterpriseCompliancePanel').then((mod) => ({ default: mod.EnterpriseCompliancePanel }))
-);
-const BlockchainPanel = React.lazy(() =>
-    import('../components/BlockchainPanel').then((mod) => ({ default: mod.BlockchainPanel }))
-);
-const AIAgentsPanel = React.lazy(() =>
-    import('../components/AIAgentsPanel').then((mod) => ({ default: mod.AIAgentsPanel }))
-);
-const FederatedLearningPanel = React.lazy(() =>
-    import('../components/FederatedLearningPanel').then((mod) => ({ default: mod.FederatedLearningPanel }))
-);
+import {
+    ChatDiagnosticsPopover,
+    ChatEmptyState,
+    ConversationSummaryPanel,
+    DocumentChatPanel,
+    PromptManager,
+    SidebarHistory,
+} from '../components/chat/chatLazyPanels';
 
 const CHAT_PERF_HISTORY_KEY = 'chat_message_perf_benchmarks_v1';
 const CHAT_DEV_MONITORS_ENABLED_KEY = 'chat_dev_monitors_enabled_v1';
@@ -299,33 +222,14 @@ const Chat: React.FC = () => {
         setInput,
     });
 
-    // Simulate initial session loading for skeleton UI
-    React.useEffect(() => {
-        const timer = setTimeout(() => {
-            setIsLoadingSessions(false);
-        }, 300);
-        return () => clearTimeout(timer);
-    }, []);
-
-    // Show skeleton loaders on initial message load
-    React.useEffect(() => {
-        if (history.length > 0 && isLoadingMessages) {
-            setIsLoadingMessages(false);
-        }
-    }, [history, isLoadingMessages]);
-
-    // Default secondary model if not set
-    React.useEffect(() => {
-        if (battleMode && !secondaryModel && availableModels.length > 1) {
-            setSecondaryModel(availableModels.find(m => m.id !== currentModel)?.id || availableModels[0].id);
-        }
-    }, [battleMode, availableModels, currentModel, secondaryModel, setSecondaryModel]);
-
     const { prompts } = usePrompts();
-    const [searchQuery, setSearchQuery] = React.useState('');
-    const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState('');
-    const [searchResults, setSearchResults] = React.useState<number[]>([]);
-    const [currentSearchIndex, setCurrentSearchIndex] = React.useState(0);
+    const {
+        searchQuery,
+        setSearchQuery,
+        searchResults,
+        currentSearchIndex,
+        setCurrentSearchIndex,
+    } = useChatSearchState({ history });
     const {
         showSearch,
         setShowSearch,
@@ -427,9 +331,6 @@ const Chat: React.FC = () => {
     const searchResultPreviewCacheRef = React.useRef<Map<number, SearchResultPreviewCacheEntry>>(new Map());
     const rowMetadataCacheRef = React.useRef(createChatRowMetadataCacheState());
 
-    const [hasCompletedLaunchChecklist, setHasCompletedLaunchChecklist] = React.useState<boolean>(() => {
-        return localStorage.getItem('chat_launch_checklist_completed') === '1';
-    });
     const [showBottomControls, setShowBottomControls] = React.useState<boolean>(() => {
         const stored = localStorage.getItem('chat_show_bottom_controls');
         return stored !== '0';
@@ -454,6 +355,27 @@ const Chat: React.FC = () => {
 
     // Initialize conversation tree only when branching is enabled.
     const treeHook = useConversationTree(history, { enabled: branchingEnabled });
+    useChatPageEffects({
+        setIsLoadingSessions,
+        setIsLoadingMessages,
+        setSecondaryModel,
+        setShowHistory,
+        history,
+        isLoadingMessages,
+        battleMode,
+        secondaryModel,
+        availableModels,
+        currentModel,
+        isCompactViewport,
+        showHistory,
+        branchingEnabled,
+        sessionId,
+        input,
+        syncTreeWithHistory: treeHook.replaceMessages,
+        loadAutoCategorizationService,
+        loadAutoTaggingService,
+        loadWorkflowsService,
+    });
 
     const shouldLoadContextManagement = history.length > 0 || sidebarOpen || projectContextFeatureEnabled;
     React.useEffect(() => {
@@ -494,12 +416,6 @@ const Chat: React.FC = () => {
     });
 
     React.useEffect(() => {
-        if (isCompactViewport && showHistory) {
-            setShowHistory(false);
-        }
-    }, [isCompactViewport, setShowHistory, showHistory]);
-
-    React.useEffect(() => {
         const composerElement = composerContainerRef.current;
         if (!composerElement) return;
 
@@ -532,15 +448,6 @@ const Chat: React.FC = () => {
             // Ignore storage failures for dev monitor preferences.
         }
     }, [devMonitorsEnabled]);
-
-    // Sync tree with history when branching is enabled or when history changes
-    React.useEffect(() => {
-        if (branchingEnabled && history.length > 0) {
-            // Replace messages in tree with current history
-            console.log('[TreeSync] Syncing tree with history:', history.length, 'messages');
-            treeHook.replaceMessages(history);
-        }
-    }, [branchingEnabled, history.length]); // Run when branching is enabled OR history length changes
 
     useChatDevMonitors({
         enabled: devMonitorsEnabled,
@@ -590,24 +497,21 @@ const Chat: React.FC = () => {
         setInput('Help me validate my setup and run a quick first task.');
         toast.success('Starter prompt inserted.');
     }, [setInput]);
-    const providerReady = connectionStatus.local === 'online' || connectionStatus.remote === 'online';
-    const modelReady = Boolean(currentModel);
-    const promptReady = input.trim().length > 0;
-    const readinessSteps = React.useMemo<LaunchReadinessStep[]>(
-        () =>
-            buildReadinessSteps({
-                providerReady,
-                localStatus: connectionStatus.local,
-                remoteStatus: connectionStatus.remote,
-                modelReady,
-                modelLabel: currentModelObj?.name || currentModel,
-                promptReady,
-            }),
-        [providerReady, connectionStatus.local, connectionStatus.remote, modelReady, currentModelObj, currentModel, promptReady]
-    );
-    const readinessCompletedCount = readinessSteps.filter(step => step.complete).length;
-    const launchChecklistComplete = readinessCompletedCount === readinessSteps.length;
-    const shouldShowLaunchChecklist = !hasCompletedLaunchChecklist && !launchChecklistComplete;
+    const {
+        hasCompletedLaunchChecklist,
+        providerReady,
+        modelReady,
+        promptReady,
+        readinessSteps,
+        readinessCompletedCount,
+        launchChecklistComplete,
+        shouldShowLaunchChecklist,
+    } = useChatLaunchReadiness({
+        connectionStatus,
+        currentModel,
+        currentModelLabel: currentModelObj?.name || currentModel,
+        input,
+    });
     const diagnosticsStatus = React.useMemo(
         () =>
             getDiagnosticsStatus({
@@ -618,11 +522,6 @@ const Chat: React.FC = () => {
             }),
         [providerReady, modelReady, history.length, promptReady]
     );
-    React.useEffect(() => {
-        if (!launchChecklistComplete || hasCompletedLaunchChecklist) return;
-        setHasCompletedLaunchChecklist(true);
-        localStorage.setItem('chat_launch_checklist_completed', '1');
-    }, [launchChecklistComplete, hasCompletedLaunchChecklist]);
 
     const handleToggleDevMonitors = React.useCallback(() => {
         setDevMonitorsEnabled((prev) => !prev);
@@ -794,84 +693,6 @@ const Chat: React.FC = () => {
         };
     }, [projectContextFeatureEnabled]);
 
-    // Auto-categorization and auto-tagging
-    React.useEffect(() => {
-        if (history.length > 0 && sessionId) {
-            // Auto-categorize after 3+ messages
-            if (history.length >= 3) {
-                void loadAutoCategorizationService()
-                    .then((service) => service.categorizeConversation(sessionId))
-                    .catch(console.error);
-            }
-            // Auto-tag after 2+ messages
-            if (history.length >= 2) {
-                void loadAutoTaggingService()
-                    .then((service) => service.tagConversation(sessionId))
-                    .catch(console.error);
-            }
-        }
-    }, [history.length, sessionId]);
-
-    // Check workflows when message is sent
-    React.useEffect(() => {
-        if (history.length > 0) {
-            const lastMessage = history[history.length - 1];
-            if (lastMessage?.role === 'user' && lastMessage.content) {
-                void loadWorkflowsService()
-                    .then((service) => service.checkWorkflows(
-                        lastMessage.content,
-                        history,
-                        currentModel
-                    ))
-                    .catch(console.error);
-            }
-        }
-    }, [history.length, currentModel]);
-
-    // Debounce search query (300ms delay)
-    React.useEffect(() => {
-        const timer = setTimeout(() => {
-            setDebouncedSearchQuery(searchQuery);
-        }, 300);
-
-        return () => clearTimeout(timer);
-    }, [searchQuery]);
-    const searchableMessageContent = React.useMemo(
-        () => history.map((msg) => (typeof msg.content === 'string' ? msg.content.toLowerCase() : '')),
-        [history]
-    );
-
-    // Search within chat
-    React.useEffect(() => {
-        const normalizedQuery = normalizeChatSearchQuery(debouncedSearchQuery);
-        if (!normalizedQuery) {
-            setSearchResults((prev) => (prev.length === 0 ? prev : []));
-            setCurrentSearchIndex((prev) => (prev === 0 ? prev : 0));
-            return;
-        }
-
-        const nextMatches = findChatSearchMatches(searchableMessageContent, normalizedQuery);
-        const matchesChanged = !areSearchResultIndicesEqual(searchResults, nextMatches);
-        if (matchesChanged) {
-            setSearchResults(nextMatches);
-            if (currentSearchIndex !== 0) {
-                setCurrentSearchIndex(0);
-            }
-            return;
-        }
-
-        if (nextMatches.length === 0) {
-            if (currentSearchIndex !== 0) {
-                setCurrentSearchIndex(0);
-            }
-            return;
-        }
-
-        if (currentSearchIndex >= nextMatches.length) {
-            setCurrentSearchIndex(nextMatches.length - 1);
-        }
-    }, [debouncedSearchQuery, searchableMessageContent, searchResults, currentSearchIndex]);
-
     // Navigate to specific search result
     const navigateToSearchResult = React.useCallback((resultIndex: number) => {
         setCurrentSearchIndex(resultIndex);
@@ -889,19 +710,6 @@ const Chat: React.FC = () => {
             });
         }
     }, [currentSearchIndex, searchResults]);
-
-    // Confirm before closing unsaved
-    React.useEffect(() => {
-        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-            if (input.trim() !== '' || (history.length > 0 && history[history.length - 1].isLoading)) {
-                e.preventDefault();
-                e.returnValue = ''; // Required for Chrome/Electron
-                return '';
-            }
-        };
-        window.addEventListener('beforeunload', handleBeforeUnload);
-        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-    }, [input, history]);
 
     const {
         slashMatch,
@@ -926,6 +734,45 @@ const Chat: React.FC = () => {
             setIsLoadingMessages(false);
         }, 300);
     }, [loadSession]);
+    const handleJumpToSearchMessage = React.useCallback((targetSessionId: string, messageIndex: number) => {
+        if (targetSessionId !== sessionId) {
+            handleLoadSession(targetSessionId);
+        }
+        setTimeout(() => {
+            if (virtuosoRef.current && messageIndex >= 0) {
+                virtuosoRef.current.scrollToIndex({
+                    index: messageIndex,
+                    align: 'center',
+                    behavior: 'smooth',
+                });
+                toast.success(`Jumped to message #${messageIndex + 1}`);
+            }
+        }, 300);
+    }, [handleLoadSession, sessionId]);
+    const handleApplyOptimizedPrompt = React.useCallback((optimizedPrompt: string, optimizedSystemPrompt?: string) => {
+        setInput(optimizedPrompt);
+        if (optimizedSystemPrompt) {
+            setSystemPrompt(optimizedSystemPrompt);
+        }
+    }, [setInput, setSystemPrompt]);
+    const handleSendMultiModal = React.useCallback(async (media: unknown, text: string) => {
+        const multiModalAIService = await loadMultiModalAIService();
+        const response = await multiModalAIService.sendMultiModalRequest(
+            { text, media },
+            async (prompt, promptSystem) => {
+                const result = await executeChatCompletion({
+                    prompt,
+                    systemPrompt: promptSystem,
+                });
+                return { content: result.content };
+            }
+        );
+        appendMessage({
+            role: 'assistant',
+            content: response.content,
+            isLoading: false,
+        });
+    }, [appendMessage, executeChatCompletion]);
     const {
         handleEditMessage,
         handleSaveEdit,
@@ -1650,389 +1497,101 @@ const Chat: React.FC = () => {
                 />
             )}
             overlays={(
-                <ChatOverlays
-                    slots={{
-                        keyboardShortcutsModal: showShortcutsModal ? (
-                            <React.Suspense fallback={null}>
-                                <KeyboardShortcutsModal
-                                    isOpen={showShortcutsModal}
-                                    onClose={() => setShowShortcutsModal(false)}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        requestResponseLog: showRequestLog ? (
-                            <React.Suspense fallback={null}>
-                                <RequestResponseLog
-                                    isOpen={showRequestLog}
-                                    onClose={() => setShowRequestLog(false)}
-                                    logs={apiLogs}
-                                    onClear={clearApiLogs}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        analyticsDashboard: showAnalytics ? (
-                            <React.Suspense fallback={null}>
-                                <AnalyticsDashboard
-                                    isOpen={showAnalytics}
-                                    onClose={() => setShowAnalytics(false)}
-                                    usageHistory={usageStats}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        conversationTreeView: branchingEnabled && showTreeView && treeHook.treeManager ? (
-                            <React.Suspense fallback={null}>
-                                <ConversationTreeView
-                                    isOpen={showTreeView}
-                                    onClose={() => setShowTreeView(false)}
-                                    treeManager={treeHook.treeManager}
-                                    currentPath={treeHook.currentPath}
-                                    onNavigateToNode={() => {
-                                        setShowTreeView(false);
-                                    }}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        exportDialog: showExportDialog ? (
-                            <React.Suspense fallback={null}>
-                                <ExportDialog
-                                    isOpen={showExportDialog}
-                                    onClose={() => setShowExportDialog(false)}
-                                    messages={history}
-                                    sessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Conversation'}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        globalSearchDialog: showGlobalSearch ? (
-                            <React.Suspense fallback={null}>
-                                <GlobalSearchDialog
-                                    isOpen={showGlobalSearch}
-                                    onClose={() => setShowGlobalSearch(false)}
-                                    currentSessionId={sessionId}
-                                    currentSessionTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Current Conversation'}
-                                    onNavigateToMessage={(targetSessionId, messageIndex) => {
-                                        if (targetSessionId !== sessionId) {
-                                            handleLoadSession(targetSessionId);
-                                        }
-                                        setTimeout(() => {
-                                            if (virtuosoRef.current && messageIndex >= 0) {
-                                                virtuosoRef.current.scrollToIndex({
-                                                    index: messageIndex,
-                                                    align: 'center',
-                                                    behavior: 'smooth'
-                                                });
-                                                toast.success(`Jumped to message #${messageIndex + 1}`);
-                                            }
-                                        }, 300);
-                                    }}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        templateLibraryDialog: showTemplateLibrary ? (
-                            <React.Suspense fallback={null}>
-                                <TemplateLibraryDialog
-                                    isOpen={showTemplateLibrary}
-                                    onClose={() => setShowTemplateLibrary(false)}
-                                    onUseTemplate={(template: ConversationTemplate) => {
-                                        createNewSession();
-
-                                        if (template.systemPrompt) {
-                                            setSystemPrompt(template.systemPrompt);
-                                        }
-                                        if (template.settings) {
-                                            if (template.settings.temperature !== undefined) setTemperature(template.settings.temperature);
-                                            if (template.settings.topP !== undefined) setTopP(template.settings.topP);
-                                            if (template.settings.maxTokens !== undefined) setMaxTokens(template.settings.maxTokens);
-                                            if (template.settings.expertMode !== undefined) setExpertMode(template.settings.expertMode);
-                                            if (template.settings.thinkingEnabled !== undefined) setThinkingEnabled(template.settings.thinkingEnabled);
-                                        }
-
-                                        if (template.initialMessages.length > 0) {
-                                            replaceHistory(template.initialMessages.map(m => ({
-                                                ...m,
-                                                isLoading: false
-                                            })));
-                                        }
-                                    }}
-                                    currentMessages={history}
-                                    currentSystemPrompt={systemPrompt}
-                                    currentSettings={{
-                                        temperature,
-                                        topP,
-                                        maxTokens,
-                                        expertMode,
-                                        thinkingEnabled
-                                    }}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        abTestingPanel: showABTesting ? (
-                            <React.Suspense fallback={null}>
-                                <ABTestingPanel
-                                    isOpen={showABTesting}
-                                    onClose={() => setShowABTesting(false)}
-                                    onExecutePrompt={async (prompt, dialogSystemPrompt, modelId, dialogTemperature, dialogTopP, dialogMaxTokens) => {
-                                        return executeChatCompletion({
-                                            prompt,
-                                            systemPrompt: dialogSystemPrompt,
-                                            modelId,
-                                            temperature: dialogTemperature,
-                                            topP: dialogTopP,
-                                            maxTokens: dialogMaxTokens,
-                                        });
-                                    }}
-                                    currentInput={input}
-                                    currentContext={history}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        promptOptimizationPanel: showPromptOptimization ? (
-                            <React.Suspense fallback={null}>
-                                <PromptOptimizationPanel
-                                    isOpen={showPromptOptimization}
-                                    onClose={() => setShowPromptOptimization(false)}
-                                    initialPrompt={input}
-                                    initialSystemPrompt={systemPrompt}
-                                    onApplyOptimized={(optimizedPrompt, optimizedSystemPrompt) => {
-                                        setInput(optimizedPrompt);
-                                        if (optimizedSystemPrompt) {
-                                            setSystemPrompt(optimizedSystemPrompt);
-                                        }
-                                    }}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        calendarScheduleDialog: showCalendarSchedule ? (
-                            <React.Suspense fallback={null}>
-                                <CalendarScheduleDialog
-                                    isOpen={showCalendarSchedule}
-                                    onClose={() => setShowCalendarSchedule(false)}
-                                    conversationTitle={savedSessions.find(s => s.id === sessionId)?.title || 'Conversation'}
-                                    conversationSummary={history.length > 0 ? `Review conversation with ${history.length} messages` : undefined}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        recommendationsPanel: showRecommendations ? (
-                            <React.Suspense fallback={null}>
-                                <ConversationRecommendationsPanel
-                                    isOpen={showRecommendations}
-                                    onClose={() => setShowRecommendations(false)}
-                                    currentSessionId={sessionId}
-                                    currentMessage={input}
-                                    conversationHistory={history}
-                                    onSelectConversation={(nextSessionId) => {
-                                        handleLoadSession(nextSessionId);
-                                        setShowRecommendations(false);
-                                    }}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        workflowsManager: showWorkflows ? (
-                            <React.Suspense fallback={null}>
-                                <WorkflowsManager
-                                    isOpen={showWorkflows}
-                                    onClose={() => setShowWorkflows(false)}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        apiPlayground: showAPIPlayground ? (
-                            <React.Suspense fallback={null}>
-                                <APIPlayground
-                                    isOpen={showAPIPlayground}
-                                    onClose={() => setShowAPIPlayground(false)}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        developerDocs: showDeveloperDocs ? (
-                            <React.Suspense fallback={null}>
-                                <DeveloperDocumentationPanel
-                                    isOpen={showDeveloperDocs}
-                                    onClose={() => setShowDeveloperDocs(false)}
-                                    onOpenAPIPlayground={() => {
-                                        setShowDeveloperDocs(false);
-                                        setShowAPIPlayground(true);
-                                    }}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        pluginManager: showPluginManager ? (
-                            <React.Suspense fallback={null}>
-                                <PluginManager
-                                    isOpen={showPluginManager}
-                                    onClose={() => setShowPluginManager(false)}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        codeIntegrationPanel: showCodeIntegration ? (
-                            <React.Suspense fallback={null}>
-                                <CodeIntegrationPanel
-                                    isOpen={showCodeIntegration}
-                                    onClose={() => {
-                                        setShowCodeIntegration(false);
-                                        setSelectedCode(null);
-                                    }}
-                                    code={selectedCode?.code}
-                                    language={selectedCode?.language || 'javascript'}
-                                    conversationHistory={history}
-                                    onExecutePrompt={async (prompt, promptSystem) => {
-                                        const result = await executeChatCompletion({
-                                            prompt,
-                                            systemPrompt: promptSystem,
-                                        });
-                                        return { content: result.content };
-                                    }}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        workspaceViews: showWorkspaceViews ? (
-                            <React.Suspense fallback={null}>
-                                <WorkspaceViewsPanel
-                                    isOpen={showWorkspaceViews}
-                                    onClose={() => setShowWorkspaceViews(false)}
-                                    conversations={savedSessions.map(s => ({
-                                        id: s.id,
-                                        title: s.title,
-                                        messageCount: s.messageCount || 0,
-                                        lastActivity: s.lastMessageTime || s.createdAt,
-                                        pinned: s.pinned,
-                                        archived: false,
-                                        category: undefined,
-                                        tags: [],
-                                        model: undefined,
-                                    }))}
-                                    onSelectConversation={(id) => {
-                                        handleLoadSession(id);
-                                        setShowWorkspaceViews(false);
-                                    }}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        interactiveTutorial: showTutorial && currentTutorial ? (
-                            <React.Suspense fallback={null}>
-                                <InteractiveTutorial
-                                    tutorial={currentTutorial}
-                                    onComplete={handleCompleteTutorial}
-                                    onSkip={handleSkipTutorial}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        bciPanel: showBCI ? (
-                            <React.Suspense fallback={null}>
-                                <BCIPanel
-                                    isOpen={showBCI}
-                                    onClose={() => setShowBCI(false)}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        multiModalPanel: showMultiModal ? (
-                            <React.Suspense fallback={null}>
-                                <MultiModalAIPanel
-                                    isOpen={showMultiModal}
-                                    onClose={() => setShowMultiModal(false)}
-                                    onSend={async (media, text) => {
-                                        const multiModalAIService = await loadMultiModalAIService();
-                                        const response = await multiModalAIService.sendMultiModalRequest(
-                                            { text, media },
-                                            async (prompt, promptSystem) => {
-                                                const result = await executeChatCompletion({
-                                                    prompt,
-                                                    systemPrompt: promptSystem,
-                                                });
-                                                return { content: result.content };
-                                            }
-                                        );
-                                        appendMessage({
-                                            role: 'assistant',
-                                            content: response.content,
-                                            isLoading: false,
-                                        });
-                                    }}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        collaborationPanel: showCollaboration ? (
-                            <React.Suspense fallback={null}>
-                                <RealTimeCollaborationPanel
-                                    isOpen={showCollaboration}
-                                    onClose={() => setShowCollaboration(false)}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        cloudSyncPanel: showCloudSync ? (
-                            <React.Suspense fallback={null}>
-                                <CloudSyncPanel
-                                    isOpen={showCloudSync}
-                                    onClose={() => setShowCloudSync(false)}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        teamWorkspacesPanel: showTeamWorkspaces ? (
-                            <React.Suspense fallback={null}>
-                                <TeamWorkspacesPanel
-                                    isOpen={showTeamWorkspaces}
-                                    onClose={() => setShowTeamWorkspaces(false)}
-                                    availableModels={availableModels}
-                                    conversations={savedSessions}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        enterpriseCompliancePanel: showEnterpriseCompliance ? (
-                            <React.Suspense fallback={null}>
-                                <EnterpriseCompliancePanel
-                                    isOpen={showEnterpriseCompliance}
-                                    onClose={() => setShowEnterpriseCompliance(false)}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        blockchainPanel: showBlockchain ? (
-                            <React.Suspense fallback={null}>
-                                <BlockchainPanel
-                                    isOpen={showBlockchain}
-                                    onClose={() => setShowBlockchain(false)}
-                                    sessionId={sessionId}
-                                    conversationData={history}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        aiAgentsPanel: showAIAgents ? (
-                            <React.Suspense fallback={null}>
-                                <AIAgentsPanel
-                                    isOpen={showAIAgents}
-                                    onClose={() => setShowAIAgents(false)}
-                                    onExecutePrompt={async (prompt, promptSystem) => {
-                                        const result = await executeChatCompletion({
-                                            prompt,
-                                            systemPrompt: promptSystem,
-                                        });
-                                        return { content: result.content };
-                                    }}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        federatedLearningPanel: showFederatedLearning ? (
-                            <React.Suspense fallback={null}>
-                                <FederatedLearningPanel
-                                    isOpen={showFederatedLearning}
-                                    onClose={() => setShowFederatedLearning(false)}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                        performanceMonitor: devMonitorsEnabled ? (
-                            <React.Suspense fallback={null}>
-                                <PerformanceMonitorOverlay messageCount={history.length} />
-                            </React.Suspense>
-                        ) : null,
-                        recoveryDialog: showRecoveryDialog ? (
-                            <React.Suspense fallback={null}>
-                                <RecoveryDialog
-                                    isOpen={showRecoveryDialog}
-                                    onClose={() => setShowRecoveryDialog(false)}
-                                    onRestore={handleRestoreSession}
-                                    onDismiss={handleDismissRecovery}
-                                    recoveryState={recoveryState}
-                                />
-                            </React.Suspense>
-                        ) : null,
-                    }}
+                <ChatOverlaySlots
+                    showShortcutsModal={showShortcutsModal}
+                    setShowShortcutsModal={setShowShortcutsModal}
+                    showRequestLog={showRequestLog}
+                    setShowRequestLog={setShowRequestLog}
+                    apiLogs={apiLogs}
+                    clearApiLogs={clearApiLogs}
+                    showAnalytics={showAnalytics}
+                    setShowAnalytics={setShowAnalytics}
+                    usageStats={usageStats}
+                    branchingEnabled={branchingEnabled}
+                    showTreeView={showTreeView}
+                    setShowTreeView={setShowTreeView}
+                    treeManager={treeHook.treeManager}
+                    currentPath={treeHook.currentPath}
+                    showExportDialog={showExportDialog}
+                    setShowExportDialog={setShowExportDialog}
+                    history={history}
+                    savedSessions={savedSessions}
+                    sessionId={sessionId}
+                    showGlobalSearch={showGlobalSearch}
+                    setShowGlobalSearch={setShowGlobalSearch}
+                    handleLoadSession={handleLoadSession}
+                    onJumpToSearchMessage={handleJumpToSearchMessage}
+                    showTemplateLibrary={showTemplateLibrary}
+                    setShowTemplateLibrary={setShowTemplateLibrary}
+                    createNewSession={createNewSession}
+                    setSystemPrompt={setSystemPrompt}
+                    setTemperature={setTemperature}
+                    setTopP={setTopP}
+                    setMaxTokens={setMaxTokens}
+                    setExpertMode={setExpertMode}
+                    setThinkingEnabled={setThinkingEnabled}
+                    replaceHistory={replaceHistory}
+                    systemPrompt={systemPrompt}
+                    temperature={temperature}
+                    topP={topP}
+                    maxTokens={maxTokens}
+                    expertMode={expertMode}
+                    thinkingEnabled={thinkingEnabled}
+                    showABTesting={showABTesting}
+                    setShowABTesting={setShowABTesting}
+                    executeChatCompletion={executeChatCompletion}
+                    input={input}
+                    showPromptOptimization={showPromptOptimization}
+                    setShowPromptOptimization={setShowPromptOptimization}
+                    showCalendarSchedule={showCalendarSchedule}
+                    setShowCalendarSchedule={setShowCalendarSchedule}
+                    showRecommendations={showRecommendations}
+                    setShowRecommendations={setShowRecommendations}
+                    showWorkflows={showWorkflows}
+                    setShowWorkflows={setShowWorkflows}
+                    showAPIPlayground={showAPIPlayground}
+                    setShowAPIPlayground={setShowAPIPlayground}
+                    showDeveloperDocs={showDeveloperDocs}
+                    setShowDeveloperDocs={setShowDeveloperDocs}
+                    showPluginManager={showPluginManager}
+                    setShowPluginManager={setShowPluginManager}
+                    showCodeIntegration={showCodeIntegration}
+                    setShowCodeIntegration={setShowCodeIntegration}
+                    selectedCode={selectedCode}
+                    setSelectedCode={setSelectedCode}
+                    showWorkspaceViews={showWorkspaceViews}
+                    setShowWorkspaceViews={setShowWorkspaceViews}
+                    showTutorial={showTutorial}
+                    currentTutorial={currentTutorial}
+                    handleCompleteTutorial={handleCompleteTutorial}
+                    handleSkipTutorial={handleSkipTutorial}
+                    showBCI={showBCI}
+                    setShowBCI={setShowBCI}
+                    showMultiModal={showMultiModal}
+                    setShowMultiModal={setShowMultiModal}
+                    onSendMultiModal={handleSendMultiModal}
+                    showCollaboration={showCollaboration}
+                    setShowCollaboration={setShowCollaboration}
+                    showCloudSync={showCloudSync}
+                    setShowCloudSync={setShowCloudSync}
+                    showTeamWorkspaces={showTeamWorkspaces}
+                    setShowTeamWorkspaces={setShowTeamWorkspaces}
+                    availableModels={availableModels}
+                    showEnterpriseCompliance={showEnterpriseCompliance}
+                    setShowEnterpriseCompliance={setShowEnterpriseCompliance}
+                    showBlockchain={showBlockchain}
+                    setShowBlockchain={setShowBlockchain}
+                    showAIAgents={showAIAgents}
+                    setShowAIAgents={setShowAIAgents}
+                    showFederatedLearning={showFederatedLearning}
+                    setShowFederatedLearning={setShowFederatedLearning}
+                    devMonitorsEnabled={devMonitorsEnabled}
+                    showRecoveryDialog={showRecoveryDialog}
+                    setShowRecoveryDialog={setShowRecoveryDialog}
+                    handleRestoreSession={handleRestoreSession}
+                    handleDismissRecovery={handleDismissRecovery}
+                    recoveryState={recoveryState}
+                    onApplyOptimizedPrompt={handleApplyOptimizedPrompt}
                 />
             )}
         />

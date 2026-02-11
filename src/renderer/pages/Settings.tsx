@@ -1,20 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
-    Key, Server, Plus, Trash2, Edit2, Check,
-    Palette, Database, DollarSign, Activity, Settings as SettingsIcon, Sparkles, Plug, Download,
-    Shield, Lock, RefreshCw, BarChart3, Eye, GraduationCap
+    Key, Server, Palette, Database, DollarSign, Activity, Settings as SettingsIcon, Sparkles, Plug, Download,
+    Shield, BarChart3, Eye, GraduationCap
 } from 'lucide-react';
 import MCPSettings from '../components/MCPSettings';
 import ModelDownloader from '../components/ModelDownloader';
 import { SettingsApiTab } from '../components/settings/SettingsApiTab';
+import { SettingsAppearanceTab, type SettingsPreferences } from '../components/settings/SettingsAppearanceTab';
+import { SettingsEndpointsTab } from '../components/settings/SettingsEndpointsTab';
 import { SettingsIntegrationsTab } from '../components/settings/SettingsIntegrationsTab';
+import { SettingsPresetsTab } from '../components/settings/SettingsPresetsTab';
+import { SettingsPrivacyTab } from '../components/settings/SettingsPrivacyTab';
+import { SettingsWebhooksTab } from '../components/settings/SettingsWebhooksTab';
 import { ThemeService, ThemeConfig } from '../services/theme';
 import { githubService } from '../services/github';
 import { notionService } from '../services/notion';
 import { webhookService } from '../services/webhooks';
 import { privacyService } from '../services/privacy';
-import { encryptionService } from '../services/encryption';
 import { ConversationAnalyticsDashboard } from '../components/ConversationAnalyticsDashboard';
 import { AccessibilitySettingsContent } from '../components/AccessibilitySettingsContent';
 import { InteractiveTutorial } from '../components/InteractiveTutorial';
@@ -85,7 +88,7 @@ const Settings: React.FC = () => {
     const [availableThemes, setAvailableThemes] = useState<ThemeConfig[]>(themeService.getAllThemes());
     
     // Preferences
-    const [preferences, setPreferences] = useState({
+    const [preferences, setPreferences] = useState<SettingsPreferences>({
         defaultModel: localStorage.getItem('app_default_model') || '',
         codeFont: localStorage.getItem('app_code_font') || 'JetBrains Mono',
         chatFont: localStorage.getItem('app_chat_font') || 'Inter',
@@ -197,6 +200,11 @@ const Settings: React.FC = () => {
         }
         await notionService.setConfig(notionKey, notionDatabaseId);
         toast.success('Notion configuration saved securely');
+    };
+
+    const handleSelectTheme = (themeId: string) => {
+        themeService.setTheme(themeId);
+        setCurrentTheme(themeService.getCurrentTheme());
     };
 
     // Endpoint Management
@@ -348,757 +356,68 @@ const Settings: React.FC = () => {
 
                 {/* Model Endpoints Tab */}
                 {activeTab === 'endpoints' && (
-                    <div className="max-w-3xl space-y-6 animate-in fade-in slide-in-from-right-2">
-                        <div className="flex justify-between items-center">
-                            <div>
-                                <h3 className="text-xl font-bold text-white">Model Endpoints</h3>
-                                <p className="text-slate-500 text-sm">Configure custom LLM endpoints (LM Studio, Ollama, etc.)</p>
-                            </div>
-                            <button
-                                onClick={() => setShowAddEndpoint(true)}
-                                className="flex items-center gap-2 px-4 py-2 bg-primary text-slate-900 font-bold rounded-lg hover:brightness-110 transition-all"
-                            >
-                                <Plus size={16} /> Add Endpoint
-                            </button>
-                        </div>
-
-                        {/* Add Endpoint Form */}
-                        {showAddEndpoint && (
-                            <div className="bg-slate-900 border border-primary/30 rounded-xl p-6 animate-in slide-in-from-top-2">
-                                <h4 className="font-bold text-white mb-4">New Endpoint</h4>
-                                <div className="grid grid-cols-2 gap-4 mb-4">
-                                    <div>
-                                        <label className="text-xs font-bold text-slate-400 block mb-1">Name</label>
-                                        <input
-                                            value={newEndpoint.name}
-                                            onChange={e => setNewEndpoint({ ...newEndpoint, name: e.target.value })}
-                                            placeholder="My LM Studio"
-                                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs font-bold text-slate-400 block mb-1">Type</label>
-                                        <select
-                                            value={newEndpoint.type}
-                                            onChange={e => setNewEndpoint({ ...newEndpoint, type: e.target.value as ModelEndpoint['type'] })}
-                                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary"
-                                        >
-                                            <option value="lm-studio">LM Studio</option>
-                                            <option value="openai-compatible">OpenAI Compatible</option>
-                                            <option value="ollama">Ollama</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div className="mb-4">
-                                    <label className="text-xs font-bold text-slate-400 block mb-1">URL</label>
-                                    <input
-                                        value={newEndpoint.url}
-                                        onChange={e => setNewEndpoint({ ...newEndpoint, url: e.target.value })}
-                                        placeholder="http://localhost:1234/v1"
-                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-primary"
-                                    />
-                                </div>
-                                <div className="flex gap-2 justify-end">
-                                    <button onClick={() => setShowAddEndpoint(false)} className="px-4 py-2 text-slate-400 hover:text-white">Cancel</button>
-                                    <button onClick={addEndpoint} className="px-4 py-2 bg-primary text-slate-900 font-bold rounded-lg">Save</button>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Endpoints List */}
-                        <div className="space-y-3">
-                            {/* Default LM Studio Entry */}
-                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex justify-between items-center">
-                                <div className="flex items-center gap-4">
-                                    <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
-                                        <Server size={20} />
-                                    </div>
-                                    <div>
-                                        <div className="font-bold text-white">Local LM Studio</div>
-                                        <div className="text-xs text-slate-500 font-mono">http://localhost:3000</div>
-                                    </div>
-                                </div>
-                                <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded font-bold">Default</span>
-                            </div>
-
-                            {endpoints.map(ep => (
-                                <div key={ep.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex justify-between items-center group">
-                                    <div className="flex items-center gap-4">
-                                        <div className="p-2 bg-slate-800 rounded-lg text-slate-400">
-                                            <Server size={20} />
-                                        </div>
-                                        <div>
-                                            <div className="font-bold text-white">{ep.name}</div>
-                                            <div className="text-xs text-slate-500 font-mono">{ep.url}</div>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs bg-slate-800 text-slate-400 px-2 py-1 rounded">{ep.type}</span>
-                                        <button
-                                            onClick={() => deleteEndpoint(ep.id)}
-                                            className="p-2 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
-                                        >
-                                            <Trash2 size={16} />
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
+                    <SettingsEndpointsTab
+                        showAddEndpoint={showAddEndpoint}
+                        setShowAddEndpoint={setShowAddEndpoint}
+                        newEndpoint={newEndpoint}
+                        setNewEndpoint={setNewEndpoint}
+                        endpoints={endpoints}
+                        onAddEndpoint={addEndpoint}
+                        onDeleteEndpoint={deleteEndpoint}
+                    />
                 )}
 
                 {/* System Presets Tab */}
                 {activeTab === 'presets' && (
-                    <div className="max-w-3xl space-y-6 animate-in fade-in slide-in-from-right-2">
-                        <div className="flex justify-between items-center">
-                            <div>
-                                <h3 className="text-xl font-bold text-white">System Prompt Presets</h3>
-                                <p className="text-slate-500 text-sm">Create reusable system prompts for different use cases.</p>
-                            </div>
-                            <button
-                                onClick={() => setShowAddPreset(true)}
-                                className="flex items-center gap-2 px-4 py-2 bg-primary text-slate-900 font-bold rounded-lg hover:brightness-110 transition-all"
-                            >
-                                <Plus size={16} /> New Preset
-                            </button>
-                        </div>
-
-                        {/* Add Preset Form */}
-                        {showAddPreset && (
-                            <div className="bg-slate-900 border border-primary/30 rounded-xl p-6 animate-in slide-in-from-top-2">
-                                <h4 className="font-bold text-white mb-4">New System Preset</h4>
-                                <div className="mb-4">
-                                    <label className="text-xs font-bold text-slate-400 block mb-1">Name</label>
-                                    <input
-                                        value={newPreset.name}
-                                        onChange={e => setNewPreset({ ...newPreset, name: e.target.value })}
-                                        placeholder="My Expert Persona"
-                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary"
-                                    />
-                                </div>
-                                <div className="mb-4">
-                                    <label className="text-xs font-bold text-slate-400 block mb-1">System Prompt</label>
-                                    <textarea
-                                        value={newPreset.prompt}
-                                        onChange={e => setNewPreset({ ...newPreset, prompt: e.target.value })}
-                                        placeholder="You are an expert..."
-                                        rows={4}
-                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary resize-none"
-                                    />
-                                </div>
-                                <div className="flex gap-2 justify-end">
-                                    <button onClick={() => setShowAddPreset(false)} className="px-4 py-2 text-slate-400 hover:text-white">Cancel</button>
-                                    <button onClick={addPreset} className="px-4 py-2 bg-primary text-slate-900 font-bold rounded-lg">Save</button>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Presets List */}
-                        <div className="space-y-3">
-                            {presets.map(preset => (
-                                <div key={preset.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 group">
-                                    <div className="flex justify-between items-start mb-2">
-                                        <div className="flex items-center gap-3">
-                                            <Sparkles size={16} className="text-primary" />
-                                            <span className="font-bold text-white">{preset.name}</span>
-                                        </div>
-                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button
-                                                onClick={() => setEditingPreset(preset.id)}
-                                                className="p-1.5 text-slate-500 hover:text-blue-400"
-                                            >
-                                                <Edit2 size={14} />
-                                            </button>
-                                            <button
-                                                onClick={() => deletePreset(preset.id)}
-                                                className="p-1.5 text-slate-500 hover:text-red-400"
-                                            >
-                                                <Trash2 size={14} />
-                                            </button>
-                                        </div>
-                                    </div>
-                                    {editingPreset === preset.id ? (
-                                        <div className="mt-2">
-                                            <textarea
-                                                defaultValue={preset.prompt}
-                                                id={`preset-${preset.id}`}
-                                                rows={3}
-                                                className="w-full bg-slate-950 border border-primary/50 rounded-lg px-3 py-2 text-white text-sm focus:outline-none resize-none"
-                                            />
-                                            <div className="flex gap-2 justify-end mt-2">
-                                                <button onClick={() => setEditingPreset(null)} className="px-3 py-1 text-slate-400 text-sm">Cancel</button>
-                                                <button
-                                                    onClick={() => {
-                                                        const el = document.getElementById(`preset-${preset.id}`) as HTMLTextAreaElement;
-                                                        updatePreset(preset.id, el.value);
-                                                    }}
-                                                    className="px-3 py-1 bg-primary text-slate-900 text-sm font-bold rounded"
-                                                >
-                                                    Save
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <p className="text-slate-400 text-sm line-clamp-2">{preset.prompt}</p>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
+                    <SettingsPresetsTab
+                        showAddPreset={showAddPreset}
+                        setShowAddPreset={setShowAddPreset}
+                        newPreset={newPreset}
+                        setNewPreset={setNewPreset}
+                        presets={presets}
+                        editingPreset={editingPreset}
+                        setEditingPreset={setEditingPreset}
+                        onAddPreset={addPreset}
+                        onUpdatePreset={updatePreset}
+                        onDeletePreset={deletePreset}
+                    />
                 )}
 
                 {/* Appearance Tab */}
                 {activeTab === 'appearance' && (
-                    <div className="max-w-3xl space-y-6 animate-in fade-in slide-in-from-right-2">
-                        <div>
-                            <h3 className="text-xl font-bold text-white mb-2">Theme Selection</h3>
-                            <p className="text-slate-500 text-sm">Choose a theme that matches your style and workflow.</p>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {availableThemes.map(theme => (
-                                <button
-                                    key={theme.id}
-                                    onClick={() => {
-                                        themeService.setTheme(theme.id);
-                                        // Force a re-render by updating state
-                                        setCurrentTheme(themeService.getCurrentTheme());
-                                        toast.success(`Switched to ${theme.name}`);
-                                    }}
-                                    className={`relative p-4 rounded-xl border-2 transition-all text-left group ${
-                                        currentTheme.id === theme.id
-                                            ? 'border-primary bg-primary/10 shadow-lg shadow-primary/20'
-                                            : 'border-slate-800 bg-slate-900 hover:border-slate-700 hover:bg-slate-800/50'
-                                    }`}
-                                >
-                                    <div className="flex items-center justify-between mb-3">
-                                        <span className="font-bold text-white">{theme.name}</span>
-                                        {currentTheme.id === theme.id && (
-                                            <Check size={18} className="text-primary" />
-                                        )}
-                                    </div>
-                                    <div className="flex gap-2 mb-3">
-                                        <div
-                                            className="w-8 h-8 rounded"
-                                            style={{ backgroundColor: theme.primaryColor }}
-                                            title="Primary"
-                                        />
-                                        <div
-                                            className="w-8 h-8 rounded"
-                                            style={{ backgroundColor: theme.backgroundColor }}
-                                            title="Background"
-                                        />
-                                        <div
-                                            className="w-8 h-8 rounded"
-                                            style={{ backgroundColor: theme.accentColor }}
-                                            title="Accent"
-                                        />
-                                        <div
-                                            className="w-8 h-8 rounded border border-slate-700"
-                                            style={{ backgroundColor: theme.surfaceColor }}
-                                            title="Surface"
-                                        />
-                                    </div>
-                                    <div className="text-xs text-slate-500">
-                                        {theme.id === 'oled-dark' && 'Pure black for OLED displays'}
-                                        {theme.id === 'deep-purple' && 'Rich purple tones for creativity'}
-                                        {theme.id === 'forest-green' && 'Natural green palette'}
-                                        {theme.id === 'solarized-dark' && 'Classic Solarized color scheme'}
-                                        {theme.id === 'light' && 'Clean light mode for daytime'}
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-
-                        <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4">
-                            <p className="text-xs text-slate-500">
-                                💡 Themes are applied instantly. Your selection is saved automatically.
-                            </p>
-                        </div>
-
-                        {/* Preferences */}
-                        <div className="space-y-6 mt-8">
-                            <div>
-                                <h3 className="text-xl font-bold text-white mb-2">Preferences</h3>
-                                <p className="text-slate-500 text-sm">Customize your app experience.</p>
-                            </div>
-
-                            {/* Default Model */}
-                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                                <label className="block text-sm font-bold text-white mb-3">Default Model</label>
-                                <select
-                                    value={preferences.defaultModel}
-                                    onChange={(e) => {
-                                        const newPrefs = { ...preferences, defaultModel: e.target.value };
-                                        setPreferences(newPrefs);
-                                        localStorage.setItem('app_default_model', e.target.value);
-                                        toast.success('Default model saved');
-                                    }}
-                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary"
-                                >
-                                    <option value="">Use last selected</option>
-                                    {/* Models would be loaded from availableModels hook if needed */}
-                                </select>
-                                <p className="text-xs text-slate-500 mt-2">Model to use when starting a new chat</p>
-                            </div>
-
-                            {/* Font Settings */}
-                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
-                                <label className="block text-sm font-bold text-white">Font Settings</label>
-                                
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-xs text-slate-400 mb-1">Chat Font</label>
-                                        <select
-                                            value={preferences.chatFont}
-                                            onChange={(e) => {
-                                                const newPrefs = { ...preferences, chatFont: e.target.value };
-                                                setPreferences(newPrefs);
-                                                localStorage.setItem('app_chat_font', e.target.value);
-                                            }}
-                                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary"
-                                        >
-                                            <option value="Inter">Inter</option>
-                                            <option value="Roboto">Roboto</option>
-                                            <option value="Open Sans">Open Sans</option>
-                                            <option value="Lato">Lato</option>
-                                            <option value="Poppins">Poppins</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs text-slate-400 mb-1">Chat Font Size</label>
-                                        <input
-                                            type="number"
-                                            min="10"
-                                            max="20"
-                                            value={preferences.chatFontSize}
-                                            onChange={(e) => {
-                                                const newPrefs = { ...preferences, chatFontSize: parseInt(e.target.value) };
-                                                setPreferences(newPrefs);
-                                                localStorage.setItem('app_chat_font_size', e.target.value);
-                                            }}
-                                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs text-slate-400 mb-1">Code Font</label>
-                                        <select
-                                            value={preferences.codeFont}
-                                            onChange={(e) => {
-                                                const newPrefs = { ...preferences, codeFont: e.target.value };
-                                                setPreferences(newPrefs);
-                                                localStorage.setItem('app_code_font', e.target.value);
-                                            }}
-                                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary"
-                                        >
-                                            <option value="JetBrains Mono">JetBrains Mono</option>
-                                            <option value="Fira Code">Fira Code</option>
-                                            <option value="Source Code Pro">Source Code Pro</option>
-                                            <option value="Consolas">Consolas</option>
-                                            <option value="Monaco">Monaco</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs text-slate-400 mb-1">Code Font Size</label>
-                                        <input
-                                            type="number"
-                                            min="10"
-                                            max="18"
-                                            value={preferences.codeFontSize}
-                                            onChange={(e) => {
-                                                const newPrefs = { ...preferences, codeFontSize: parseInt(e.target.value) };
-                                                setPreferences(newPrefs);
-                                                localStorage.setItem('app_code_font_size', e.target.value);
-                                            }}
-                                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Layout Options */}
-                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
-                                <label className="block text-sm font-bold text-white">Layout Options</label>
-                                
-                                <div>
-                                    <label className="block text-xs text-slate-400 mb-2">Layout Mode</label>
-                                    <div className="flex gap-2">
-                                        {['normal', 'compact', 'wide'].map(mode => (
-                                            <button
-                                                key={mode}
-                                                onClick={() => {
-                                                    const newPrefs = { ...preferences, layoutMode: mode };
-                                                    setPreferences(newPrefs);
-                                                    localStorage.setItem('app_layout_mode', mode);
-                                                    toast.success(`Switched to ${mode} mode`);
-                                                }}
-                                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                                                    preferences.layoutMode === mode
-                                                        ? 'bg-primary text-white'
-                                                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                                                }`}
-                                            >
-                                                {mode.charAt(0).toUpperCase() + mode.slice(1)}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Behavior Preferences */}
-                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
-                                <label className="block text-sm font-bold text-white">Behavior</label>
-                                
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <div className="text-sm text-white font-medium">Auto-scroll to new messages</div>
-                                        <div className="text-xs text-slate-500">Automatically scroll when new messages arrive</div>
-                                    </div>
-                                    <button
-                                        onClick={() => {
-                                            const newPrefs = { ...preferences, autoScroll: !preferences.autoScroll };
-                                            setPreferences(newPrefs);
-                                            localStorage.setItem('app_auto_scroll', String(newPrefs.autoScroll));
-                                        }}
-                                        className={`relative w-12 h-6 rounded-full transition-colors ${
-                                            preferences.autoScroll ? 'bg-primary' : 'bg-slate-700'
-                                        }`}
-                                    >
-                                        <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                                            preferences.autoScroll ? 'translate-x-6' : 'translate-x-0'
-                                        }`} />
-                                    </button>
-                                </div>
-
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <div className="text-sm text-white font-medium">Desktop Notifications</div>
-                                        <div className="text-xs text-slate-500">Show notifications for long responses</div>
-                                    </div>
-                                    <button
-                                        onClick={() => {
-                                            const newPrefs = { ...preferences, notifications: !preferences.notifications };
-                                            setPreferences(newPrefs);
-                                            localStorage.setItem('app_notifications', String(newPrefs.notifications));
-                                        }}
-                                        className={`relative w-12 h-6 rounded-full transition-colors ${
-                                            preferences.notifications ? 'bg-primary' : 'bg-slate-700'
-                                        }`}
-                                    >
-                                        <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                                            preferences.notifications ? 'translate-x-6' : 'translate-x-0'
-                                        }`} />
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <SettingsAppearanceTab
+                        availableThemes={availableThemes}
+                        currentTheme={currentTheme}
+                        onSelectTheme={handleSelectTheme}
+                        preferences={preferences}
+                        setPreferences={setPreferences}
+                    />
                 )}
 
                 {/* Webhooks Tab */}
                 {activeTab === 'webhooks' && (
-                    <div className="max-w-3xl space-y-6 animate-in fade-in slide-in-from-right-2">
-                        <div className="flex justify-between items-center">
-                            <div>
-                                <h3 className="text-xl font-bold text-white">Webhooks</h3>
-                                <p className="text-slate-500 text-sm">Configure webhooks to receive notifications when conversations complete</p>
-                            </div>
-                            <button
-                                onClick={() => setShowAddWebhook(true)}
-                                className="flex items-center gap-2 px-4 py-2 bg-primary text-slate-900 font-bold rounded-lg hover:brightness-110 transition-all"
-                            >
-                                <Plus size={16} /> Add Webhook
-                            </button>
-                        </div>
-
-                        {/* Add Webhook Form */}
-                        {showAddWebhook && (
-                            <div className="bg-slate-900 border border-primary/30 rounded-xl p-6 animate-in slide-in-from-top-2">
-                                <h4 className="font-bold text-white mb-4">New Webhook</h4>
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="text-xs font-bold text-slate-400 block mb-1">Name</label>
-                                        <input
-                                            value={newWebhook.name}
-                                            onChange={e => setNewWebhook({ ...newWebhook, name: e.target.value })}
-                                            placeholder="My Webhook"
-                                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs font-bold text-slate-400 block mb-1">URL</label>
-                                        <input
-                                            value={newWebhook.url}
-                                            onChange={e => setNewWebhook({ ...newWebhook, url: e.target.value })}
-                                            placeholder="https://example.com/webhook"
-                                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-primary"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs font-bold text-slate-400 block mb-2">Events</label>
-                                        <div className="space-y-2">
-                                            <label className="flex items-center gap-2 text-sm text-slate-300">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={newWebhook.events.includes('conversation_complete')}
-                                                    onChange={e => {
-                                                        if (e.target.checked) {
-                                                            setNewWebhook({ ...newWebhook, events: [...newWebhook.events, 'conversation_complete'] });
-                                                        } else {
-                                                            setNewWebhook({ ...newWebhook, events: newWebhook.events.filter(e => e !== 'conversation_complete') });
-                                                        }
-                                                    }}
-                                                    className="rounded"
-                                                />
-                                                Conversation Complete
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-2 justify-end">
-                                        <button onClick={() => setShowAddWebhook(false)} className="px-4 py-2 text-slate-400 hover:text-white">Cancel</button>
-                                        <button
-                                            onClick={() => {
-                                                if (!newWebhook.name || !newWebhook.url) {
-                                                    toast.error('Name and URL are required');
-                                                    return;
-                                                }
-                                                webhookService.addWebhook(newWebhook);
-                                                setWebhooks(webhookService.getWebhooks());
-                                                setNewWebhook({ name: '', url: '', enabled: true, events: ['conversation_complete'] });
-                                                setShowAddWebhook(false);
-                                                toast.success('Webhook added!');
-                                            }}
-                                            className="px-4 py-2 bg-primary text-slate-900 font-bold rounded-lg"
-                                        >
-                                            Save
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Webhooks List */}
-                        <div className="space-y-3">
-                            {webhooks.length === 0 ? (
-                                <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center">
-                                    <Activity size={32} className="mx-auto text-slate-600 mb-3" />
-                                    <p className="text-slate-500">No webhooks configured</p>
-                                    <p className="text-xs text-slate-600 mt-1">Add a webhook to receive notifications</p>
-                                </div>
-                            ) : (
-                                webhooks.map(webhook => (
-                                    <div key={webhook.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex justify-between items-center group">
-                                        <div className="flex items-center gap-4">
-                                            <div className={`p-2 rounded-lg ${webhook.enabled ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
-                                                <Activity size={20} />
-                                            </div>
-                                            <div>
-                                                <div className="font-bold text-white">{webhook.name}</div>
-                                                <div className="text-xs text-slate-500 font-mono">{webhook.url}</div>
-                                                <div className="text-xs text-slate-600 mt-1">
-                                                    Events: {webhook.events.join(', ')}
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button
-                                                onClick={() => {
-                                                    webhookService.updateWebhook(webhook.id, { enabled: !webhook.enabled });
-                                                    setWebhooks(webhookService.getWebhooks());
-                                                    toast.success(webhook.enabled ? 'Webhook disabled' : 'Webhook enabled');
-                                                }}
-                                                className={`px-3 py-1 text-xs rounded ${webhook.enabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}
-                                            >
-                                                {webhook.enabled ? 'Enabled' : 'Disabled'}
-                                            </button>
-                                            <button
-                                                onClick={() => {
-                                                    webhookService.deleteWebhook(webhook.id);
-                                                    setWebhooks(webhookService.getWebhooks());
-                                                    toast.success('Webhook deleted');
-                                                }}
-                                                className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded transition-colors"
-                                                title="Delete"
-                                            >
-                                                <Trash2 size={14} />
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    </div>
+                    <SettingsWebhooksTab
+                        webhooks={webhooks}
+                        setWebhooks={setWebhooks}
+                        newWebhook={newWebhook}
+                        setNewWebhook={setNewWebhook}
+                        showAddWebhook={showAddWebhook}
+                        setShowAddWebhook={setShowAddWebhook}
+                    />
                 )}
 
                 {/* Privacy & Security Tab */}
                 {activeTab === 'privacy' && (
-                    <div className="max-w-3xl space-y-6 animate-in fade-in slide-in-from-right-2">
-                        <div>
-                            <h3 className="text-xl font-bold text-white mb-2">Privacy & Security</h3>
-                            <p className="text-slate-500 text-sm">Control data collection, encryption, and app updates</p>
-                        </div>
-
-                        {/* Privacy Mode */}
-                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                            <div className="flex items-start justify-between mb-4">
-                                <div>
-                                    <h4 className="text-lg font-bold text-white flex items-center gap-2 mb-1">
-                                        <Shield size={20} className="text-primary" /> Privacy Mode
-                                    </h4>
-                                    <p className="text-sm text-slate-400">Disable all analytics and telemetry when enabled</p>
-                                </div>
-                                <label className="relative inline-flex items-center cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={privacyMode}
-                                        onChange={(e) => {
-                                            const enabled = e.target.checked;
-                                            setPrivacyMode(enabled);
-                                            if (enabled) {
-                                                privacyService.enablePrivacyMode();
-                                                setAnalyticsEnabled(false);
-                                                toast.success('Privacy mode enabled - all analytics disabled');
-                                            } else {
-                                                privacyService.disablePrivacyMode();
-                                                setAnalyticsEnabled(true);
-                                                toast.success('Privacy mode disabled');
-                                            }
-                                        }}
-                                        className="sr-only peer"
-                                    />
-                                    <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                                </label>
-                            </div>
-                        </div>
-
-                        {/* Analytics Toggle */}
-                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                            <div className="flex items-start justify-between mb-4">
-                                <div>
-                                    <h4 className="text-lg font-bold text-white flex items-center gap-2 mb-1">
-                                        <Activity size={20} className="text-primary" /> Analytics
-                                    </h4>
-                                    <p className="text-sm text-slate-400">Track usage statistics and token counts</p>
-                                </div>
-                                <label className="relative inline-flex items-center cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={analyticsEnabled && !privacyMode}
-                                        disabled={privacyMode}
-                                        onChange={(e) => {
-                                            const enabled = e.target.checked;
-                                            setAnalyticsEnabled(enabled);
-                                            if (enabled) {
-                                                privacyService.enableAnalytics();
-                                            } else {
-                                                privacyService.disableAnalytics();
-                                            }
-                                            toast.success(`Analytics ${enabled ? 'enabled' : 'disabled'}`);
-                                        }}
-                                        className="sr-only peer"
-                                    />
-                                    <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary peer-disabled:opacity-50"></div>
-                                </label>
-                            </div>
-                            {privacyMode && (
-                                <p className="text-xs text-slate-500 mt-2">Analytics are disabled when Privacy Mode is enabled</p>
-                            )}
-                        </div>
-
-                        {/* Encryption */}
-                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                            <h4 className="text-lg font-bold text-white flex items-center gap-2 mb-4">
-                                <Lock size={20} className="text-primary" /> Data Encryption
-                            </h4>
-                            <p className="text-sm text-slate-400 mb-4">
-                                Sensitive data (API keys, tokens) can be encrypted at rest using AES-GCM encryption.
-                            </p>
-                            <div className="space-y-3">
-                                <div className="flex items-center justify-between p-3 bg-slate-950 rounded-lg">
-                                    <span className="text-sm text-slate-300">Encryption Available</span>
-                                    <span className={`text-xs font-bold px-2 py-1 rounded ${encryptionService.isAvailable() ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                                        {encryptionService.isAvailable() ? 'Yes' : 'No'}
-                                    </span>
-                                </div>
-                                {!encryptionService.isAvailable() && (
-                                    <p className="text-xs text-slate-500">Web Crypto API not available in this environment</p>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Secure Wipe */}
-                        <div className="bg-slate-900 border border-red-500/30 rounded-xl p-6">
-                            <h4 className="text-lg font-bold text-white flex items-center gap-2 mb-4">
-                                <Trash2 size={20} className="text-red-400" /> Secure Wipe
-                            </h4>
-                            <p className="text-sm text-slate-400 mb-4">
-                                Permanently delete all conversation data, API keys, and settings. This action cannot be undone.
-                            </p>
-                            <button
-                                onClick={() => {
-                                    if (confirm('Are you sure you want to permanently delete ALL data? This cannot be undone.')) {
-                                        // Clear all localStorage
-                                        localStorage.clear();
-                                        // Clear encryption key
-                                        encryptionService.clearKey();
-                                        toast.success('All data wiped. Please restart the app.');
-                                        setTimeout(() => {
-                                            window.location.reload();
-                                        }, 2000);
-                                    }
-                                }}
-                                className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 font-bold rounded-lg transition-colors border border-red-500/30"
-                            >
-                                Wipe All Data
-                            </button>
-                        </div>
-
-                        {/* App Updates */}
-                        {appVersion && (
-                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                                <h4 className="text-lg font-bold text-white flex items-center gap-2 mb-4">
-                                    <RefreshCw size={20} className="text-primary" /> App Updates
-                                </h4>
-                                <div className="space-y-3">
-                                    <div className="flex items-center justify-between p-3 bg-slate-950 rounded-lg">
-                                        <span className="text-sm text-slate-300">Current Version</span>
-                                        <span className="text-sm font-mono text-slate-400">{appVersion}</span>
-                                    </div>
-                                    {updateAvailable && updateInfo && (
-                                        <div className="p-3 bg-primary/10 border border-primary/30 rounded-lg">
-                                            <p className="text-sm text-primary font-bold mb-2">Update Available: {updateInfo.version}</p>
-                                            <button
-                                                onClick={async () => {
-                                                    if (window.electronAPI?.quitAndInstall) {
-                                                        await window.electronAPI.quitAndInstall();
-                                                    }
-                                                }}
-                                                className="px-4 py-2 bg-primary text-slate-900 font-bold rounded-lg hover:brightness-110 transition-all"
-                                            >
-                                                Restart & Install
-                                            </button>
-                                        </div>
-                                    )}
-                                    <button
-                                        onClick={async () => {
-                                            if (window.electronAPI?.checkForUpdates) {
-                                                const result = await window.electronAPI.checkForUpdates();
-                                                if (result.available) {
-                                                    toast.success(`Update available: ${result.version}`);
-                                                    setUpdateAvailable(true);
-                                                } else {
-                                                    toast.info(result.message || 'No updates available');
-                                                }
-                                            }
-                                        }}
-                                        className="w-full px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg transition-colors"
-                                    >
-                                        Check for Updates
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                    <SettingsPrivacyTab
+                        privacyMode={privacyMode}
+                        setPrivacyMode={setPrivacyMode}
+                        analyticsEnabled={analyticsEnabled}
+                        setAnalyticsEnabled={setAnalyticsEnabled}
+                        appVersion={appVersion}
+                        updateAvailable={updateAvailable}
+                        setUpdateAvailable={setUpdateAvailable}
+                        updateInfo={updateInfo}
+                    />
                 )}
 
                 {/* Conversation Analytics Tab */}
