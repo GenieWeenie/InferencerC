@@ -12,6 +12,18 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
     return fallback;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 export interface FolderChangedEventPayload {
     path: string;
     type: string;
@@ -176,6 +188,47 @@ class MCPClient {
         this.loadServers();
     }
 
+    private parseStoredServers(raw: string): MCPServer[] {
+        const parsed = parseJson(raw);
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+
+        const servers: MCPServer[] = [];
+        parsed.forEach((entry) => {
+            if (!isRecord(entry)) {
+                return;
+            }
+            if (
+                typeof entry.id !== 'string'
+                || typeof entry.name !== 'string'
+                || typeof entry.command !== 'string'
+                || !Array.isArray(entry.args)
+            ) {
+                return;
+            }
+            const args = entry.args.filter((arg): arg is string => typeof arg === 'string');
+            const env = isRecord(entry.env)
+                ? Object.fromEntries(
+                    Object.entries(entry.env).filter(([, value]) => typeof value === 'string')
+                )
+                : undefined;
+
+            servers.push({
+                id: entry.id,
+                name: entry.name,
+                description: typeof entry.description === 'string' ? entry.description : undefined,
+                command: entry.command,
+                args,
+                env,
+                status: 'disconnected',
+                errorMessage: typeof entry.errorMessage === 'string' ? entry.errorMessage : undefined,
+            });
+        });
+
+        return servers;
+    }
+
     /**
      * Load saved servers from localStorage
      */
@@ -183,7 +236,7 @@ class MCPClient {
         try {
             const saved = localStorage.getItem(MCP_SERVERS_KEY);
             if (saved) {
-                const servers: MCPServer[] = JSON.parse(saved);
+                const servers = this.parseStoredServers(saved);
                 servers.forEach(s => {
                     // Reset status on load
                     s.status = 'disconnected';

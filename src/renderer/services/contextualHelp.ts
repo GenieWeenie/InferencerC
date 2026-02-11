@@ -22,6 +22,32 @@ export interface HelpContext {
     helpId?: string;
 }
 
+const TOOLTIP_POSITIONS = new Set<NonNullable<HelpTooltip['position']>>([
+    'top',
+    'bottom',
+    'left',
+    'right',
+]);
+
+const TOOLTIP_TRIGGERS = new Set<NonNullable<HelpTooltip['trigger']>>([
+    'hover',
+    'click',
+    'focus',
+    'always',
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 export class ContextualHelpService {
     private static instance: ContextualHelpService;
     private readonly STORAGE_KEY = 'contextual_help';
@@ -39,6 +65,44 @@ export class ContextualHelpService {
         return ContextualHelpService.instance;
     }
 
+    private sanitizeTooltip(value: unknown): HelpTooltip | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+        if (
+            typeof value.id !== 'string'
+            || typeof value.target !== 'string'
+            || typeof value.title !== 'string'
+            || typeof value.content !== 'string'
+        ) {
+            return null;
+        }
+        return {
+            id: value.id,
+            target: value.target,
+            title: value.title,
+            content: value.content,
+            position: TOOLTIP_POSITIONS.has(value.position as NonNullable<HelpTooltip['position']>)
+                ? value.position as NonNullable<HelpTooltip['position']>
+                : undefined,
+            trigger: TOOLTIP_TRIGGERS.has(value.trigger as NonNullable<HelpTooltip['trigger']>)
+                ? value.trigger as NonNullable<HelpTooltip['trigger']>
+                : undefined,
+            delay: typeof value.delay === 'number' && Number.isFinite(value.delay) ? value.delay : undefined,
+            persistent: typeof value.persistent === 'boolean' ? value.persistent : undefined,
+        };
+    }
+
+    private parseStoredTooltips(raw: string): HelpTooltip[] {
+        const parsed = parseJson(raw);
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed
+            .map((entry) => this.sanitizeTooltip(entry))
+            .filter((entry): entry is HelpTooltip => entry !== null);
+    }
+
     /**
      * Load tooltips
      */
@@ -46,8 +110,11 @@ export class ContextualHelpService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                const tooltips: HelpTooltip[] = JSON.parse(stored);
+                const tooltips = this.parseStoredTooltips(stored);
                 tooltips.forEach(t => this.tooltips.set(t.id, t));
+                if (tooltips.length === 0) {
+                    this.loadDefaultTooltips();
+                }
             } else {
                 // Load default tooltips
                 this.loadDefaultTooltips();

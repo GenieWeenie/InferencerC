@@ -82,6 +82,20 @@ const estimateUsageFallback = ({
     };
 };
 
+export const parseStoredExcludedIndices = (raw: string): Set<number> => {
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+            return new Set();
+        }
+        const indices = parsed
+            .filter((entry): entry is number => Number.isInteger(entry) && entry >= 0);
+        return new Set(indices);
+    } catch {
+        return new Set();
+    }
+};
+
 export const useChatContextOptimizer = ({
     sessionId,
     history,
@@ -112,8 +126,7 @@ export const useChatContextOptimizer = ({
                 setExcludedContextIndices(new Set());
                 return;
             }
-            const parsed = JSON.parse(raw) as number[];
-            setExcludedContextIndices(new Set(parsed.filter((n) => Number.isInteger(n) && n >= 0)));
+            setExcludedContextIndices(parseStoredExcludedIndices(raw));
         } catch {
             setExcludedContextIndices(new Set());
         }

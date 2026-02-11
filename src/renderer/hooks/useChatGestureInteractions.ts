@@ -30,6 +30,20 @@ interface UseChatGestureInteractionsParams {
     onDeleteMessage: (index: number) => void;
 }
 
+export const parseBookmarkedMessageIndices = (raw: string): Set<number> => {
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+            return new Set();
+        }
+        return new Set(
+            parsed.filter((entry): entry is number => Number.isInteger(entry) && entry >= 0)
+        );
+    } catch {
+        return new Set();
+    }
+};
+
 export const useChatGestureInteractions = ({
     history,
     sessionId,
@@ -243,7 +257,7 @@ export const useChatGestureInteractions = ({
         try {
             const saved = localStorage.getItem(`bookmarks_${sessionId}`);
             if (saved) {
-                setBookmarkedMessages(new Set(JSON.parse(saved)));
+                setBookmarkedMessages(parseBookmarkedMessageIndices(saved));
             } else {
                 setBookmarkedMessages(new Set());
             }

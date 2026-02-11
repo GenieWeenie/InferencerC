@@ -25,6 +25,46 @@ type SerializedWorkspace = {
     modelPolicy?: Partial<WorkspaceModelPolicy>;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) return [];
+    return value.filter((entry): entry is string => typeof entry === 'string');
+};
+
+const parseStoredWorkspaces = (raw: string): SerializedWorkspace[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+    const workspaces: SerializedWorkspace[] = [];
+    for (let index = 0; index < parsed.length; index++) {
+        const entry = parsed[index];
+        if (!isRecord(entry) || typeof entry.id !== 'string') {
+            continue;
+        }
+        const modelPolicy = isRecord(entry.modelPolicy) ? entry.modelPolicy : undefined;
+        workspaces.push({
+            id: entry.id,
+            modelPolicy: modelPolicy ? {
+                allowedProviders: sanitizeStringArray(modelPolicy.allowedProviders),
+                allowedModelIds: sanitizeStringArray(modelPolicy.allowedModelIds),
+            } : undefined,
+        });
+    }
+    return workspaces;
+};
+
 export const loadAnalyticsService = async (): Promise<AnalyticsService> => {
     if (!analyticsServicePromise) {
         analyticsServicePromise = import('../services/analytics').then((mod) => mod.analyticsService);
@@ -71,7 +111,11 @@ export const hasLikelyActiveTeamWorkspace = (): boolean => {
             return false;
         }
         const workspacesRaw = localStorage.getItem(TEAM_WORKSPACES_STORAGE_KEY);
-        return Boolean(workspacesRaw && workspacesRaw !== '[]');
+        if (!workspacesRaw) {
+            return false;
+        }
+        const workspaces = parseStoredWorkspaces(workspacesRaw);
+        return workspaces.some((workspace) => workspace.id === activeWorkspace);
     } catch {
         return false;
     }
@@ -103,8 +147,8 @@ const getActiveWorkspaceModelPolicy = (): WorkspaceModelPolicy | null => {
         const workspacesRaw = localStorage.getItem(TEAM_WORKSPACES_STORAGE_KEY);
         if (!workspacesRaw) return null;
 
-        const workspaces = JSON.parse(workspacesRaw) as SerializedWorkspace[];
-        if (!Array.isArray(workspaces)) return null;
+        const workspaces = parseStoredWorkspaces(workspacesRaw);
+        if (workspaces.length === 0) return null;
 
         const workspace = workspaces.find((entry) => entry?.id === activeWorkspaceId);
         if (!workspace) return null;

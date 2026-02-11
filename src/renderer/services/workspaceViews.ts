@@ -33,6 +33,23 @@ export interface ConversationGroup {
     }>;
 }
 
+const VIEW_MODES = new Set<WorkspaceViewMode>(['list', 'grid', 'kanban', 'compact']);
+const GROUP_BY_VALUES = new Set<NonNullable<WorkspaceViewConfig['groupBy']>>(['date', 'category', 'model', 'tag', 'none']);
+const SORT_BY_VALUES = new Set<NonNullable<WorkspaceViewConfig['sortBy']>>(['date', 'title', 'messageCount', 'lastActivity']);
+const SORT_ORDER_VALUES = new Set<NonNullable<WorkspaceViewConfig['sortOrder']>>(['asc', 'desc']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 export class WorkspaceViewsService {
     private static instance: WorkspaceViewsService;
     private readonly STORAGE_KEY = 'workspace_view_config';
@@ -46,19 +63,7 @@ export class WorkspaceViewsService {
         return WorkspaceViewsService.instance;
     }
 
-    /**
-     * Get workspace view configuration
-     */
-    getConfig(): WorkspaceViewConfig {
-        try {
-            const stored = localStorage.getItem(this.STORAGE_KEY);
-            if (stored) {
-                return JSON.parse(stored);
-            }
-        } catch (error) {
-            console.error('Failed to load workspace view config:', error);
-        }
-
+    private getDefaultConfig(): WorkspaceViewConfig {
         return {
             mode: 'list',
             groupBy: 'date',
@@ -70,12 +75,56 @@ export class WorkspaceViewsService {
         };
     }
 
+    private sanitizeConfig(value: unknown): WorkspaceViewConfig | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+        const defaults = this.getDefaultConfig();
+        return {
+            mode: VIEW_MODES.has(value.mode as WorkspaceViewMode) ? value.mode as WorkspaceViewMode : defaults.mode,
+            groupBy: GROUP_BY_VALUES.has(value.groupBy as NonNullable<WorkspaceViewConfig['groupBy']>)
+                ? value.groupBy as NonNullable<WorkspaceViewConfig['groupBy']>
+                : defaults.groupBy,
+            sortBy: SORT_BY_VALUES.has(value.sortBy as NonNullable<WorkspaceViewConfig['sortBy']>)
+                ? value.sortBy as NonNullable<WorkspaceViewConfig['sortBy']>
+                : defaults.sortBy,
+            sortOrder: SORT_ORDER_VALUES.has(value.sortOrder as NonNullable<WorkspaceViewConfig['sortOrder']>)
+                ? value.sortOrder as NonNullable<WorkspaceViewConfig['sortOrder']>
+                : defaults.sortOrder,
+            showPinned: typeof value.showPinned === 'boolean' ? value.showPinned : defaults.showPinned,
+            showArchived: typeof value.showArchived === 'boolean' ? value.showArchived : defaults.showArchived,
+            itemsPerPage: typeof value.itemsPerPage === 'number' && Number.isFinite(value.itemsPerPage)
+                ? Math.max(1, Math.round(value.itemsPerPage))
+                : defaults.itemsPerPage,
+        };
+    }
+
+    /**
+     * Get workspace view configuration
+     */
+    getConfig(): WorkspaceViewConfig {
+        try {
+            const stored = localStorage.getItem(this.STORAGE_KEY);
+            if (stored) {
+                const parsed = parseJson(stored);
+                const config = this.sanitizeConfig(parsed);
+                if (config) {
+                    return config;
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load workspace view config:', error);
+        }
+
+        return this.getDefaultConfig();
+    }
+
     /**
      * Update workspace view configuration
      */
     updateConfig(config: Partial<WorkspaceViewConfig>): void {
         const current = this.getConfig();
-        const updated = { ...current, ...config };
+        const updated = this.sanitizeConfig({ ...current, ...config }) || current;
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(updated));
     }
 

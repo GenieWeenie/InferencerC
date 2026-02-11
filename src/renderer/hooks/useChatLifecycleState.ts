@@ -34,27 +34,46 @@ interface UseChatLifecycleStateParams {
     searchResultsLength: number;
 }
 
-const readCloudSyncAuthSnapshot = (): boolean => {
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+export const readCloudSyncAuthSnapshot = (): boolean => {
     try {
         const raw = localStorage.getItem(CLOUD_SYNC_CONFIG_KEY);
         if (!raw) return false;
-        const parsed = JSON.parse(raw) as Partial<{
-            token?: string;
-            accountId?: string;
-            encryptionSalt?: string;
-        }>;
-        return Boolean(parsed.token && parsed.accountId && parsed.encryptionSalt);
+        const parsed = parseJson(raw);
+        if (!isRecord(parsed)) return false;
+        return Boolean(
+            typeof parsed.token === 'string'
+            && parsed.token.trim().length > 0
+            && typeof parsed.accountId === 'string'
+            && parsed.accountId.trim().length > 0
+            && typeof parsed.encryptionSalt === 'string'
+            && parsed.encryptionSalt.trim().length > 0
+        );
     } catch {
         return false;
     }
 };
 
-const readHasConfiguredMcpServers = (): boolean => {
+export const readHasConfiguredMcpServers = (): boolean => {
     try {
         const raw = localStorage.getItem(MCP_SERVERS_CONFIG_KEY);
         if (!raw) return false;
-        const parsed = JSON.parse(raw) as unknown;
-        return Array.isArray(parsed) && parsed.length > 0;
+        const parsed = parseJson(raw);
+        if (!Array.isArray(parsed)) return false;
+        return parsed.some((entry) => {
+            return isRecord(entry) && typeof entry.id === 'string' && entry.id.trim().length > 0;
+        });
     } catch {
         return false;
     }

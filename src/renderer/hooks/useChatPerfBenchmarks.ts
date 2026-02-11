@@ -34,21 +34,37 @@ interface UseChatPerfBenchmarksParams {
     currentModel: string;
 }
 
-const parseStoredBenchmarks = (storageKey: string): ChatPerfSample[] => {
+export const parseStoredBenchmarks = (storageKey: string): ChatPerfSample[] => {
     try {
         const raw = localStorage.getItem(storageKey);
         if (!raw) return [];
-        const parsed = JSON.parse(raw) as ChatPerfSample[];
-        if (!Array.isArray(parsed)) return [];
+        const parsedUnknown: unknown = JSON.parse(raw);
+        if (!Array.isArray(parsedUnknown)) return [];
+        const parsed: ChatPerfSample[] = [];
+        parsedUnknown.forEach((entry) => {
+            if (!entry || typeof entry !== 'object') return;
+            const candidate = entry as Partial<ChatPerfSample>;
+            if (
+                !Number.isFinite(candidate.timestamp)
+                || typeof candidate.modelId !== 'string'
+                || (candidate.mode !== 'single' && candidate.mode !== 'battle')
+                || !Number.isFinite(candidate.inputChars)
+                || !Number.isFinite(candidate.inputToRenderMs)
+            ) {
+                return;
+            }
+            parsed.push({
+                timestamp: candidate.timestamp,
+                modelId: candidate.modelId,
+                mode: candidate.mode,
+                inputChars: candidate.inputChars,
+                inputToRenderMs: candidate.inputToRenderMs,
+                inputToFirstTokenMs: typeof candidate.inputToFirstTokenMs === 'number'
+                    ? candidate.inputToFirstTokenMs
+                    : null,
+            });
+        });
         return parsed
-            .filter((item) =>
-                item &&
-                Number.isFinite(item.timestamp) &&
-                typeof item.modelId === 'string' &&
-                (item.mode === 'single' || item.mode === 'battle') &&
-                Number.isFinite(item.inputChars) &&
-                Number.isFinite(item.inputToRenderMs)
-            )
             .slice(0, 5);
     } catch {
         return [];

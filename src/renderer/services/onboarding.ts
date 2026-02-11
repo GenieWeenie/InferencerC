@@ -37,6 +37,33 @@ export interface FeatureDiscovery {
     dismissedAt?: number;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const STEP_POSITIONS = new Set<NonNullable<TutorialStep['position']>>([
+    'top',
+    'bottom',
+    'left',
+    'right',
+    'center',
+]);
+
+const STEP_ACTIONS = new Set<NonNullable<TutorialStep['action']>>([
+    'click',
+    'type',
+    'scroll',
+    'wait',
+]);
+
 export class OnboardingService {
     private static instance: OnboardingService;
     private readonly STORAGE_KEY = 'onboarding_tutorials';
@@ -44,6 +71,114 @@ export class OnboardingService {
     private readonly COMPLETED_KEY = 'onboarding_completed';
 
     private constructor() {}
+
+    private sanitizeTutorialStep(value: unknown): TutorialStep | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+        if (
+            typeof value.id !== 'string'
+            || typeof value.title !== 'string'
+            || typeof value.description !== 'string'
+        ) {
+            return null;
+        }
+        return {
+            id: value.id,
+            title: value.title,
+            description: value.description,
+            target: typeof value.target === 'string' ? value.target : undefined,
+            position: STEP_POSITIONS.has(value.position as NonNullable<TutorialStep['position']>)
+                ? value.position as NonNullable<TutorialStep['position']>
+                : undefined,
+            action: STEP_ACTIONS.has(value.action as NonNullable<TutorialStep['action']>)
+                ? value.action as NonNullable<TutorialStep['action']>
+                : undefined,
+            actionTarget: typeof value.actionTarget === 'string' ? value.actionTarget : undefined,
+            skipable: typeof value.skipable === 'boolean' ? value.skipable : undefined,
+        };
+    }
+
+    private sanitizeTutorial(value: unknown): Tutorial | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+        if (
+            typeof value.id !== 'string'
+            || typeof value.name !== 'string'
+            || typeof value.description !== 'string'
+            || typeof value.completed !== 'boolean'
+            || !Array.isArray(value.steps)
+        ) {
+            return null;
+        }
+        const steps = value.steps
+            .map((entry) => this.sanitizeTutorialStep(entry))
+            .filter((entry): entry is TutorialStep => entry !== null);
+        if (steps.length === 0) {
+            return null;
+        }
+        return {
+            id: value.id,
+            name: value.name,
+            description: value.description,
+            completed: value.completed,
+            completedAt: typeof value.completedAt === 'number' && Number.isFinite(value.completedAt)
+                ? value.completedAt
+                : undefined,
+            steps,
+        };
+    }
+
+    private parseStoredTutorials(raw: string): Tutorial[] {
+        const parsed = parseJson(raw);
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed
+            .map((entry) => this.sanitizeTutorial(entry))
+            .filter((entry): entry is Tutorial => entry !== null);
+    }
+
+    private sanitizeFeatureDiscovery(value: unknown): FeatureDiscovery | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+        if (
+            typeof value.id !== 'string'
+            || typeof value.featureName !== 'string'
+            || typeof value.description !== 'string'
+            || typeof value.shown !== 'boolean'
+            || typeof value.dismissed !== 'boolean'
+        ) {
+            return null;
+        }
+        return {
+            id: value.id,
+            featureName: value.featureName,
+            description: value.description,
+            target: typeof value.target === 'string' ? value.target : undefined,
+            version: typeof value.version === 'string' ? value.version : undefined,
+            shown: value.shown,
+            shownAt: typeof value.shownAt === 'number' && Number.isFinite(value.shownAt)
+                ? value.shownAt
+                : undefined,
+            dismissed: value.dismissed,
+            dismissedAt: typeof value.dismissedAt === 'number' && Number.isFinite(value.dismissedAt)
+                ? value.dismissedAt
+                : undefined,
+        };
+    }
+
+    private parseStoredDiscoveries(raw: string): FeatureDiscovery[] {
+        const parsed = parseJson(raw);
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed
+            .map((entry) => this.sanitizeFeatureDiscovery(entry))
+            .filter((entry): entry is FeatureDiscovery => entry !== null);
+    }
 
     static getInstance(): OnboardingService {
         if (!OnboardingService.instance) {
@@ -86,7 +221,10 @@ export class OnboardingService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                return JSON.parse(stored);
+                const tutorials = this.parseStoredTutorials(stored);
+                if (tutorials.length > 0) {
+                    return tutorials;
+                }
             }
         } catch (error) {
             console.error('Failed to load tutorials:', error);
@@ -206,7 +344,7 @@ export class OnboardingService {
         try {
             const stored = localStorage.getItem(this.DISCOVERY_KEY);
             if (stored) {
-                return JSON.parse(stored);
+                return this.parseStoredDiscoveries(stored);
             }
         } catch (error) {
             console.error('Failed to load feature discoveries:', error);

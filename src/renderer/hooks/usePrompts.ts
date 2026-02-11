@@ -43,12 +43,59 @@ const createPromptId = (): string => {
     return `prompt_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizePromptSnippet = (value: unknown): PromptSnippet | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (
+        typeof value.id !== 'string'
+        || typeof value.alias !== 'string'
+        || typeof value.title !== 'string'
+        || typeof value.content !== 'string'
+    ) {
+        return null;
+    }
+    return {
+        id: value.id,
+        alias: value.alias,
+        title: value.title,
+        content: value.content,
+    };
+};
+
+export const parseStoredPromptSnippets = (raw: string): PromptSnippet[] | null => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return null;
+    }
+    const prompts: PromptSnippet[] = [];
+    parsed.forEach((entry) => {
+        const snippet = sanitizePromptSnippet(entry);
+        if (snippet) {
+            prompts.push(snippet);
+        }
+    });
+    return prompts;
+};
+
 const loadInitialPrompts = (): PromptSnippet[] => {
     try {
         const saved = localStorage.getItem(PROMPTS_STORAGE_KEY);
         if (saved) {
-            const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed)) {
+            const parsed = parseStoredPromptSnippets(saved);
+            if (parsed && parsed.length > 0) {
                 return parsed;
             }
         }

@@ -26,12 +26,46 @@ export interface WebhookPayload {
   };
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
 class WebhookService {
   private webhooks: WebhookConfig[] = [];
   private readonly STORAGE_KEY = 'app_webhooks';
 
   constructor() {
     this.loadWebhooks();
+  }
+
+  private sanitizeWebhook(value: unknown): WebhookConfig | null {
+    if (!isRecord(value)) {
+      return null;
+    }
+    if (
+      typeof value.id !== 'string'
+      || typeof value.name !== 'string'
+      || typeof value.url !== 'string'
+      || typeof value.enabled !== 'boolean'
+      || !Array.isArray(value.events)
+    ) {
+      return null;
+    }
+    return {
+      id: value.id,
+      name: value.name,
+      url: value.url,
+      enabled: value.enabled,
+      events: value.events.filter((event): event is string => typeof event === 'string'),
+    };
   }
 
   /**
@@ -41,7 +75,14 @@ class WebhookService {
     try {
       const stored = localStorage.getItem(this.STORAGE_KEY);
       if (stored) {
-        this.webhooks = JSON.parse(stored);
+        const parsed = parseJson(stored);
+        if (!Array.isArray(parsed)) {
+          this.webhooks = [];
+          return;
+        }
+        this.webhooks = parsed
+          .map((entry) => this.sanitizeWebhook(entry))
+          .filter((entry): entry is WebhookConfig => entry !== null);
       }
     } catch (error) {
       console.error('Failed to load webhooks:', error);

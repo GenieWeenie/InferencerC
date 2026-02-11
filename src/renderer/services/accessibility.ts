@@ -25,6 +25,22 @@ export interface KeyboardShortcut {
     description: string;
 }
 
+const FONT_SIZE_VALUES = new Set<AccessibilityConfig['fontSize']>(['small', 'medium', 'large', 'xlarge']);
+const TOUCH_TARGET_VALUES = new Set<AccessibilityConfig['touchTargetSize']>(['standard', 'large', 'xlarge']);
+const COLOR_BLIND_VALUES = new Set<AccessibilityConfig['colorBlindMode']>(['none', 'protanopia', 'deuteranopia', 'tritanopia']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 export class AccessibilityService {
     private static instance: AccessibilityService;
     private readonly STORAGE_KEY = 'accessibility_config';
@@ -39,6 +55,65 @@ export class AccessibilityService {
             AccessibilityService.instance = new AccessibilityService();
         }
         return AccessibilityService.instance;
+    }
+
+    private getDefaultConfig(): AccessibilityConfig {
+        return {
+            reducedMotion: false,
+            highContrast: false,
+            fontSize: 'medium',
+            touchTargetSize: 'standard',
+            screenReader: true,
+            keyboardNavigation: true,
+            focusVisible: true,
+            ariaLabels: true,
+            colorBlindMode: 'none',
+        };
+    }
+
+    private sanitizeConfig(value: unknown): AccessibilityConfig | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+        const defaults = this.getDefaultConfig();
+        return {
+            reducedMotion: typeof value.reducedMotion === 'boolean' ? value.reducedMotion : defaults.reducedMotion,
+            highContrast: typeof value.highContrast === 'boolean' ? value.highContrast : defaults.highContrast,
+            fontSize: FONT_SIZE_VALUES.has(value.fontSize as AccessibilityConfig['fontSize'])
+                ? value.fontSize as AccessibilityConfig['fontSize']
+                : defaults.fontSize,
+            touchTargetSize: TOUCH_TARGET_VALUES.has(value.touchTargetSize as AccessibilityConfig['touchTargetSize'])
+                ? value.touchTargetSize as AccessibilityConfig['touchTargetSize']
+                : defaults.touchTargetSize,
+            screenReader: typeof value.screenReader === 'boolean' ? value.screenReader : defaults.screenReader,
+            keyboardNavigation: typeof value.keyboardNavigation === 'boolean' ? value.keyboardNavigation : defaults.keyboardNavigation,
+            focusVisible: typeof value.focusVisible === 'boolean' ? value.focusVisible : defaults.focusVisible,
+            ariaLabels: typeof value.ariaLabels === 'boolean' ? value.ariaLabels : defaults.ariaLabels,
+            colorBlindMode: COLOR_BLIND_VALUES.has(value.colorBlindMode as AccessibilityConfig['colorBlindMode'])
+                ? value.colorBlindMode as AccessibilityConfig['colorBlindMode']
+                : defaults.colorBlindMode,
+        };
+    }
+
+    private sanitizeShortcut(value: unknown): KeyboardShortcut | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+        if (
+            typeof value.key !== 'string'
+            || typeof value.action !== 'string'
+            || typeof value.description !== 'string'
+        ) {
+            return null;
+        }
+        return {
+            key: value.key,
+            action: value.action,
+            description: value.description,
+            ctrl: typeof value.ctrl === 'boolean' ? value.ctrl : undefined,
+            shift: typeof value.shift === 'boolean' ? value.shift : undefined,
+            alt: typeof value.alt === 'boolean' ? value.alt : undefined,
+        };
     }
 
     /**
@@ -71,25 +146,16 @@ export class AccessibilityService {
      * Get accessibility configuration
      */
     getConfig(): AccessibilityConfig {
-        const defaults: AccessibilityConfig = {
-            reducedMotion: false,
-            highContrast: false,
-            fontSize: 'medium',
-            touchTargetSize: 'standard',
-            screenReader: true,
-            keyboardNavigation: true,
-            focusVisible: true,
-            ariaLabels: true,
-            colorBlindMode: 'none',
-        };
+        const defaults = this.getDefaultConfig();
 
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                return {
-                    ...defaults,
-                    ...JSON.parse(stored),
-                };
+                const parsed = parseJson(stored);
+                const config = this.sanitizeConfig(parsed);
+                if (config) {
+                    return config;
+                }
             }
         } catch (error) {
             console.error('Failed to load accessibility config:', error);
@@ -115,7 +181,15 @@ export class AccessibilityService {
         try {
             const stored = localStorage.getItem(this.SHORTCUTS_KEY);
             if (stored) {
-                return JSON.parse(stored);
+                const parsed = parseJson(stored);
+                if (Array.isArray(parsed)) {
+                    const shortcuts = parsed
+                        .map((entry) => this.sanitizeShortcut(entry))
+                        .filter((entry): entry is KeyboardShortcut => entry !== null);
+                    if (shortcuts.length > 0) {
+                        return shortcuts;
+                    }
+                }
             }
         } catch (error) {
             console.error('Failed to load keyboard shortcuts:', error);
