@@ -35,6 +35,19 @@ interface PluginManagerProps {
     onClose: () => void;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+export const parsePluginManifestJson = (raw: string): Record<string, unknown> | null => {
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        return isRecord(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
+};
+
 export const PluginManager: React.FC<PluginManagerProps> = ({
     isOpen,
     onClose,
@@ -100,13 +113,18 @@ export const PluginManager: React.FC<PluginManagerProps> = ({
 
     const handleInstallFromManifest = async () => {
         try {
-            const manifest = JSON.parse(manifestJson);
+            const manifest = parsePluginManifestJson(manifestJson);
+            if (!manifest) {
+                toast.error('Manifest JSON must be an object');
+                return;
+            }
             if (!pluginSystemService.validateManifest(manifest)) {
                 toast.error('Invalid plugin manifest');
                 return;
             }
 
-            const exists = pluginSystemService.getPlugin(manifest.id);
+            const manifestId = String(manifest.id);
+            const exists = pluginSystemService.getPlugin(manifestId);
             if (exists) {
                 await pluginSystemService.updatePlugin(manifest);
                 toast.success('Plugin updated from manifest');

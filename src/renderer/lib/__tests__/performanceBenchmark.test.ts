@@ -7,6 +7,7 @@ import {
     runSearchIndexBaseline,
     formatSearchIndexBenchmarkReport,
     saveSearchIndexBenchmarkReport,
+    parseStoredSearchIndexBenchmarkReports,
 } from '../performanceBenchmark';
 
 // Mock requestAnimationFrame for Node environment
@@ -283,6 +284,10 @@ describe('performanceBenchmark', () => {
                 expect(saved).toHaveLength(1);
                 expect(saved[0].label).toBe('unit-bench');
 
+                localStorage.setItem('test-search-index-bench-reports', JSON.stringify([
+                    { id: 'bad', label: 'bad', suite: { timestamp: 'x' } },
+                    saved[0],
+                ]));
                 const nextSaved = saveSearchIndexBenchmarkReport(suite, {
                     storageKey: 'test-search-index-bench-reports',
                     maxReports: 2,
@@ -290,6 +295,12 @@ describe('performanceBenchmark', () => {
                 });
                 expect(nextSaved).toHaveLength(2);
                 expect(nextSaved[0].label).toBe('unit-bench-2');
+                expect(nextSaved[1].label).toBe('unit-bench');
+
+                const parsedStored = parseStoredSearchIndexBenchmarkReports(
+                    localStorage.getItem('test-search-index-bench-reports') || '[]'
+                );
+                expect(parsedStored).toHaveLength(2);
             } finally {
                 Object.defineProperty(globalThis, 'localStorage', {
                     value: originalLocalStorage,

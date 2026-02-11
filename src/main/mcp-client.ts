@@ -33,6 +33,93 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
   return fallback;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const isJsonRpcId = (value: unknown): value is string | number | null => {
+  return value === null || typeof value === 'string' || typeof value === 'number';
+};
+
+const hasOwnProperty = (value: Record<string, unknown>, key: string): boolean => {
+  return Object.prototype.hasOwnProperty.call(value, key);
+};
+
+const isJsonRpcParams = (value: unknown): value is JSONRPCParams => {
+  return Array.isArray(value) || isRecord(value);
+};
+
+export const parseJsonRpcMessageLine = (
+  line: string,
+): { message: JSONRPCMessage } | { error: string } => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch (error) {
+    return { error: `Invalid JSON: ${getErrorMessage(error, 'unknown parse error')}` };
+  }
+
+  if (!isRecord(parsed)) {
+    return { error: 'JSON-RPC payload must be an object' };
+  }
+  if (parsed.jsonrpc !== '2.0') {
+    return { error: 'JSON-RPC payload must include jsonrpc: "2.0"' };
+  }
+
+  if (hasOwnProperty(parsed, 'error')) {
+    if (!isRecord(parsed.error)) {
+      return { error: 'JSON-RPC error response has invalid error payload' };
+    }
+    if (typeof parsed.error.code !== 'number' || !Number.isFinite(parsed.error.code)) {
+      return { error: 'JSON-RPC error response is missing numeric error.code' };
+    }
+    if (typeof parsed.error.message !== 'string') {
+      return { error: 'JSON-RPC error response is missing string error.message' };
+    }
+    if (!isJsonRpcId(parsed.id)) {
+      return { error: 'JSON-RPC error response has invalid id' };
+    }
+
+    const message: JSONRPCErrorResponse = {
+      jsonrpc: '2.0',
+      error: {
+        code: parsed.error.code,
+        message: parsed.error.message,
+        ...(hasOwnProperty(parsed.error, 'data') ? { data: parsed.error.data as JSONValue } : {}),
+      },
+      id: parsed.id,
+    };
+    return { message };
+  }
+
+  if (hasOwnProperty(parsed, 'result')) {
+    if (!isJsonRpcId(parsed.id)) {
+      return { error: 'JSON-RPC response has invalid id' };
+    }
+    const message: JSONRPCResponse = {
+      jsonrpc: '2.0',
+      result: parsed.result as JSONValue,
+      id: parsed.id,
+    };
+    return { message };
+  }
+
+  if (typeof parsed.method !== 'string') {
+    return { error: 'JSON-RPC request/notification is missing method' };
+  }
+  if (hasOwnProperty(parsed, 'id') && !isJsonRpcId(parsed.id)) {
+    return { error: 'JSON-RPC request has invalid id' };
+  }
+
+  const message: JSONRPCRequest = {
+    jsonrpc: '2.0',
+    method: parsed.method,
+    ...(isJsonRpcParams(parsed.params) ? { params: parsed.params } : {}),
+    ...(hasOwnProperty(parsed, 'id') ? { id: parsed.id as string | number | null } : {}),
+  };
+  return { message };
+};
+
 /**
  * MCP Client for communicating with MCP servers via stdio
  */
@@ -263,12 +350,12 @@ export class MCPClient extends EventEmitter {
         continue;
       }
 
-      try {
-        const message: JSONRPCMessage = JSON.parse(line);
-        this.handleMessage(message);
-      } catch (error: unknown) {
-        this.emit('error', new Error(`Failed to parse JSON-RPC message: ${getErrorMessage(error, 'unknown parse error')}`));
+      const parsed = parseJsonRpcMessageLine(line);
+      if ('error' in parsed) {
+        this.emit('error', new Error(`Failed to parse JSON-RPC message: ${parsed.error}`));
+        continue;
       }
+      this.handleMessage(parsed.message);
     }
   }
 

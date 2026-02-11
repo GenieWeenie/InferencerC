@@ -33,6 +33,51 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
 
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeHeaders = (value: unknown): Record<string, string> | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    const headers: Record<string, string> = {};
+    Object.entries(value).forEach(([key, entryValue]) => {
+        if (typeof entryValue === 'string') {
+            headers[key] = entryValue;
+        }
+    });
+    return headers;
+};
+
+export const mergeRequestFromEditorJson = (current: APIRequest, json: string): APIRequest => {
+    const parsed = parseJson(json);
+    if (!isRecord(parsed)) {
+        return current;
+    }
+
+    const next: APIRequest = { ...current };
+    if (typeof parsed.url === 'string') {
+        next.url = parsed.url;
+    }
+    if (typeof parsed.method === 'string' && isAPIRequestMethod(parsed.method)) {
+        next.method = parsed.method;
+    }
+    const headers = sanitizeHeaders(parsed.headers);
+    if (headers) {
+        next.headers = headers;
+    }
+    if (Object.prototype.hasOwnProperty.call(parsed, 'body')) {
+        next.body = parsed.body;
+    }
+
+    return next;
+};
+
 export const APIPlayground: React.FC<APIPlaygroundProps> = ({
     isOpen,
     onClose,
@@ -77,17 +122,7 @@ export const APIPlayground: React.FC<APIPlaygroundProps> = ({
 
     const handleJsonChange = (json: string) => {
         setRequestJson(json);
-        try {
-            const parsedUnknown: unknown = JSON.parse(json);
-            if (isRecord(parsedUnknown)) {
-                setRequest({
-                    ...request,
-                    ...(parsedUnknown as Partial<APIRequest>),
-                });
-            }
-        } catch {
-            // Invalid JSON, keep as is
-        }
+        setRequest((prev) => mergeRequestFromEditorJson(prev, json));
     };
 
     const handleSend = async () => {

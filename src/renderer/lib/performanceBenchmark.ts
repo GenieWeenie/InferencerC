@@ -80,6 +80,107 @@ export interface SaveSearchIndexBenchmarkOptions {
 const DEFAULT_SEARCH_INDEX_QUERY_LENGTHS = [1, 2, 3, 5, 8, 12, 20, 33];
 const DEFAULT_SEARCH_INDEX_REPORT_STORAGE_KEY = 'search_index_benchmark_reports';
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeSearchIndexBenchmarkSample = (value: unknown): SearchIndexBenchmarkSample | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (
+        typeof value.queryLength !== 'number'
+        || !Number.isFinite(value.queryLength)
+        || typeof value.iterations !== 'number'
+        || !Number.isFinite(value.iterations)
+        || typeof value.avgMs !== 'number'
+        || !Number.isFinite(value.avgMs)
+        || typeof value.minMs !== 'number'
+        || !Number.isFinite(value.minMs)
+        || typeof value.maxMs !== 'number'
+        || !Number.isFinite(value.maxMs)
+        || typeof value.resultCount !== 'number'
+        || !Number.isFinite(value.resultCount)
+    ) {
+        return null;
+    }
+    return {
+        queryLength: value.queryLength,
+        iterations: value.iterations,
+        avgMs: value.avgMs,
+        minMs: value.minMs,
+        maxMs: value.maxMs,
+        resultCount: value.resultCount,
+    };
+};
+
+const sanitizeSearchIndexBenchmarkSuite = (value: unknown): SearchIndexBenchmarkSuite | null => {
+    if (!isRecord(value) || !Array.isArray(value.samples)) {
+        return null;
+    }
+    if (
+        typeof value.timestamp !== 'number'
+        || !Number.isFinite(value.timestamp)
+        || typeof value.iterations !== 'number'
+        || !Number.isFinite(value.iterations)
+        || typeof value.warmupRuns !== 'number'
+        || !Number.isFinite(value.warmupRuns)
+    ) {
+        return null;
+    }
+    const samples = value.samples
+        .map((entry) => sanitizeSearchIndexBenchmarkSample(entry))
+        .filter((entry): entry is SearchIndexBenchmarkSample => entry !== null);
+    if (samples.length === 0) {
+        return null;
+    }
+    const queryLengths = Array.isArray(value.queryLengths)
+        ? value.queryLengths.filter((entry): entry is number => typeof entry === 'number' && Number.isFinite(entry))
+        : samples.map((sample) => sample.queryLength);
+
+    return {
+        timestamp: value.timestamp,
+        queryLengths,
+        iterations: value.iterations,
+        warmupRuns: value.warmupRuns,
+        samples,
+    };
+};
+
+const sanitizePersistedReport = (value: unknown): SearchIndexBenchmarkPersistedReport | null => {
+    if (!isRecord(value) || typeof value.id !== 'string' || typeof value.createdAt !== 'number' || typeof value.label !== 'string') {
+        return null;
+    }
+    const suite = sanitizeSearchIndexBenchmarkSuite(value.suite);
+    if (!suite) {
+        return null;
+    }
+    return {
+        id: value.id,
+        createdAt: value.createdAt,
+        label: value.label,
+        suite,
+    };
+};
+
+export const parseStoredSearchIndexBenchmarkReports = (raw: string): SearchIndexBenchmarkPersistedReport[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+    return parsed
+        .map((entry) => sanitizePersistedReport(entry))
+        .filter((entry): entry is SearchIndexBenchmarkPersistedReport => entry !== null);
+};
+
 const buildSyntheticQuery = (queryLength: number): string => {
     const terms = new Array<string>(queryLength);
     for (let i = 0; i < queryLength; i++) {
@@ -174,7 +275,7 @@ export function saveSearchIndexBenchmarkReport(
 
     try {
         const raw = localStorage.getItem(storageKey);
-        const parsed = raw ? JSON.parse(raw) as SearchIndexBenchmarkPersistedReport[] : [];
+        const parsed = raw ? parseStoredSearchIndexBenchmarkReports(raw) : [];
         const next = [record, ...parsed].slice(0, maxReports);
         localStorage.setItem(storageKey, JSON.stringify(next));
         return next;

@@ -69,4 +69,25 @@ describe('chatStreamParser', () => {
     expect(consumeChatStreamContent(state)).toBe('');
     expect(flushChatStreamToolCalls(state)).toBeNull();
   });
+
+  it('drops malformed payload shapes while keeping valid deltas', () => {
+    const state = createChatStreamParseState();
+
+    applyChatStreamChunk(
+      state,
+      'data: {"choices":"bad"}\n' +
+        'data: {"choices":[{"delta":{"content":"ok","tool_calls":[{"index":"bad"}]}}]}\n' +
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call","function":{"name":"ping","arguments":"{}"}}]}}]}\n',
+      false,
+    );
+
+    expect(consumeChatStreamContent(state)).toBe('ok');
+    expect(flushChatStreamToolCalls(state)).toEqual([
+      {
+        id: 'call',
+        type: 'function',
+        function: { name: 'ping', arguments: '{}' },
+      },
+    ]);
+  });
 });

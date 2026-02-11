@@ -36,6 +36,83 @@ export const createChatStreamParseState = (): ChatStreamParseState => ({
     toolCallsDirty: false,
 });
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const sanitizeToolCallFunctionDelta = (value: unknown): ToolCallFunctionDelta | undefined => {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+    const next: ToolCallFunctionDelta = {};
+    if (typeof value.name === 'string') {
+        next.name = value.name;
+    }
+    if (typeof value.arguments === 'string') {
+        next.arguments = value.arguments;
+    }
+    return next;
+};
+
+const sanitizeToolCallDelta = (value: unknown): ToolCallDelta | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    const next: ToolCallDelta = {};
+    if (typeof value.id === 'string') {
+        next.id = value.id;
+    }
+    if (typeof value.index === 'number' && Number.isInteger(value.index) && Number.isFinite(value.index)) {
+        next.index = value.index;
+    }
+    const fn = sanitizeToolCallFunctionDelta(value.function);
+    if (fn && (typeof fn.name === 'string' || typeof fn.arguments === 'string')) {
+        next.function = fn;
+    }
+    if (typeof next.index !== 'number') {
+        return null;
+    }
+    return next;
+};
+
+const sanitizeChoiceDelta = (value: unknown): ChoiceDelta | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    const delta: ChoiceDelta = {};
+    if (typeof value.content === 'string') {
+        delta.content = value.content;
+    }
+    if (Array.isArray(value.tool_calls)) {
+        const toolCalls = value.tool_calls
+            .map((entry) => sanitizeToolCallDelta(entry))
+            .filter((entry): entry is ToolCallDelta => entry !== null);
+        if (toolCalls.length > 0) {
+            delta.tool_calls = toolCalls;
+        }
+    }
+    return delta;
+};
+
+const sanitizeDataPayload = (value: unknown): StreamDataPayload | null => {
+    if (!isRecord(value) || !Array.isArray(value.choices)) {
+        return null;
+    }
+    const choices: StreamDataPayload['choices'] = [];
+    for (let i = 0; i < value.choices.length; i += 1) {
+        const choice = value.choices[i];
+        if (!isRecord(choice)) {
+            continue;
+        }
+        const delta = sanitizeChoiceDelta(choice.delta);
+        choices.push(delta ? { delta } : {});
+    }
+    if (choices.length === 0) {
+        return null;
+    }
+    return { choices };
+};
+
 const getOrCreateToolCall = (
     state: ChatStreamParseState,
     index: number
@@ -90,7 +167,7 @@ const parseDataPayload = (line: string): StreamDataPayload | null => {
     }
 
     try {
-        return JSON.parse(dataStr) as StreamDataPayload;
+        return sanitizeDataPayload(JSON.parse(dataStr));
     } catch {
         return null;
     }
