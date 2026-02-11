@@ -54,6 +54,24 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
     return fallback;
 };
 
+const parseBooleanRecord = (raw: string): Record<string, boolean> => {
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return {};
+        }
+        const record: Record<string, boolean> = {};
+        Object.entries(parsed as Record<string, unknown>).forEach(([key, value]) => {
+            if (typeof value === 'boolean') {
+                record[key] = value;
+            }
+        });
+        return record;
+    } catch {
+        return {};
+    }
+};
+
 const GlobalSearchDialog: React.FC<GlobalSearchDialogProps> = ({
     isOpen,
     onClose,
@@ -207,7 +225,7 @@ const GlobalSearchDialog: React.FC<GlobalSearchDialogProps> = ({
                 const stored = sessionStorage.getItem(storageKey);
 
                 if (stored) {
-                    const collapseState = JSON.parse(stored) as Record<string, boolean>;
+                    const collapseState = parseBooleanRecord(stored);
 
                     // Check if entire message is collapsed
                     if (collapseState['message'] === true) {

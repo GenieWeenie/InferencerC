@@ -30,6 +30,18 @@ export interface SuggestionContext {
     keyPoints: string[];
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 export class SmartSuggestionsService {
     private static instance: SmartSuggestionsService;
 
@@ -272,12 +284,10 @@ Types: follow-up, clarification, example, deep-dive, alternative, related`;
             // Try to parse JSON from response
             const jsonMatch = content.match(/\[[\s\S]*\]/);
             if (jsonMatch) {
-                const parsedUnknown: unknown = JSON.parse(jsonMatch[0]);
+                const parsedUnknown = parseJson(jsonMatch[0]);
                 if (Array.isArray(parsedUnknown)) {
                     return parsedUnknown.map((entry, i: number) => {
-                        const suggestion = (typeof entry === 'object' && entry !== null
-                            ? entry
-                            : {}) as { text?: unknown; type?: unknown };
+                        const suggestion = isRecord(entry) ? entry : {};
                         const normalizedType = this.normalizeSuggestionType(suggestion.type);
                         return {
                             id: `ai-${i}`,

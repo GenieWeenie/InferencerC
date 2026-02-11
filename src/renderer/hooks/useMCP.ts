@@ -8,6 +8,28 @@ interface UseMCPOptions {
     deferUntilIdle?: boolean;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+export const parseToolCallPayload = (value: unknown): { name: string; args: Record<string, unknown> } | null => {
+    if (!isRecord(value) || typeof value.name !== 'string') {
+        return null;
+    }
+    const args = isRecord(value.arguments)
+        ? value.arguments
+        : (isRecord(value.parameters) ? value.parameters : {});
+    return { name: value.name, args };
+};
+
 const getSchemaSummary = (schema: unknown): string => {
     if (typeof schema !== 'object' || schema === null) {
         return 'unknown';
@@ -139,42 +161,36 @@ export const useMCP = (options: UseMCPOptions = {}) => {
         let match;
 
         while ((match = xmlPattern.exec(content)) !== null) {
-            try {
-                const parsed = JSON.parse(match[1]);
-                if (parsed.name) {
-                    const tool = tools.find((t) => t.name === parsed.name);
-                    if (tool) {
-                        toolCalls.push({
-                            id: crypto.randomUUID(),
-                            name: parsed.name,
-                            arguments: parsed.arguments || {},
-                            serverId: tool.serverId,
-                        });
-                    }
-                }
-            } catch (e) {
-                console.warn('Failed to parse tool call:', e);
+            const payload = parseToolCallPayload(parseJson(match[1]));
+            if (!payload) {
+                continue;
+            }
+            const tool = tools.find((t) => t.name === payload.name);
+            if (tool) {
+                toolCalls.push({
+                    id: crypto.randomUUID(),
+                    name: payload.name,
+                    arguments: payload.args,
+                    serverId: tool.serverId,
+                });
             }
         }
 
         const codeBlockPattern = /```(?:tool|function)\s*\n(\{[\s\S]*?\})\s*\n```/g;
 
         while ((match = codeBlockPattern.exec(content)) !== null) {
-            try {
-                const parsed = JSON.parse(match[1]);
-                if (parsed.name) {
-                    const tool = tools.find((t) => t.name === parsed.name);
-                    if (tool) {
-                        toolCalls.push({
-                            id: crypto.randomUUID(),
-                            name: parsed.name,
-                            arguments: parsed.arguments || parsed.parameters || {},
-                            serverId: tool.serverId,
-                        });
-                    }
-                }
-            } catch (e) {
-                console.warn('Failed to parse tool call from code block:', e);
+            const payload = parseToolCallPayload(parseJson(match[1]));
+            if (!payload) {
+                continue;
+            }
+            const tool = tools.find((t) => t.name === payload.name);
+            if (tool) {
+                toolCalls.push({
+                    id: crypto.randomUUID(),
+                    name: payload.name,
+                    arguments: payload.args,
+                    serverId: tool.serverId,
+                });
             }
         }
 

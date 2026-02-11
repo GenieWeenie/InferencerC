@@ -13,6 +13,14 @@ const ACTIVITY_LOG_KEY = 'api_activity_log_entries';
 const ACTIVITY_LOG_COUNT_KEY = 'api_activity_log_count';
 const MAX_ACTIVITY_LOG_ENTRIES = 200;
 
+const parseJson = (raw: string): unknown | null => {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
 export class ActivityLogService {
   private static instance: ActivityLogService;
 
@@ -30,7 +38,7 @@ export class ActivityLogService {
       if (typeof localStorage === 'undefined') return [];
       const raw = localStorage.getItem(ACTIVITY_LOG_KEY);
       if (!raw) return [];
-      const parsed = JSON.parse(raw);
+      const parsed = parseJson(raw);
       if (!Array.isArray(parsed)) return [];
       const validEntries = parsed.filter(this.isValidEntry);
       this.saveCount(validEntries.length);

@@ -48,6 +48,14 @@ const estimateTokensFallback = (text: string): number => {
     return Math.max(1, Math.ceil(normalized.length / 4));
 };
 
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 const estimateUsageFallback = ({
     history,
     excludedIndices,
@@ -83,17 +91,13 @@ const estimateUsageFallback = ({
 };
 
 export const parseStoredExcludedIndices = (raw: string): Set<number> => {
-    try {
-        const parsed: unknown = JSON.parse(raw);
-        if (!Array.isArray(parsed)) {
-            return new Set();
-        }
-        const indices = parsed
-            .filter((entry): entry is number => Number.isInteger(entry) && entry >= 0);
-        return new Set(indices);
-    } catch {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
         return new Set();
     }
+    const indices = parsed
+        .filter((entry): entry is number => Number.isInteger(entry) && entry >= 0);
+    return new Set(indices);
 };
 
 export const useChatContextOptimizer = ({

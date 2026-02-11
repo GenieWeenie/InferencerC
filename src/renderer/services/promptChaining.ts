@@ -125,6 +125,48 @@ const parseJson = (raw: string): unknown => {
     }
 };
 
+const tryParseJsonString = (raw: string): unknown | undefined => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return undefined;
+    }
+};
+
+const resolvePathValue = (source: unknown, path: string[]): unknown => {
+    let current: unknown = source;
+    for (const segment of path) {
+        if (Array.isArray(current)) {
+            const index = Number(segment);
+            if (!Number.isInteger(index) || index < 0 || index >= current.length) {
+                return undefined;
+            }
+            current = current[index];
+            continue;
+        }
+        if (!isRecord(current)) {
+            return undefined;
+        }
+        current = current[segment];
+    }
+    return current;
+};
+
+const stringifyResolvedValue = (value: unknown, fallback: string): string => {
+    if (typeof value === 'string') {
+        return value;
+    }
+    if (typeof value === 'undefined') {
+        return fallback;
+    }
+    try {
+        const serialized = JSON.stringify(value);
+        return typeof serialized === 'string' ? serialized : fallback;
+    } catch {
+        return fallback;
+    }
+};
+
 const sanitizeStringArray = (value: unknown): string[] => {
     if (!Array.isArray(value)) {
         return [];
@@ -493,22 +535,17 @@ export class PromptChainingService {
                 }
 
                 // Try to parse output as JSON and extract property
-                try {
-                    const parsed = JSON.parse(stepResult.output);
-                    let value = parsed;
-                    for (const prop of propertyPath) {
-                        value = value?.[prop];
-                    }
-                    return typeof value === 'string' ? value : JSON.stringify(value);
-                } catch {
+                const parsed = tryParseJsonString(stepResult.output);
+                if (typeof parsed === 'undefined') {
                     return stepResult.output;
                 }
+                const value = resolvePathValue(parsed, propertyPath);
+                return stringifyResolvedValue(value, stepResult.output);
             }
 
             // Check custom variables
             if (context.variables[path] !== undefined) {
-                const val = context.variables[path];
-                return typeof val === 'string' ? val : JSON.stringify(val);
+                return stringifyResolvedValue(context.variables[path], match);
             }
 
             return match; // Keep unresolved
@@ -705,13 +742,13 @@ export class PromptChainingService {
         switch (step.transform) {
             case 'json_extract':
                 const path = (step.transformConfig?.path as string) || '';
-                try {
-                    const parsed = JSON.parse(inputs[0]);
-                    const value = path.split('.').reduce((obj, key) => obj?.[key], parsed);
-                    return typeof value === 'string' ? value : JSON.stringify(value);
-                } catch {
+                const parsed = tryParseJsonString(inputs[0]);
+                if (typeof parsed === 'undefined') {
                     return inputs[0];
                 }
+                const pathSegments = path.split('.').filter(Boolean);
+                const value = pathSegments.length > 0 ? resolvePathValue(parsed, pathSegments) : parsed;
+                return stringifyResolvedValue(value, inputs[0]);
 
             case 'summarize':
                 // Simple summarization - take first N characters
@@ -759,10 +796,9 @@ export class PromptChainingService {
             // Add step outputs
             context.stepResults.forEach((result, stepId) => {
                 evalContext[stepId] = result.output;
-                try {
-                    evalContext[`${stepId}_json`] = JSON.parse(result.output);
-                } catch {
-                    // Not JSON, that's fine
+                const parsed = tryParseJsonString(result.output);
+                if (typeof parsed !== 'undefined') {
+                    evalContext[`${stepId}_json`] = parsed;
                 }
             });
 
@@ -790,8 +826,11 @@ export class PromptChainingService {
             case 'merge':
                 // Try to merge as JSON objects
                 try {
-                    const merged = outputs.reduce((acc, output) => {
-                        const parsed = JSON.parse(output);
+                    const merged = outputs.reduce<Record<string, unknown>>((acc, output) => {
+                        const parsed = tryParseJsonString(output);
+                        if (!isRecord(parsed)) {
+                            throw new Error('Non-object output');
+                        }
                         return { ...acc, ...parsed };
                     }, {});
                     return JSON.stringify(merged, null, 2);

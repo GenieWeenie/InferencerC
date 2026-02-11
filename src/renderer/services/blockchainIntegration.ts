@@ -46,6 +46,29 @@ const parseJson = (raw: string): unknown => {
     }
 };
 
+const tryParseJsonString = (raw: string): { ok: true; value: unknown } | { ok: false } => {
+    try {
+        return { ok: true, value: JSON.parse(raw) };
+    } catch {
+        return { ok: false };
+    }
+};
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message.trim().length > 0) {
+        return error.message;
+    }
+    return fallback;
+};
+
+const decodeConversationPayload = (raw: string): unknown => {
+    const parsed = tryParseJsonString(raw);
+    if (!parsed.ok) {
+        throw new Error('Conversation payload is not valid JSON');
+    }
+    return parsed.value;
+};
+
 const getDefaultConfig = (): BlockchainConfig => ({
     enabled: false,
     network: 'local',
@@ -236,12 +259,14 @@ export class BlockchainIntegrationService {
             throw new Error('Stored blockchain payload is invalid');
         }
         
-        // Decrypt if needed
-        if (encryptionKey) {
-            return JSON.parse(await this.decryptData(block.encryptedData, encryptionKey));
+        try {
+            const payload = encryptionKey
+                ? await this.decryptData(block.encryptedData, encryptionKey)
+                : block.encryptedData;
+            return decodeConversationPayload(payload);
+        } catch (error) {
+            throw new Error(`Stored blockchain conversation is unreadable: ${getErrorMessage(error, 'decode failed')}`);
         }
-
-        return JSON.parse(block.encryptedData);
     }
 
     /**

@@ -8,6 +8,14 @@ export interface UsageStatsRecord {
 
 const ANALYTICS_KEY = 'inferencer-analytics';
 
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 const isUsageStatsRecord = (value: unknown): value is UsageStatsRecord => {
     if (!value || typeof value !== 'object') return false;
     const entry = value as Record<string, unknown>;
@@ -24,7 +32,7 @@ export const readAnalyticsUsageStats = (): UsageStatsRecord[] => {
     try {
         const data = localStorage.getItem(ANALYTICS_KEY);
         if (!data) return [];
-        const parsed = JSON.parse(data);
+        const parsed = parseJson(data);
         if (!Array.isArray(parsed)) return [];
         return parsed.filter(isUsageStatsRecord);
     } catch (error) {

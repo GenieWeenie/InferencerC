@@ -26,6 +26,61 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
 
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeHeaders = (value: unknown): Record<string, string> => {
+    if (!isRecord(value)) {
+        return {};
+    }
+    const headers: Record<string, string> = {};
+    Object.entries(value).forEach(([key, entryValue]) => {
+        if (typeof entryValue === 'string') {
+            headers[key] = entryValue;
+        }
+    });
+    return headers;
+};
+
+const sanitizeAPIRequest = (value: unknown): APIRequest | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (typeof value.url !== 'string' || typeof value.method !== 'string' || !isAPIRequestMethod(value.method)) {
+        return null;
+    }
+    return {
+        url: value.url,
+        method: value.method,
+        headers: sanitizeHeaders(value.headers),
+        body: value.body,
+    };
+};
+
+const parseSavedRequests = (raw: string): Array<{ name: string; request: APIRequest }> => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+    const saved: Array<{ name: string; request: APIRequest }> = [];
+    parsed.forEach((entry) => {
+        if (!isRecord(entry) || typeof entry.name !== 'string') {
+            return;
+        }
+        const request = sanitizeAPIRequest(entry.request);
+        if (!request) {
+            return;
+        }
+        saved.push({ name: entry.name, request });
+    });
+    return saved;
+};
+
 export const RequestBuilder: React.FC<RequestBuilderProps> = ({
     initialRequest,
     onBuild,
@@ -51,7 +106,7 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
         try {
             const stored = localStorage.getItem('saved_api_requests');
             if (stored) {
-                setSavedRequests(JSON.parse(stored));
+                setSavedRequests(parseSavedRequests(stored));
             }
         } catch (error) {
             console.error('Failed to load saved requests:', error);

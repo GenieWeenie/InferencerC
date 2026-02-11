@@ -229,23 +229,13 @@ Return a JSON array of suggestions:
             const jsonMatch = content.match(/\[[\s\S]*\]/);
             if (!jsonMatch) return [];
 
-            const parsedUnknown: unknown = JSON.parse(jsonMatch[0]);
+            const parsedUnknown = parseJson(jsonMatch[0]);
             if (!Array.isArray(parsedUnknown)) {
                 return [];
             }
 
             return parsedUnknown.map((entry, i: number) => {
-                const suggestion = (typeof entry === 'object' && entry !== null
-                    ? entry
-                    : {}) as {
-                        type?: unknown;
-                        description?: unknown;
-                        code?: unknown;
-                        refactoredCode?: unknown;
-                        confidence?: unknown;
-                        impact?: unknown;
-                        explanation?: unknown;
-                    };
+                const suggestion = isRecord(entry) ? entry : {};
 
                 const code = typeof suggestion.code === 'string' ? suggestion.code : '';
                 const refactoredCode = typeof suggestion.refactoredCode === 'string'

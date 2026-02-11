@@ -10,6 +10,28 @@ export interface CollapseState {
     [key: string]: boolean;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
+export const parseStoredCollapseState = (raw: string): CollapseState => {
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!isRecord(parsed)) {
+            return {};
+        }
+        const state: CollapseState = {};
+        Object.entries(parsed).forEach(([key, value]) => {
+            if (typeof value === 'boolean') {
+                state[key] = value;
+            }
+        });
+        return state;
+    } catch {
+        return {};
+    }
+};
+
 export const useCollapseState = (sessionId: string) => {
     const [collapseState, setCollapseState] = useState<CollapseState>({});
 
@@ -23,8 +45,7 @@ export const useCollapseState = (sessionId: string) => {
         try {
             const stored = sessionStorage.getItem(storageKey);
             if (stored) {
-                const parsed = JSON.parse(stored);
-                setCollapseState(parsed);
+                setCollapseState(parseStoredCollapseState(stored));
             }
         } catch (e) {
             console.error('Failed to load collapse state from sessionStorage', e);
