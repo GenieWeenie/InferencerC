@@ -458,31 +458,37 @@ const storeMessageContent = (sessionId: string, messageIndex: number, content: u
   messageContentWriteCache.set(key, contentStr);
 };
 
+const parseChunkContentJson = (content: string): { ok: true; value: unknown } | { ok: false } => {
+  try {
+    return { ok: true, value: JSON.parse(content) };
+  } catch {
+    return { ok: false };
+  }
+};
+
 const decodeStoredMessageContent = (key: string, content: string): unknown => {
   const knownKind = messageContentKindCache.get(key);
   if (knownKind === 'plain') {
     return content;
   }
 
+  const parsed = parseChunkContentJson(content);
   if (knownKind === 'json') {
-    try {
-      return JSON.parse(content);
-    } catch (e) {
-      // If the content was unexpectedly plain, recover gracefully.
-      messageContentKindCache.set(key, 'plain');
-      return content;
+    if (parsed.ok) {
+      return parsed.value;
     }
-  }
-
-  // Backward compatibility for chunk data saved before content-kind tracking existed.
-  try {
-    const parsed = JSON.parse(content);
-    messageContentKindCache.set(key, 'json');
-    return parsed;
-  } catch (e) {
+    // If the content was unexpectedly plain, recover gracefully.
     messageContentKindCache.set(key, 'plain');
     return content;
   }
+
+  // Backward compatibility for chunk data saved before content-kind tracking existed.
+  if (parsed.ok) {
+    messageContentKindCache.set(key, 'json');
+    return parsed.value;
+  }
+  messageContentKindCache.set(key, 'plain');
+  return content;
 };
 
 /**

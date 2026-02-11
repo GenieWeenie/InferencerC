@@ -54,22 +54,30 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
     return fallback;
 };
 
-const parseBooleanRecord = (raw: string): Record<string, boolean> => {
+const parseJson = (raw: string): unknown | null => {
     try {
-        const parsed: unknown = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-            return {};
-        }
-        const record: Record<string, boolean> = {};
-        Object.entries(parsed as Record<string, unknown>).forEach(([key, value]) => {
-            if (typeof value === 'boolean') {
-                record[key] = value;
-            }
-        });
-        return record;
+        return JSON.parse(raw);
     } catch {
+        return null;
+    }
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+export const parseBooleanRecord = (raw: string): Record<string, boolean> => {
+    const parsed = parseJson(raw);
+    if (!isRecord(parsed)) {
         return {};
     }
+    const record: Record<string, boolean> = {};
+    Object.entries(parsed).forEach(([key, value]) => {
+        if (typeof value === 'boolean') {
+            record[key] = value;
+        }
+    });
+    return record;
 };
 
 const GlobalSearchDialog: React.FC<GlobalSearchDialogProps> = ({

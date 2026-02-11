@@ -48,15 +48,30 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 };
 
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 const sanitizeStringArray = (value: unknown): string[] => {
     if (!Array.isArray(value)) {
         return [];
     }
     const sanitized: string[] = [];
+    const seen = new Set<string>();
     for (let i = 0; i < value.length; i++) {
-        if (typeof value[i] === 'string') {
-            sanitized.push(value[i]);
+        if (typeof value[i] !== 'string') {
+            continue;
         }
+        const normalized = value[i].trim();
+        if (!normalized || seen.has(normalized)) {
+            continue;
+        }
+        seen.add(normalized);
+        sanitized.push(normalized);
     }
     return sanitized;
 };
@@ -67,32 +82,32 @@ const sanitizeTermMap = (value: unknown): Record<string, string[]> => {
     }
     const sanitized: Record<string, string[]> = {};
     for (const [key, entry] of Object.entries(value)) {
-        sanitized[key] = sanitizeStringArray(entry);
+        const normalizedKey = key.trim();
+        if (!normalizedKey) {
+            continue;
+        }
+        sanitized[normalizedKey] = sanitizeStringArray(entry);
     }
     return sanitized;
 };
 
 const parseStoredIndex = (raw: string): InvertedIndex | null => {
-    try {
-        const parsed: unknown = JSON.parse(raw);
-        if (!isRecord(parsed)) {
-            return null;
-        }
-        const version = typeof parsed.version === 'number' && Number.isFinite(parsed.version)
-            ? parsed.version
-            : 1;
-        const updatedAt = typeof parsed.updatedAt === 'number' && Number.isFinite(parsed.updatedAt)
-            ? parsed.updatedAt
-            : Date.now();
-        return {
-            version,
-            updatedAt,
-            terms: sanitizeTermMap(parsed.terms),
-            sessionTerms: sanitizeTermMap(parsed.sessionTerms),
-        };
-    } catch {
+    const parsed = parseJson(raw);
+    if (!isRecord(parsed)) {
         return null;
     }
+    const version = typeof parsed.version === 'number' && Number.isFinite(parsed.version) && parsed.version > 0
+        ? Math.floor(parsed.version)
+        : 1;
+    const updatedAt = typeof parsed.updatedAt === 'number' && Number.isFinite(parsed.updatedAt) && parsed.updatedAt >= 0
+        ? parsed.updatedAt
+        : Date.now();
+    return {
+        version,
+        updatedAt,
+        terms: sanitizeTermMap(parsed.terms),
+        sessionTerms: sanitizeTermMap(parsed.sessionTerms),
+    };
 };
 
 const hasSameTerms = (previousTerms: string[], nextTerms: Set<string>): boolean => {

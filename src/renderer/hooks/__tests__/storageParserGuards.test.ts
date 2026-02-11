@@ -21,6 +21,12 @@ describe('hook parser guards', () => {
         expect(parsed).toEqual({ message: true, block: false });
     });
 
+    it('returns an empty collapse state for malformed persisted JSON', () => {
+        const { parseStoredCollapseState } = require('../useCollapseState') as typeof import('../useCollapseState');
+        const parsed = parseStoredCollapseState('{bad-json');
+        expect(parsed).toEqual({});
+    });
+
     it('normalizes MCP tool call payload arguments', () => {
         const { parseToolCallPayload } = require('../useMCP') as typeof import('../useMCP');
 

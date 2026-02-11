@@ -90,4 +90,28 @@ describe('chatStreamParser', () => {
       },
     ]);
   });
+
+  it('ignores empty tool-call deltas that only provide an index', () => {
+    const state = createChatStreamParseState();
+
+    applyChatStreamChunk(
+      state,
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0}]}}]}\n',
+      false,
+    );
+
+    expect(flushChatStreamToolCalls(state)).toBeNull();
+  });
+
+  it('skips empty choice deltas and keeps the first valid one for merge', () => {
+    const state = createChatStreamParseState();
+
+    applyChatStreamChunk(
+      state,
+      'data: {"choices":[{"delta":{}},{"delta":{"content":"hello"}}]}\n',
+      false,
+    );
+
+    expect(consumeChatStreamContent(state)).toBe('hello');
+  });
 });

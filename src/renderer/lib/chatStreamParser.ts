@@ -40,6 +40,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 };
 
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 const sanitizeToolCallFunctionDelta = (value: unknown): ToolCallFunctionDelta | undefined => {
     if (!isRecord(value)) {
         return undefined;
@@ -72,6 +80,9 @@ const sanitizeToolCallDelta = (value: unknown): ToolCallDelta | null => {
     if (typeof next.index !== 'number') {
         return null;
     }
+    if (typeof next.id !== 'string' && !next.function) {
+        return null;
+    }
     return next;
 };
 
@@ -91,6 +102,9 @@ const sanitizeChoiceDelta = (value: unknown): ChoiceDelta | null => {
             delta.tool_calls = toolCalls;
         }
     }
+    if (typeof delta.content !== 'string' && !Array.isArray(delta.tool_calls)) {
+        return null;
+    }
     return delta;
 };
 
@@ -105,7 +119,10 @@ const sanitizeDataPayload = (value: unknown): StreamDataPayload | null => {
             continue;
         }
         const delta = sanitizeChoiceDelta(choice.delta);
-        choices.push(delta ? { delta } : {});
+        if (!delta) {
+            continue;
+        }
+        choices.push({ delta });
     }
     if (choices.length === 0) {
         return null;
@@ -166,11 +183,11 @@ const parseDataPayload = (line: string): StreamDataPayload | null => {
         return null;
     }
 
-    try {
-        return sanitizeDataPayload(JSON.parse(dataStr));
-    } catch {
+    const parsed = parseJson(dataStr);
+    if (parsed === null) {
         return null;
     }
+    return sanitizeDataPayload(parsed);
 };
 
 export const applyChatStreamChunk = (

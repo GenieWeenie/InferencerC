@@ -45,6 +45,17 @@ describe('useCollapseState', () => {
             consoleErrorSpy.mockRestore();
         });
 
+        it('should ignore non-object persisted JSON without reporting parse errors', () => {
+            const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+            sessionStorage.setItem(storageKey, '[]');
+
+            const { result } = renderHook(() => useCollapseState(sessionId));
+            expect(result.current.collapseState).toEqual({});
+            expect(consoleErrorSpy).not.toHaveBeenCalled();
+
+            consoleErrorSpy.mockRestore();
+        });
+
         it('should not load state when sessionId is empty', () => {
             sessionStorage.setItem('collapse-state-', JSON.stringify({ 'item-1': true }));
 

@@ -25,4 +25,16 @@ describe('mcp-client JSON-RPC line parser', () => {
     const parsed = parseJsonRpcMessageLine('{"jsonrpc":"2.0","id":{"bad":1},"result":{}}');
     expect(parsed).toEqual({ error: 'JSON-RPC response has invalid id' });
   });
+
+  it('rejects payloads that include both result and error', () => {
+    const parsed = parseJsonRpcMessageLine(
+      '{"jsonrpc":"2.0","id":1,"result":{"ok":true},"error":{"code":-1,"message":"bad"}}'
+    );
+    expect(parsed).toEqual({ error: 'JSON-RPC payload cannot include both result and error' });
+  });
+
+  it('rejects requests with invalid params type when params is present', () => {
+    const parsed = parseJsonRpcMessageLine('{"jsonrpc":"2.0","method":"tools/list","params":"bad"}');
+    expect(parsed).toEqual({ error: 'JSON-RPC request has invalid params' });
+  });
 });

@@ -34,6 +34,8 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const MAX_SAVED_REQUESTS = 100;
+
 const sanitizeHeaders = (value: unknown): Record<string, string> => {
     if (!isRecord(value)) {
         return {};
@@ -62,22 +64,32 @@ const sanitizeAPIRequest = (value: unknown): APIRequest | null => {
     };
 };
 
-const parseSavedRequests = (raw: string): Array<{ name: string; request: APIRequest }> => {
+export const parseSavedRequests = (raw: string): Array<{ name: string; request: APIRequest }> => {
     const parsed = parseJson(raw);
     if (!Array.isArray(parsed)) {
         return [];
     }
     const saved: Array<{ name: string; request: APIRequest }> = [];
-    parsed.forEach((entry) => {
+    const seenNames = new Set<string>();
+    for (let i = 0; i < parsed.length; i++) {
+        const entry = parsed[i];
+        if (saved.length >= MAX_SAVED_REQUESTS) {
+            break;
+        }
         if (!isRecord(entry) || typeof entry.name !== 'string') {
-            return;
+            continue;
+        }
+        const normalizedName = entry.name.trim();
+        if (!normalizedName || seenNames.has(normalizedName)) {
+            continue;
         }
         const request = sanitizeAPIRequest(entry.request);
         if (!request) {
-            return;
+            continue;
         }
-        saved.push({ name: entry.name, request });
-    });
+        seenNames.add(normalizedName);
+        saved.push({ name: normalizedName, request });
+    }
     return saved;
 };
 

@@ -318,4 +318,34 @@ describe('SearchIndexService', () => {
       expect(SearchIndexService.searchSessions(longQuery)).toEqual(firstRun);
     }
   });
+
+  it('sanitizes malformed persisted index maps when hydrating from storage', () => {
+    localStorage.setItem('app_search_index', JSON.stringify({
+      version: -3.2,
+      updatedAt: 'bad',
+      terms: {
+        ' alpha ': [' s1 ', '', 's1', 's2', 5],
+        '   ': ['ignored'],
+      },
+      sessionTerms: {
+        ' session-1 ': ['alpha', ' alpha ', 8],
+      },
+    }));
+
+    const index = SearchIndexService.getIndex();
+
+    expect(index.version).toBe(1);
+    expect(index.updatedAt).toEqual(expect.any(Number));
+    expect(index.terms).toEqual({ alpha: ['s1', 's2'] });
+    expect(index.sessionTerms).toEqual({ 'session-1': ['alpha'] });
+  });
+
+  it('falls back to an empty index when persisted JSON is unreadable', () => {
+    localStorage.setItem('app_search_index', '{bad-json');
+
+    const index = SearchIndexService.getIndex();
+
+    expect(index.terms).toEqual({});
+    expect(index.sessionTerms).toEqual({});
+  });
 });

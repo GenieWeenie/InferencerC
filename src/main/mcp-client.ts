@@ -49,21 +49,33 @@ const isJsonRpcParams = (value: unknown): value is JSONRPCParams => {
   return Array.isArray(value) || isRecord(value);
 };
 
+const parseJsonLine = (
+  line: string,
+): { ok: true; value: unknown } | { ok: false; error: string } => {
+  try {
+    return { ok: true, value: JSON.parse(line) };
+  } catch (error) {
+    return { ok: false, error: `Invalid JSON: ${getErrorMessage(error, 'unknown parse error')}` };
+  }
+};
+
 export const parseJsonRpcMessageLine = (
   line: string,
 ): { message: JSONRPCMessage } | { error: string } => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(line);
-  } catch (error) {
-    return { error: `Invalid JSON: ${getErrorMessage(error, 'unknown parse error')}` };
+  const parsedResult = parseJsonLine(line);
+  if (!parsedResult.ok) {
+    return { error: parsedResult.error };
   }
+  const parsed = parsedResult.value;
 
   if (!isRecord(parsed)) {
     return { error: 'JSON-RPC payload must be an object' };
   }
   if (parsed.jsonrpc !== '2.0') {
     return { error: 'JSON-RPC payload must include jsonrpc: "2.0"' };
+  }
+  if (hasOwnProperty(parsed, 'error') && hasOwnProperty(parsed, 'result')) {
+    return { error: 'JSON-RPC payload cannot include both result and error' };
   }
 
   if (hasOwnProperty(parsed, 'error')) {
@@ -109,6 +121,9 @@ export const parseJsonRpcMessageLine = (
   }
   if (hasOwnProperty(parsed, 'id') && !isJsonRpcId(parsed.id)) {
     return { error: 'JSON-RPC request has invalid id' };
+  }
+  if (hasOwnProperty(parsed, 'params') && !isJsonRpcParams(parsed.params)) {
+    return { error: 'JSON-RPC request has invalid params' };
   }
 
   const message: JSONRPCRequest = {

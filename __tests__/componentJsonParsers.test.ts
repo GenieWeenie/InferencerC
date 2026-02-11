@@ -2,8 +2,40 @@
  * @jest-environment jsdom
  */
 
+jest.mock('../src/renderer/services/search', () => ({
+  SearchService: {
+    getRecentSearches: jest.fn(() => []),
+    searchAsync: jest.fn(async () => ({
+      results: [],
+      stats: {
+        totalResults: 0,
+        sessionsSearched: 0,
+        messagesSearched: 0,
+        searchTimeMs: 0,
+        topKeywords: [],
+      },
+    })),
+    saveRecentSearch: jest.fn(),
+    clearRecentSearches: jest.fn(),
+  },
+}));
+
+jest.mock('../src/renderer/services/history', () => ({
+  HistoryService: {
+    getAllSessions: jest.fn(() => []),
+  },
+}));
+
+jest.mock('../src/renderer/services/autoTagging', () => ({
+  autoTaggingService: {
+    getAllTags: jest.fn(() => []),
+  },
+}));
+
 import { mergeRequestFromEditorJson } from '../src/renderer/components/APIPlayground';
+import { parseBooleanRecord } from '../src/renderer/components/GlobalSearchDialog';
 import { parsePluginManifestJson } from '../src/renderer/components/PluginManager';
+import { parseSavedRequests } from '../src/renderer/components/RequestBuilder';
 import type { APIRequest } from '../src/renderer/services/apiClient';
 
 describe('component JSON parser guards', () => {
@@ -49,5 +81,48 @@ describe('component JSON parser guards', () => {
     expect(parsePluginManifestJson('{"id":"plugin.a"}')).toEqual({ id: 'plugin.a' });
     expect(parsePluginManifestJson('[1,2,3]')).toBeNull();
     expect(parsePluginManifestJson('{bad-json')).toBeNull();
+  });
+
+  it('parses search dialog boolean records and ignores malformed payloads', () => {
+    expect(parseBooleanRecord('{"a":true,"b":"x","c":false}')).toEqual({ a: true, c: false });
+    expect(parseBooleanRecord('[]')).toEqual({});
+    expect(parseBooleanRecord('{bad-json')).toEqual({});
+  });
+
+  it('sanitizes and dedupes saved request entries from storage payloads', () => {
+    expect(parseSavedRequests(JSON.stringify([
+      {
+        name: ' Saved ',
+        request: {
+          url: 'https://example.com',
+          method: 'GET',
+          headers: { Authorization: 'token', Bad: 1 },
+          body: { ok: true },
+        },
+      },
+      {
+        name: 'Saved',
+        request: {
+          url: 'https://example.com/dupe',
+          method: 'POST',
+          headers: {},
+          body: {},
+        },
+      },
+      {
+        name: 'Bad',
+        request: { url: 'https://example.com', method: 'PATCH' },
+      },
+    ]))).toEqual([
+      {
+        name: 'Saved',
+        request: {
+          url: 'https://example.com',
+          method: 'GET',
+          headers: { Authorization: 'token' },
+          body: { ok: true },
+        },
+      },
+    ]);
   });
 });

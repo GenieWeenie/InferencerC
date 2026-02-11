@@ -14,22 +14,29 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
 
-const parseStoredCollapseStateWithStatus = (raw: string): { state: CollapseState; hadParseError: boolean } => {
+const parseJson = (raw: string): { ok: true; value: unknown } | { ok: false } => {
     try {
-        const parsed: unknown = JSON.parse(raw);
-        if (!isRecord(parsed)) {
-            return { state: {}, hadParseError: false };
-        }
-        const state: CollapseState = {};
-        Object.entries(parsed).forEach(([key, value]) => {
-            if (typeof value === 'boolean') {
-                state[key] = value;
-            }
-        });
-        return { state, hadParseError: false };
+        return { ok: true, value: JSON.parse(raw) };
     } catch {
+        return { ok: false };
+    }
+};
+
+const parseStoredCollapseStateWithStatus = (raw: string): { state: CollapseState; hadParseError: boolean } => {
+    const parsed = parseJson(raw);
+    if (!parsed.ok) {
         return { state: {}, hadParseError: true };
     }
+    if (!isRecord(parsed.value)) {
+        return { state: {}, hadParseError: false };
+    }
+    const state: CollapseState = {};
+    Object.entries(parsed.value).forEach(([key, value]) => {
+        if (typeof value === 'boolean') {
+            state[key] = value;
+        }
+    });
+    return { state, hadParseError: false };
 };
 
 export const parseStoredCollapseState = (raw: string): CollapseState => {

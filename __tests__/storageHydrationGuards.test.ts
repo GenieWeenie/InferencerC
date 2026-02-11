@@ -1118,6 +1118,19 @@ describe('storage hydration guards', () => {
 
     const cacheStats = ragDocumentChatService.getEmbeddingCacheStats();
     expect(cacheStats.entries).toBe(1);
+
+    localStorage.setItem('app_session_chunk-fallback', JSON.stringify({
+      id: 'chunk-fallback',
+      title: 'Chunk fallback',
+      lastModified: 1,
+      modelId: 'model-1',
+      messages: [
+        { role: 'assistant', content: '', _contentChunked: true },
+      ],
+    }));
+    localStorage.setItem('app_message_content_chunk-fallback_0', '{bad-json');
+    const chunkFallbackSession = HistoryService.getSession('chunk-fallback');
+    expect(chunkFallbackSession?.messages[0]?.content).toBe('{bad-json');
   });
 
   test('guards enterprise compliance storage hydration for sso/session/retention/audit logs', () => {
