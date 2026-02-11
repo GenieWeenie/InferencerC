@@ -38,6 +38,125 @@ export interface WorkflowExecution {
     error?: string;
 }
 
+const CONDITION_TYPES = new Set<WorkflowCondition['type']>([
+    'intent',
+    'keyword',
+    'message-count',
+    'topic',
+    'category',
+    'model',
+]);
+
+const CONDITION_OPERATORS = new Set<WorkflowCondition['operator']>([
+    'equals',
+    'contains',
+    'starts-with',
+    'ends-with',
+    'greater-than',
+    'less-than',
+]);
+
+const ACTION_TYPES = new Set<WorkflowAction['type']>([
+    'set-model',
+    'set-temperature',
+    'set-system-prompt',
+    'add-context',
+    'trigger-webhook',
+    'send-notification',
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeCondition = (value: unknown): WorkflowCondition | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (!CONDITION_TYPES.has(value.type as WorkflowCondition['type'])) {
+        return null;
+    }
+    if (!CONDITION_OPERATORS.has(value.operator as WorkflowCondition['operator'])) {
+        return null;
+    }
+
+    const isMessageCountCondition = value.type === 'message-count';
+    if (isMessageCountCondition) {
+        if (typeof value.value !== 'number' || !Number.isFinite(value.value)) {
+            return null;
+        }
+    } else if (typeof value.value !== 'string') {
+        return null;
+    }
+
+    return {
+        type: value.type as WorkflowCondition['type'],
+        operator: value.operator as WorkflowCondition['operator'],
+        value: value.value as string | number,
+    };
+};
+
+const sanitizeAction = (value: unknown): WorkflowAction | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (!ACTION_TYPES.has(value.type as WorkflowAction['type'])) {
+        return null;
+    }
+    if (typeof value.value !== 'string' && typeof value.value !== 'number') {
+        return null;
+    }
+    const config = isRecord(value.config) ? value.config : undefined;
+    return {
+        type: value.type as WorkflowAction['type'],
+        value: value.value,
+        config,
+    };
+};
+
+const sanitizeWorkflow = (value: unknown): WorkflowRule | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (typeof value.id !== 'string' || typeof value.name !== 'string') {
+        return null;
+    }
+    if (typeof value.enabled !== 'boolean') {
+        return null;
+    }
+    if (typeof value.priority !== 'number' || !Number.isFinite(value.priority)) {
+        return null;
+    }
+
+    const conditions = Array.isArray(value.conditions)
+        ? value.conditions.map(sanitizeCondition).filter((condition): condition is WorkflowCondition => condition !== null)
+        : [];
+    const actions = Array.isArray(value.actions)
+        ? value.actions.map(sanitizeAction).filter((action): action is WorkflowAction => action !== null)
+        : [];
+    if (conditions.length === 0 || actions.length === 0) {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        name: value.name,
+        description: typeof value.description === 'string' ? value.description : undefined,
+        enabled: value.enabled,
+        conditions,
+        actions,
+        priority: value.priority,
+    };
+};
+
 export class WorkflowsService {
     private static instance: WorkflowsService;
     private workflows: Map<string, WorkflowRule> = new Map();
@@ -62,9 +181,16 @@ export class WorkflowsService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                const workflows: WorkflowRule[] = JSON.parse(stored);
-                workflows.forEach(w => {
-                    this.workflows.set(w.id, w);
+                const parsed = parseJson(stored);
+                if (!Array.isArray(parsed)) {
+                    return;
+                }
+                parsed.forEach((entry) => {
+                    const workflow = sanitizeWorkflow(entry);
+                    if (!workflow) {
+                        return;
+                    }
+                    this.workflows.set(workflow.id, workflow);
                 });
             }
         } catch (error) {
@@ -153,20 +279,26 @@ export class WorkflowsService {
             switch (condition.type) {
                 case 'intent':
                     const intent = detectIntent(message);
-                    matches = this.evaluateCondition(intent, condition.operator, condition.value as string);
+                    if (typeof condition.value === 'string') {
+                        matches = this.evaluateCondition(intent, condition.operator, condition.value);
+                    }
                     break;
 
                 case 'keyword':
-                    matches = this.evaluateCondition(message.toLowerCase(), condition.operator, (condition.value as string).toLowerCase());
+                    if (typeof condition.value === 'string') {
+                        matches = this.evaluateCondition(message.toLowerCase(), condition.operator, condition.value.toLowerCase());
+                    }
                     break;
 
                 case 'message-count':
-                    matches = this.evaluateCondition(conversationHistory.length, condition.operator, condition.value as number);
+                    if (typeof condition.value === 'number') {
+                        matches = this.evaluateCondition(conversationHistory.length, condition.operator, condition.value);
+                    }
                     break;
 
                 case 'model':
-                    if (currentModel) {
-                        matches = this.evaluateCondition(currentModel, condition.operator, condition.value as string);
+                    if (currentModel && typeof condition.value === 'string') {
+                        matches = this.evaluateCondition(currentModel, condition.operator, condition.value);
                     }
                     break;
 

@@ -44,6 +44,57 @@ const createEmptyIndex = (): InvertedIndex => ({
     sessionTerms: {},
 });
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const sanitized: string[] = [];
+    for (let i = 0; i < value.length; i++) {
+        if (typeof value[i] === 'string') {
+            sanitized.push(value[i]);
+        }
+    }
+    return sanitized;
+};
+
+const sanitizeTermMap = (value: unknown): Record<string, string[]> => {
+    if (!isRecord(value)) {
+        return {};
+    }
+    const sanitized: Record<string, string[]> = {};
+    for (const [key, entry] of Object.entries(value)) {
+        sanitized[key] = sanitizeStringArray(entry);
+    }
+    return sanitized;
+};
+
+const parseStoredIndex = (raw: string): InvertedIndex | null => {
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!isRecord(parsed)) {
+            return null;
+        }
+        const version = typeof parsed.version === 'number' && Number.isFinite(parsed.version)
+            ? parsed.version
+            : 1;
+        const updatedAt = typeof parsed.updatedAt === 'number' && Number.isFinite(parsed.updatedAt)
+            ? parsed.updatedAt
+            : Date.now();
+        return {
+            version,
+            updatedAt,
+            terms: sanitizeTermMap(parsed.terms),
+            sessionTerms: sanitizeTermMap(parsed.sessionTerms),
+        };
+    } catch {
+        return null;
+    }
+};
+
 const hasSameTerms = (previousTerms: string[], nextTerms: Set<string>): boolean => {
     if (previousTerms.length !== nextTerms.size) {
         return false;
@@ -533,13 +584,8 @@ export const SearchIndexService = {
             }
 
             if (raw) {
-                const parsed = JSON.parse(raw) as Partial<InvertedIndex>;
-                const normalized = {
-                    version: parsed.version || 1,
-                    updatedAt: parsed.updatedAt || Date.now(),
-                    terms: parsed.terms || {},
-                    sessionTerms: parsed.sessionTerms || {},
-                };
+                const parsed = parseStoredIndex(raw);
+                const normalized = parsed ?? createEmptyIndex();
                 indexCache = normalized;
                 indexCacheRaw = raw;
                 clearPostingSetCache();

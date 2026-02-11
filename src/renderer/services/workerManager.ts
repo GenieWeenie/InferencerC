@@ -126,8 +126,7 @@ class WorkerManagerService {
 
             try {
                 // Worker creation using Vite's worker URL pattern
-                // @ts-expect-error - import.meta.url is handled by Vite at build time
-                const baseUrl: string = import.meta.url;
+                const baseUrl = import.meta.url;
 
                 switch (type) {
                     case 'encryption':

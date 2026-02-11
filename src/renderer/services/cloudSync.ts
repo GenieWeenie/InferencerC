@@ -21,6 +21,53 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
     return fallback;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const parseStringRecord = (raw: string): Record<string, string> | null => {
+    const parsed = parseJson(raw);
+    if (!isRecord(parsed)) return null;
+    const record: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+        if (typeof value === 'string') {
+            record[key] = value;
+        }
+    }
+    return record;
+};
+
+const parseChatSession = (raw: string): ChatSession | null => {
+    const parsed = parseJson(raw);
+    if (!isRecord(parsed)) return null;
+    if (typeof parsed.id !== 'string' || typeof parsed.title !== 'string' || typeof parsed.modelId !== 'string') {
+        return null;
+    }
+    if (!Array.isArray(parsed.messages)) {
+        return null;
+    }
+    return parsed as ChatSession;
+};
+
+type EncryptedPayload = { v: number; iv: string; ct: string };
+
+const parseEncryptedPayload = (ciphertext: string): EncryptedPayload | null => {
+    const parsed = parseJson(ciphertext);
+    if (!isRecord(parsed)) return null;
+    if (typeof parsed.v !== 'number' || typeof parsed.iv !== 'string' || typeof parsed.ct !== 'string') {
+        return null;
+    }
+    return { v: parsed.v, iv: parsed.iv, ct: parsed.ct };
+};
+
 const logComplianceEvent = (event: ComplianceEventInput): void => {
     void loadEnterpriseComplianceService()
         .then((service) => service.logEvent(event))
@@ -155,18 +202,21 @@ class CloudSyncService {
         try {
             const raw = localStorage.getItem(CONFIG_KEY);
             if (raw) {
-                const parsed = JSON.parse(raw) as Partial<CloudSyncConfig>;
+                const parsedUnknown = parseJson(raw);
+                const parsed = isRecord(parsedUnknown) ? parsedUnknown : {};
                 return {
-                    enabled: parsed.enabled ?? true,
-                    baseUrl: (parsed.baseUrl || 'http://localhost:3000').replace(/\/$/, ''),
-                    token: parsed.token,
-                    accountId: parsed.accountId,
-                    email: parsed.email,
-                    encryptionSalt: parsed.encryptionSalt,
-                    deviceId: parsed.deviceId || crypto.randomUUID(),
-                    syncSettings: parsed.syncSettings ?? true,
-                    syncTemplates: parsed.syncTemplates ?? true,
-                    selectedConversationIds: parsed.selectedConversationIds || [],
+                    enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : true,
+                    baseUrl: (typeof parsed.baseUrl === 'string' ? parsed.baseUrl : 'http://localhost:3000').replace(/\/$/, ''),
+                    token: typeof parsed.token === 'string' ? parsed.token : undefined,
+                    accountId: typeof parsed.accountId === 'string' ? parsed.accountId : undefined,
+                    email: typeof parsed.email === 'string' ? parsed.email : undefined,
+                    encryptionSalt: typeof parsed.encryptionSalt === 'string' ? parsed.encryptionSalt : undefined,
+                    deviceId: typeof parsed.deviceId === 'string' && parsed.deviceId.trim().length > 0 ? parsed.deviceId : crypto.randomUUID(),
+                    syncSettings: typeof parsed.syncSettings === 'boolean' ? parsed.syncSettings : true,
+                    syncTemplates: typeof parsed.syncTemplates === 'boolean' ? parsed.syncTemplates : true,
+                    selectedConversationIds: Array.isArray(parsed.selectedConversationIds)
+                        ? parsed.selectedConversationIds.filter((id): id is string => typeof id === 'string')
+                        : [],
                 };
             }
         } catch (error) {
@@ -238,9 +288,9 @@ class CloudSyncService {
             },
         });
 
-        const payload = await response.json().catch(() => ({} as Record<string, unknown>));
+        const payload: unknown = await response.json().catch(() => ({}));
         if (!response.ok) {
-            const message = typeof payload.error === 'string'
+            const message = isRecord(payload) && typeof payload.error === 'string'
                 ? payload.error
                 : `Request failed (${response.status})`;
             throw new Error(message);
@@ -393,13 +443,39 @@ class CloudSyncService {
         try {
             const raw = localStorage.getItem(key);
             if (raw) {
-                const parsed = JSON.parse(raw) as CloudSyncState;
+                const parsedUnknown = parseJson(raw);
+                const parsed = isRecord(parsedUnknown) ? parsedUnknown : {};
                 return {
-                    accountId: parsed.accountId,
-                    lastSyncedAt: parsed.lastSyncedAt || 0,
-                    conversations: parsed.conversations || {},
-                    settings: parsed.settings,
-                    templates: parsed.templates,
+                    accountId: typeof parsed.accountId === 'string' ? parsed.accountId : this.config.accountId!,
+                    lastSyncedAt: typeof parsed.lastSyncedAt === 'number' ? parsed.lastSyncedAt : 0,
+                    conversations: isRecord(parsed.conversations)
+                        ? Object.fromEntries(
+                            Object.entries(parsed.conversations)
+                                .filter(([, value]) => isRecord(value)
+                                    && typeof value.serverVersion === 'number'
+                                    && typeof value.lastSyncedHash === 'string')
+                                .map(([sessionId, value]) => [sessionId, {
+                                    serverVersion: (value as SyncItemState).serverVersion,
+                                    lastSyncedHash: (value as SyncItemState).lastSyncedHash,
+                                }])
+                        )
+                        : {},
+                    settings: isRecord(parsed.settings)
+                        && typeof parsed.settings.serverVersion === 'number'
+                        && typeof parsed.settings.lastSyncedHash === 'string'
+                        ? {
+                            serverVersion: parsed.settings.serverVersion,
+                            lastSyncedHash: parsed.settings.lastSyncedHash,
+                        }
+                        : undefined,
+                    templates: isRecord(parsed.templates)
+                        && typeof parsed.templates.serverVersion === 'number'
+                        && typeof parsed.templates.lastSyncedHash === 'string'
+                        ? {
+                            serverVersion: parsed.templates.serverVersion,
+                            lastSyncedHash: parsed.templates.lastSyncedHash,
+                        }
+                        : undefined,
                 };
             }
         } catch (error) {
@@ -486,7 +562,7 @@ class CloudSyncService {
     }
 
     private async decryptPayload(ciphertext: string, passphrase: string): Promise<string> {
-        const parsed = JSON.parse(ciphertext) as { v: number; iv: string; ct: string };
+        const parsed = parseEncryptedPayload(ciphertext);
         if (!parsed || parsed.v !== 1 || !parsed.iv || !parsed.ct) {
             throw new Error('Invalid encrypted payload');
         }
@@ -656,7 +732,10 @@ class CloudSyncService {
             }
 
             const decrypted = await this.decryptPayload(conflict.serverRecord.ciphertext, passphrase);
-            const remoteSession = JSON.parse(decrypted) as ChatSession;
+            const remoteSession = parseChatSession(decrypted);
+            if (!remoteSession) {
+                continue;
+            }
             remoteSession.id = conflict.id;
             HistoryService.saveSession(remoteSession);
             state.conversations[conflict.id] = {
@@ -668,7 +747,10 @@ class CloudSyncService {
 
         for (const remote of response.pull.conversations) {
             const decrypted = await this.decryptPayload(remote.ciphertext, passphrase);
-            const remoteSession = JSON.parse(decrypted) as ChatSession;
+            const remoteSession = parseChatSession(decrypted);
+            if (!remoteSession) {
+                continue;
+            }
             remoteSession.id = remote.id;
             HistoryService.saveSession(remoteSession);
             state.conversations[remote.id] = {
@@ -694,7 +776,10 @@ class CloudSyncService {
         if (this.config.syncSettings) {
             if (response.conflicts.settings) {
                 const decrypted = await this.decryptPayload(response.conflicts.settings.ciphertext, passphrase);
-                const settingsObj = JSON.parse(decrypted) as Record<string, string>;
+                const settingsObj = parseStringRecord(decrypted);
+                if (!settingsObj) {
+                    throw new Error('Invalid synced settings payload');
+                }
                 this.applySyncableSettings(settingsObj);
                 state.settings = {
                     serverVersion: response.conflicts.settings.version,
@@ -703,7 +788,10 @@ class CloudSyncService {
                 conflictsResolved += 1;
             } else if (response.pull.settings) {
                 const decrypted = await this.decryptPayload(response.pull.settings.ciphertext, passphrase);
-                const settingsObj = JSON.parse(decrypted) as Record<string, string>;
+                const settingsObj = parseStringRecord(decrypted);
+                if (!settingsObj) {
+                    throw new Error('Invalid synced settings payload');
+                }
                 this.applySyncableSettings(settingsObj);
                 state.settings = {
                     serverVersion: response.pull.settings.version,

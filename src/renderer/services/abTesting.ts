@@ -69,6 +69,166 @@ export interface QualityCriteria {
     structure?: 'json' | 'markdown' | 'plain'; // Expected structure
 }
 
+const TEST_STATUSES = new Set<ABTest['status']>([
+    'draft',
+    'running',
+    'completed',
+    'failed',
+]);
+
+const MESSAGE_ROLES = new Set<ChatMessage['role']>([
+    'system',
+    'user',
+    'assistant',
+    'tool',
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeVariant = (value: unknown): ABTestVariant | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (typeof value.id !== 'string' || typeof value.name !== 'string' || typeof value.prompt !== 'string') {
+        return null;
+    }
+    return {
+        id: value.id,
+        name: value.name,
+        prompt: value.prompt,
+        systemPrompt: typeof value.systemPrompt === 'string' ? value.systemPrompt : undefined,
+        modelId: typeof value.modelId === 'string' ? value.modelId : undefined,
+        temperature: typeof value.temperature === 'number' && Number.isFinite(value.temperature) ? value.temperature : undefined,
+        topP: typeof value.topP === 'number' && Number.isFinite(value.topP) ? value.topP : undefined,
+        maxTokens: typeof value.maxTokens === 'number' && Number.isFinite(value.maxTokens) ? value.maxTokens : undefined,
+    };
+};
+
+const sanitizeChatMessage = (value: unknown): ChatMessage | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (!MESSAGE_ROLES.has(value.role as ChatMessage['role']) || typeof value.content !== 'string') {
+        return null;
+    }
+    return {
+        role: value.role as ChatMessage['role'],
+        content: value.content,
+    };
+};
+
+const sanitizeVariantResult = (value: unknown): ABTestVariantResult | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (
+        typeof value.variantId !== 'string'
+        || typeof value.variantName !== 'string'
+        || typeof value.response !== 'string'
+        || typeof value.responseTime !== 'number'
+        || !Number.isFinite(value.responseTime)
+    ) {
+        return null;
+    }
+
+    return {
+        variantId: value.variantId,
+        variantName: value.variantName,
+        response: value.response,
+        responseTime: value.responseTime,
+        tokensUsed: typeof value.tokensUsed === 'number' && Number.isFinite(value.tokensUsed) ? value.tokensUsed : undefined,
+        error: typeof value.error === 'string' ? value.error : undefined,
+        metadata: isRecord(value.metadata)
+            ? {
+                modelId: typeof value.metadata.modelId === 'string' ? value.metadata.modelId : undefined,
+                finishReason: typeof value.metadata.finishReason === 'string' ? value.metadata.finishReason : undefined,
+            }
+            : undefined,
+    };
+};
+
+const sanitizeMetrics = (value: unknown): ABTestMetrics | undefined => {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+    if (
+        typeof value.avgResponseTime !== 'number'
+        || !Number.isFinite(value.avgResponseTime)
+        || typeof value.totalTokens !== 'number'
+        || !Number.isFinite(value.totalTokens)
+        || typeof value.successRate !== 'number'
+        || !Number.isFinite(value.successRate)
+    ) {
+        return undefined;
+    }
+
+    return {
+        bestVariant: typeof value.bestVariant === 'string' ? value.bestVariant : undefined,
+        avgResponseTime: value.avgResponseTime,
+        totalTokens: value.totalTokens,
+        successRate: value.successRate,
+        qualityScores: isRecord(value.qualityScores)
+            ? Object.fromEntries(
+                Object.entries(value.qualityScores).filter(([, score]) => typeof score === 'number' && Number.isFinite(score))
+            )
+            : undefined,
+    };
+};
+
+const sanitizeABTest = (value: unknown): ABTest | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (
+        typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || typeof value.input !== 'string'
+        || typeof value.createdAt !== 'number'
+        || !Number.isFinite(value.createdAt)
+        || !TEST_STATUSES.has(value.status as ABTest['status'])
+    ) {
+        return null;
+    }
+
+    const variants = Array.isArray(value.variants)
+        ? value.variants.map(sanitizeVariant).filter((variant): variant is ABTestVariant => variant !== null)
+        : [];
+    if (variants.length === 0) {
+        return null;
+    }
+
+    const context = Array.isArray(value.context)
+        ? value.context.map(sanitizeChatMessage).filter((message): message is ChatMessage => message !== null)
+        : undefined;
+    const results = Array.isArray(value.results)
+        ? value.results.map(sanitizeVariantResult).filter((result): result is ABTestVariantResult => result !== null)
+        : undefined;
+
+    return {
+        id: value.id,
+        name: value.name,
+        description: typeof value.description === 'string' ? value.description : undefined,
+        variants,
+        input: value.input,
+        context,
+        createdAt: value.createdAt,
+        completedAt: typeof value.completedAt === 'number' && Number.isFinite(value.completedAt) ? value.completedAt : undefined,
+        results,
+        status: value.status as ABTest['status'],
+        metrics: sanitizeMetrics(value.metrics),
+    };
+};
+
 export class ABTestingService {
     private static instance: ABTestingService;
     private static readonly STORAGE_KEY = 'ab_tests';
@@ -92,8 +252,15 @@ export class ABTestingService {
         try {
             const stored = localStorage.getItem(ABTestingService.STORAGE_KEY);
             if (stored) {
-                const parsed = JSON.parse(stored) as ABTest[];
-                parsed.forEach(test => {
+                const parsed = parseJson(stored);
+                if (!Array.isArray(parsed)) {
+                    return;
+                }
+                parsed.forEach((entry) => {
+                    const test = sanitizeABTest(entry);
+                    if (!test) {
+                        return;
+                    }
                     this.tests.set(test.id, test);
                 });
             }
@@ -197,7 +364,7 @@ export class ABTestingService {
         const results: ABTestVariantResult[] = [];
 
         // Execute all variants in parallel
-        const promises = test.variants.map(async (variant) => {
+        const promises = test.variants.map(async (variant): Promise<ABTestVariantResult> => {
             const startTime = Date.now();
             try {
                 const result = await executePrompt(
@@ -217,7 +384,7 @@ export class ABTestingService {
                     response: result.content,
                     responseTime,
                     tokensUsed: result.tokensUsed,
-                } as ABTestVariantResult;
+                };
             } catch (error) {
                 const responseTime = Date.now() - startTime;
                 return {
@@ -226,7 +393,7 @@ export class ABTestingService {
                     response: '',
                     responseTime,
                     error: error instanceof Error ? error.message : 'Unknown error',
-                } as ABTestVariantResult;
+                };
             }
         });
 
@@ -429,16 +596,20 @@ export class ABTestingService {
      * Import test
      */
     importTest(json: string): ABTest {
-        try {
-            const test = JSON.parse(json) as ABTest;
-            test.id = crypto.randomUUID(); // Generate new ID
-            test.createdAt = Date.now();
-            this.tests.set(test.id, test);
-            this.saveTests();
-            return test;
-        } catch (error) {
+        const parsed = parseJson(json);
+        const test = sanitizeABTest(parsed);
+        if (!test) {
             throw new Error('Invalid test format');
         }
+
+        const imported: ABTest = {
+            ...test,
+            id: crypto.randomUUID(),
+            createdAt: Date.now(),
+        };
+        this.tests.set(imported.id, imported);
+        this.saveTests();
+        return imported;
     }
 }
 

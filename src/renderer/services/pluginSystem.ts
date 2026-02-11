@@ -27,6 +27,18 @@ const VALID_COMMAND_CATEGORIES = new Set<CommandCategory>([
     'Help',
 ]);
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 export interface PluginManifest {
     id: string;
     name: string;
@@ -195,11 +207,20 @@ export class PluginSystemService {
         try {
             const stored = this.storageGet(this.STORAGE_KEY);
             if (stored) {
-                const pluginData: Array<Omit<Plugin, 'instance'>> = JSON.parse(stored);
-                pluginData.forEach(plugin => {
+                const parsed = parseJson(stored);
+                if (!Array.isArray(parsed)) {
+                    return;
+                }
+
+                parsed.forEach((entry) => {
+                    if (!isRecord(entry) || !this.validateManifest(entry.manifest)) {
+                        return;
+                    }
                     const hydrated: Plugin = {
-                        ...plugin,
-                        manifest: this.normalizeManifest(plugin.manifest),
+                        manifest: this.normalizeManifest(entry.manifest),
+                        enabled: typeof entry.enabled === 'boolean' ? entry.enabled : false,
+                        installedAt: typeof entry.installedAt === 'number' ? entry.installedAt : Date.now(),
+                        lastUpdated: typeof entry.lastUpdated === 'number' ? entry.lastUpdated : undefined,
                     };
                     this.plugins.set(hydrated.manifest.id, hydrated);
                     if (hydrated.enabled) {
@@ -633,7 +654,10 @@ export class PluginSystemService {
                 get: async (key: string) => {
                     this.assertPermission(manifest, 'storage');
                     const stored = this.storageGet(`plugin:${manifest.id}:${key}`);
-                    return stored ? JSON.parse(stored) : null;
+                    if (!stored) {
+                        return null;
+                    }
+                    return parseJson(stored);
                 },
                 set: async (key: string, value: unknown) => {
                     this.assertPermission(manifest, 'storage');

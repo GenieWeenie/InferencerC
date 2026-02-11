@@ -30,6 +30,38 @@ const DEFAULT_CONFIG: AppConfig = {
   ]
 };
 
+const parseConfig = (raw: string): AppConfig | null => {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const validation = ConfigValidator.validateConfig(parsed);
+    if (!validation.success || typeof parsed !== 'object' || parsed === null) {
+      return null;
+    }
+    const config = parsed as { models?: unknown[]; defaultModel?: unknown };
+    const models = Array.isArray(config.models)
+      ? config.models.map((model) => ConfigValidator.sanitizeModel(model)).filter((model): model is Model => {
+          return Boolean(
+            model.id &&
+            model.name &&
+            model.pathOrUrl &&
+            model.type &&
+            model.status &&
+            model.adapter
+          );
+        })
+      : [];
+    if (models.length === 0) {
+      return null;
+    }
+    return {
+      models,
+      defaultModel: typeof config.defaultModel === 'string' ? config.defaultModel : undefined,
+    };
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Service class for managing application configuration
  * Handles loading, saving, and manipulation of model configurations
@@ -63,7 +95,7 @@ export class ConfigService {
     }
     try {
       const data = fs.readFileSync(CONFIG_PATH, 'utf-8');
-      return JSON.parse(data);
+      return parseConfig(data) || DEFAULT_CONFIG;
     } catch (err) {
       console.error("Failed to load config, using default", err);
       return DEFAULT_CONFIG;

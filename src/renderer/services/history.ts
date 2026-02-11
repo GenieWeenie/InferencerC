@@ -65,6 +65,111 @@ const isStructuredMessagePart = (value: unknown): value is StructuredMessagePart
 const isStructuredMessageParts = (value: unknown): value is StructuredMessagePart[] => {
   return Array.isArray(value) && value.every(isStructuredMessagePart);
 };
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const sanitizeChatMessage = (value: unknown): ChatMessage | null => {
+  if (!isRecord(value) || typeof value.role !== 'string') {
+    return null;
+  }
+  const role = value.role;
+  if (role !== 'system' && role !== 'user' && role !== 'assistant' && role !== 'tool') {
+    return null;
+  }
+  const contentValue = value.content;
+  const content = typeof contentValue === 'string' || Array.isArray(contentValue) ? contentValue : '';
+  return {
+    ...(value as ChatMessage),
+    role,
+    content,
+  };
+};
+
+const sanitizeChatSession = (value: unknown): ChatSession | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (typeof value.id !== 'string' || typeof value.title !== 'string' || typeof value.modelId !== 'string') {
+    return null;
+  }
+  const parsedLastModified = Number(value.lastModified);
+  const lastModified = Number.isFinite(parsedLastModified) ? parsedLastModified : Date.now();
+  const sourceMessages = Array.isArray(value.messages) ? value.messages : [];
+  const messages: ChatMessage[] = [];
+  for (let i = 0; i < sourceMessages.length; i++) {
+    const parsed = sanitizeChatMessage(sourceMessages[i]);
+    if (parsed) {
+      messages.push(parsed);
+    }
+  }
+  return {
+    ...(value as ChatSession),
+    id: value.id,
+    title: value.title,
+    modelId: value.modelId,
+    lastModified,
+    messages,
+  };
+};
+
+const parseChatSessionArray = (raw: string): ChatSession[] => {
+  const parsed = parseJson(raw);
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+  const sessions: ChatSession[] = [];
+  for (let i = 0; i < parsed.length; i++) {
+    const session = sanitizeChatSession(parsed[i]);
+    if (session) {
+      sessions.push(session);
+    }
+  }
+  return sessions;
+};
+
+const parseChatSession = (raw: string): ChatSession | null => {
+  const parsed = parseJson(raw);
+  return sanitizeChatSession(parsed);
+};
+
+const parsePasswordHashes = (raw: string | null): Record<string, string> => {
+  if (!raw) return {};
+  const parsed = parseJson(raw);
+  if (!isRecord(parsed)) {
+    return {};
+  }
+  const hashes: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value === 'string') {
+      hashes[key] = value;
+    }
+  }
+  return hashes;
+};
+
+const parseRecoveryState = (raw: string | null): RecoveryState | null => {
+  if (!raw) return null;
+  const parsed = parseJson(raw);
+  if (!isRecord(parsed) || typeof parsed.sessionId !== 'string' || typeof parsed.timestamp !== 'number') {
+    return null;
+  }
+  return {
+    sessionId: parsed.sessionId,
+    timestamp: parsed.timestamp,
+    draftMessage: typeof parsed.draftMessage === 'string' ? parsed.draftMessage : undefined,
+    pendingResponse: typeof parsed.pendingResponse === 'boolean' ? parsed.pendingResponse : undefined,
+  };
+};
 const sessionDataCache = new Map<string, SessionDataCacheEntry>();
 
 const loadEncryptionService = async (): Promise<EncryptionServiceType> => {
@@ -180,8 +285,8 @@ const readSessionsMetadataFromStorage = (): ChatSession[] => {
   }
 
   try {
-    const parsed = raw ? (JSON.parse(raw) as ChatSession[]) : [];
-    const normalized = Array.isArray(parsed) ? cloneMetadataList(parsed) : [];
+    const parsed = raw ? parseChatSessionArray(raw) : [];
+    const normalized = cloneMetadataList(parsed);
     sessionsMetadataCache = normalized;
     sessionsMetadataCacheRaw = raw;
     return normalized;
@@ -227,7 +332,11 @@ const patchStoredSessionMetadata = (
       };
       chunkedMessageIndexes = [...cached.chunkedMessageIndexes];
     } else {
-      session = JSON.parse(rawSession) as ChatSession;
+      const parsedSession = parseChatSession(rawSession);
+      if (!parsedSession) {
+        return;
+      }
+      session = parsedSession;
       chunkedMessageIndexes = getChunkedMessageIndexes(session.messages);
     }
 
@@ -445,7 +554,7 @@ const migrateStorage = () => {
 
     // Check if it's already migrated (naive check: if raw size is small vs number of sessions)
     // Better: parse and check structure
-    const sessions = JSON.parse(raw);
+    const sessions = parseChatSessionArray(raw);
     let migratedCount = 0;
 
     sessions.forEach((s: ChatSession) => {
@@ -480,7 +589,8 @@ const migrateToChunkedStorage = () => {
       return;
     }
 
-    const metadataSessions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    const metadataRaw = localStorage.getItem(STORAGE_KEY);
+    const metadataSessions = metadataRaw ? parseChatSessionArray(metadataRaw) : [];
 
     metadataSessions.forEach((meta: ChatSession) => {
       const sessionKey = `${SESSION_DATA_PREFIX}${meta.id}`;
@@ -488,7 +598,8 @@ const migrateToChunkedStorage = () => {
 
       if (!rawSession) return;
 
-      const session: ChatSession = JSON.parse(rawSession);
+      const session = parseChatSession(rawSession);
+      if (!session) return;
       let needsMigration = false;
 
       // Check if any messages need chunking
@@ -585,7 +696,11 @@ export const HistoryService = {
           };
           chunkedMessageIndexes = cached.chunkedMessageIndexes;
         } else {
-          session = JSON.parse(rawSpecific);
+          const parsedSession = parseChatSession(rawSpecific);
+          if (!parsedSession) {
+            return undefined;
+          }
+          session = parsedSession;
           chunkedMessageIndexes = getChunkedMessageIndexes(session.messages);
           sessionDataCache.set(id, {
             raw: rawSpecific,
@@ -649,7 +764,7 @@ export const HistoryService = {
     try {
       const encryptionService = await loadEncryptionService();
       // Verify password hash
-      const passwordHashes = JSON.parse(localStorage.getItem(SESSION_PASSWORDS_KEY) || '{}');
+      const passwordHashes = parsePasswordHashes(localStorage.getItem(SESSION_PASSWORDS_KEY));
       const storedHash = passwordHashes[id];
 
       if (!storedHash) {
@@ -676,7 +791,13 @@ export const HistoryService = {
       if (!session) return null;
 
       const decryptedJson = await encryptionService.decrypt(encryptedData);
-      const decryptedMessages = JSON.parse(decryptedJson) as ChatMessage[];
+      const parsedMessages = parseJson(decryptedJson);
+      if (!Array.isArray(parsedMessages)) {
+        return null;
+      }
+      const decryptedMessages = parsedMessages
+        .map((message) => sanitizeChatMessage(message))
+        .filter((message): message is ChatMessage => Boolean(message));
 
       return {
         ...session,
@@ -709,7 +830,7 @@ export const HistoryService = {
         .join('');
 
       // Store password hash
-      const passwordHashes = JSON.parse(localStorage.getItem(SESSION_PASSWORDS_KEY) || '{}');
+      const passwordHashes = parsePasswordHashes(localStorage.getItem(SESSION_PASSWORDS_KEY));
       passwordHashes[id] = passwordHashStr;
       localStorage.setItem(SESSION_PASSWORDS_KEY, JSON.stringify(passwordHashes));
 
@@ -826,7 +947,7 @@ export const HistoryService = {
     localStorage.removeItem(`${ENCRYPTED_SESSIONS_KEY}_${id}`);
 
     // 4. Remove password hash
-    const passwordHashes = JSON.parse(localStorage.getItem(SESSION_PASSWORDS_KEY) || '{}');
+    const passwordHashes = parsePasswordHashes(localStorage.getItem(SESSION_PASSWORDS_KEY));
     if (passwordHashes[id]) {
       delete passwordHashes[id];
       localStorage.setItem(SESSION_PASSWORDS_KEY, JSON.stringify(passwordHashes));
@@ -954,7 +1075,18 @@ export const HistoryService = {
       reader.onload = (event) => {
         try {
           const content = event.target?.result as string;
-          const importedData: ExportedChatHistory = JSON.parse(content);
+          const parsedImport = parseJson(content);
+          if (!isRecord(parsedImport) || !Array.isArray(parsedImport.sessions) || typeof parsedImport.version !== 'string') {
+            throw new Error('Invalid export file format');
+          }
+          const importedSessions = parsedImport.sessions
+            .map((session) => sanitizeChatSession(session))
+            .filter((session): session is ChatSession => Boolean(session));
+          const importedData: ExportedChatHistory = {
+            version: parsedImport.version,
+            exportedAt: typeof parsedImport.exportedAt === 'number' ? parsedImport.exportedAt : Date.now(),
+            sessions: importedSessions,
+          };
 
           // Validate the imported data
           if (!importedData.version || !importedData.sessions) {
@@ -1056,7 +1188,7 @@ export const HistoryService = {
   getRecoveryState: (): RecoveryState | null => {
     try {
       const raw = localStorage.getItem(RECOVERY_STATE_KEY);
-      return raw ? JSON.parse(raw) : null;
+      return parseRecoveryState(raw);
     } catch (e) {
       console.error("Failed to load recovery state", e);
       return null;

@@ -10,7 +10,7 @@
  * - Import/Export templates
  */
 
-import { ChatMessage } from '../../shared/types';
+import { ChatMessage, ImageAttachment } from '../../shared/types';
 
 export interface ConversationTemplate {
     id: string;
@@ -41,6 +41,133 @@ export interface TemplateCategory {
 
 const TEMPLATES_STORAGE_KEY = 'conversation_templates';
 const CATEGORIES_STORAGE_KEY = 'template_categories';
+
+const MESSAGE_ROLES = new Set<ChatMessage['role']>([
+    'system',
+    'user',
+    'assistant',
+    'tool',
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.filter((entry): entry is string => typeof entry === 'string');
+};
+
+const sanitizeTemplateSettings = (value: unknown): ConversationTemplate['settings'] | undefined => {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+    return {
+        temperature: typeof value.temperature === 'number' && Number.isFinite(value.temperature) ? value.temperature : undefined,
+        topP: typeof value.topP === 'number' && Number.isFinite(value.topP) ? value.topP : undefined,
+        maxTokens: typeof value.maxTokens === 'number' && Number.isFinite(value.maxTokens) ? value.maxTokens : undefined,
+        expertMode: typeof value.expertMode === 'string' || value.expertMode === null ? value.expertMode : undefined,
+        thinkingEnabled: typeof value.thinkingEnabled === 'boolean' ? value.thinkingEnabled : undefined,
+    };
+};
+
+const sanitizeTemplateMessage = (value: unknown): ConversationTemplate['initialMessages'][number] | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (!MESSAGE_ROLES.has(value.role as ChatMessage['role']) || typeof value.content !== 'string') {
+        return null;
+    }
+    return {
+        role: value.role as ChatMessage['role'],
+        content: value.content,
+        images: Array.isArray(value.images) ? value.images.filter((image): image is ImageAttachment => {
+            if (!isRecord(image)) {
+                return false;
+            }
+            return (
+                typeof image.id === 'string'
+                && typeof image.name === 'string'
+                && (image.mimeType === 'image/png'
+                    || image.mimeType === 'image/jpeg'
+                    || image.mimeType === 'image/gif'
+                    || image.mimeType === 'image/webp')
+                && typeof image.base64 === 'string'
+                && typeof image.thumbnailUrl === 'string'
+            );
+        }) : undefined,
+    };
+};
+
+const sanitizeTemplate = (value: unknown): ConversationTemplate | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (
+        typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || typeof value.description !== 'string'
+        || typeof value.category !== 'string'
+        || typeof value.createdAt !== 'number'
+        || !Number.isFinite(value.createdAt)
+        || typeof value.updatedAt !== 'number'
+        || !Number.isFinite(value.updatedAt)
+        || typeof value.usageCount !== 'number'
+        || !Number.isFinite(value.usageCount)
+    ) {
+        return null;
+    }
+    const initialMessages = Array.isArray(value.initialMessages)
+        ? value.initialMessages.map(sanitizeTemplateMessage).filter((message): message is ConversationTemplate['initialMessages'][number] => message !== null)
+        : [];
+    if (initialMessages.length === 0) {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        name: value.name,
+        description: value.description,
+        category: value.category,
+        tags: sanitizeStringArray(value.tags),
+        systemPrompt: typeof value.systemPrompt === 'string' ? value.systemPrompt : undefined,
+        initialMessages,
+        settings: sanitizeTemplateSettings(value.settings),
+        createdAt: value.createdAt,
+        updatedAt: value.updatedAt,
+        usageCount: value.usageCount,
+    };
+};
+
+const sanitizeCategory = (value: unknown): TemplateCategory | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (
+        typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || typeof value.icon !== 'string'
+        || typeof value.color !== 'string'
+    ) {
+        return null;
+    }
+    return {
+        id: value.id,
+        name: value.name,
+        icon: value.icon,
+        color: value.color,
+    };
+};
 
 // Built-in categories
 const DEFAULT_CATEGORIES: TemplateCategory[] = [
@@ -179,8 +306,15 @@ export class TemplateService {
             // Load user templates
             const stored = localStorage.getItem(TEMPLATES_STORAGE_KEY);
             if (stored) {
-                const templates: ConversationTemplate[] = JSON.parse(stored);
-                templates.forEach(t => this.templates.set(t.id, t));
+                const parsed = parseJson(stored);
+                if (Array.isArray(parsed)) {
+                    parsed.forEach((entry) => {
+                        const template = sanitizeTemplate(entry);
+                        if (template) {
+                            this.templates.set(template.id, template);
+                        }
+                    });
+                }
             }
 
             // Add default templates if not already present
@@ -193,8 +327,10 @@ export class TemplateService {
             // Load custom categories
             const storedCategories = localStorage.getItem(CATEGORIES_STORAGE_KEY);
             if (storedCategories) {
-                const customCategories: TemplateCategory[] = JSON.parse(storedCategories);
-                // Merge with defaults
+                const parsedCategories = parseJson(storedCategories);
+                const customCategories = Array.isArray(parsedCategories)
+                    ? parsedCategories.map(sanitizeCategory).filter((category): category is TemplateCategory => category !== null)
+                    : [];
                 customCategories.forEach(c => {
                     if (!this.categories.find(cat => cat.id === c.id)) {
                         this.categories.push(c);
@@ -384,43 +520,34 @@ export class TemplateService {
         const errors: string[] = [];
         let imported = 0;
 
-        try {
-            const data = JSON.parse(jsonData);
+        const data = parseJson(jsonData);
+        if (!isRecord(data) || !Array.isArray(data.templates)) {
+            errors.push('Invalid template file format');
+            return { imported, errors };
+        }
 
-            if (!data.templates || !Array.isArray(data.templates)) {
-                errors.push('Invalid template file format');
-                return { imported, errors };
+        for (const templateEntry of data.templates) {
+            const template = sanitizeTemplate(templateEntry);
+            if (!template) {
+                const fallbackName = isRecord(templateEntry) && typeof templateEntry.name === 'string'
+                    ? templateEntry.name
+                    : 'unknown';
+                errors.push(`Failed to import template: ${fallbackName}`);
+                continue;
             }
+            const newTemplate: ConversationTemplate = {
+                ...template,
+                id: `template-imported-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+                usageCount: 0,
+            };
+            this.templates.set(newTemplate.id, newTemplate);
+            imported++;
+        }
 
-            for (const template of data.templates) {
-                try {
-                    // Validate required fields
-                    if (!template.name || !template.initialMessages) {
-                        errors.push(`Skipped template: missing required fields`);
-                        continue;
-                    }
-
-                    // Generate new ID to avoid conflicts
-                    const newTemplate: ConversationTemplate = {
-                        ...template,
-                        id: `template-imported-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                        createdAt: Date.now(),
-                        updatedAt: Date.now(),
-                        usageCount: 0
-                    };
-
-                    this.templates.set(newTemplate.id, newTemplate);
-                    imported++;
-                } catch (e) {
-                    errors.push(`Failed to import template: ${template.name || 'unknown'}`);
-                }
-            }
-
-            if (imported > 0) {
-                this.persist();
-            }
-        } catch (e) {
-            errors.push('Failed to parse template file');
+        if (imported > 0) {
+            this.persist();
         }
 
         return { imported, errors };

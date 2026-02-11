@@ -72,6 +72,108 @@ const ACTIVE_WORKSPACE_KEY = 'team_workspaces_active_v1';
 const IDENTITY_KEY = 'team_workspace_identity_v1';
 
 const DEFAULT_IDENTITY_NAME = 'Workspace User';
+const WORKSPACE_ROLES = new Set<WorkspaceRole>(['admin', 'member', 'viewer']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.filter((entry): entry is string => typeof entry === 'string');
+};
+
+const sanitizeWorkspaceMember = (value: unknown): WorkspaceMember | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (
+        typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || !WORKSPACE_ROLES.has(value.role as WorkspaceRole)
+        || typeof value.joinedAt !== 'number'
+        || !Number.isFinite(value.joinedAt)
+    ) {
+        return null;
+    }
+    return {
+        id: value.id,
+        name: value.name,
+        role: value.role as WorkspaceRole,
+        joinedAt: value.joinedAt,
+    };
+};
+
+const sanitizeWorkspaceInvite = (value: unknown): WorkspaceInvite | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (
+        typeof value.token !== 'string'
+        || !WORKSPACE_ROLES.has(value.role as WorkspaceRole)
+        || typeof value.createdAt !== 'number'
+        || !Number.isFinite(value.createdAt)
+        || typeof value.expiresAt !== 'number'
+        || !Number.isFinite(value.expiresAt)
+        || typeof value.inviteLink !== 'string'
+    ) {
+        return null;
+    }
+    return {
+        token: value.token,
+        role: value.role as WorkspaceRole,
+        createdAt: value.createdAt,
+        expiresAt: value.expiresAt,
+        inviteLink: value.inviteLink,
+    };
+};
+
+const sanitizeWorkspace = (value: unknown): TeamWorkspace | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+    if (
+        typeof value.id !== 'string'
+        || typeof value.name !== 'string'
+        || typeof value.createdAt !== 'number'
+        || !Number.isFinite(value.createdAt)
+        || typeof value.updatedAt !== 'number'
+        || !Number.isFinite(value.updatedAt)
+    ) {
+        return null;
+    }
+
+    const modelPolicy = isRecord(value.modelPolicy) ? value.modelPolicy : {};
+    return {
+        id: value.id,
+        name: value.name,
+        description: typeof value.description === 'string' ? value.description : '',
+        createdAt: value.createdAt,
+        updatedAt: value.updatedAt,
+        members: Array.isArray(value.members)
+            ? value.members.map(sanitizeWorkspaceMember).filter((member): member is WorkspaceMember => member !== null)
+            : [],
+        invites: Array.isArray(value.invites)
+            ? value.invites.map(sanitizeWorkspaceInvite).filter((invite): invite is WorkspaceInvite => invite !== null)
+            : [],
+        sharedTemplateIds: sanitizeStringArray(value.sharedTemplateIds),
+        conversationIds: sanitizeStringArray(value.conversationIds),
+        modelPolicy: {
+            allowedProviders: sanitizeStringArray(modelPolicy.allowedProviders),
+            allowedModelIds: sanitizeStringArray(modelPolicy.allowedModelIds),
+        },
+    };
+};
 
 class TeamWorkspacesService {
     private listeners = new Set<() => void>();
@@ -125,8 +227,18 @@ class TeamWorkspacesService {
         try {
             const raw = localStorage.getItem(WORKSPACES_KEY);
             if (!raw) return [];
-            const parsed = JSON.parse(raw) as TeamWorkspace[];
-            return parsed.map(workspace => this.normalizeWorkspace(workspace));
+            const parsed = parseJson(raw);
+            if (!Array.isArray(parsed)) {
+                return [];
+            }
+            const workspaces: TeamWorkspace[] = [];
+            for (let i = 0; i < parsed.length; i++) {
+                const workspace = sanitizeWorkspace(parsed[i]);
+                if (workspace) {
+                    workspaces.push(this.normalizeWorkspace(workspace));
+                }
+            }
+            return workspaces;
         } catch (error) {
             console.error('Failed to load team workspaces:', error);
             return [];
@@ -141,8 +253,8 @@ class TeamWorkspacesService {
         try {
             const raw = localStorage.getItem(IDENTITY_KEY);
             if (raw) {
-                const parsed = JSON.parse(raw) as WorkspaceIdentity;
-                if (parsed?.userId && parsed?.displayName) {
+                const parsed = parseJson(raw);
+                if (isRecord(parsed) && typeof parsed.userId === 'string' && typeof parsed.displayName === 'string') {
                     return parsed;
                 }
             }

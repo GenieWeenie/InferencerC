@@ -94,6 +94,18 @@ interface ServiceState {
     eventCursor: number;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+};
+
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
 class RealTimeCollaborationService {
     private config: CollaborationConfig;
     private readonly STORAGE_KEY = 'collaboration_config';
@@ -117,19 +129,20 @@ class RealTimeCollaborationService {
         try {
             const raw = localStorage.getItem(this.STORAGE_KEY);
             if (raw) {
-                const parsed = JSON.parse(raw);
+                const parsed = parseJson(raw);
+                const data = isRecord(parsed) ? parsed : {};
                 return {
-                    enabled: Boolean(parsed.enabled),
-                    baseUrl: typeof parsed.baseUrl === 'string' && parsed.baseUrl.trim().length > 0
-                        ? parsed.baseUrl.trim().replace(/\/$/, '')
+                    enabled: typeof data.enabled === 'boolean' ? data.enabled : true,
+                    baseUrl: typeof data.baseUrl === 'string' && data.baseUrl.trim().length > 0
+                        ? data.baseUrl.trim().replace(/\/$/, '')
                         : 'http://localhost:3000',
-                    displayName: typeof parsed.displayName === 'string' && parsed.displayName.trim().length > 0
-                        ? parsed.displayName
+                    displayName: typeof data.displayName === 'string' && data.displayName.trim().length > 0
+                        ? data.displayName
                         : (localStorage.getItem('user_name') || 'User'),
-                    pollTimeoutMs: Number.isFinite(parsed.pollTimeoutMs)
-                        ? Math.max(5000, Math.min(30000, Number(parsed.pollTimeoutMs)))
+                    pollTimeoutMs: typeof data.pollTimeoutMs === 'number' && Number.isFinite(data.pollTimeoutMs)
+                        ? Math.max(5000, Math.min(30000, Number(data.pollTimeoutMs)))
                         : 20000,
-                    autoJoin: Boolean(parsed.autoJoin),
+                    autoJoin: typeof data.autoJoin === 'boolean' ? data.autoJoin : false,
                 };
             }
         } catch (error) {
@@ -207,9 +220,9 @@ class RealTimeCollaborationService {
             },
         });
 
-        const payload = await response.json().catch(() => ({} as Record<string, unknown>));
+        const payload: unknown = await response.json().catch(() => ({}));
         if (!response.ok) {
-            const errorMessage = typeof payload.error === 'string'
+            const errorMessage = isRecord(payload) && typeof payload.error === 'string'
                 ? payload.error
                 : `Request failed: ${response.status}`;
             throw new Error(errorMessage);

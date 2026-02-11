@@ -61,6 +61,26 @@ export interface SearchStats {
     topKeywords: string[];
 }
 
+const RECENT_SEARCHES_KEY = 'recent_searches';
+
+const readRecentSearchesFromStorage = (): string[] => {
+    try {
+        const raw = localStorage.getItem(RECENT_SEARCHES_KEY);
+        if (!raw) return [];
+        const parsed: unknown = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        const searches: string[] = [];
+        for (let i = 0; i < parsed.length; i++) {
+            if (typeof parsed[i] === 'string') {
+                searches.push(parsed[i]);
+            }
+        }
+        return searches;
+    } catch {
+        return [];
+    }
+};
+
 export class SearchService {
     private static stopWords = new Set([
         'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
@@ -452,15 +472,11 @@ export class SearchService {
         const suggestions: string[] = [];
 
         // Get recent searches from localStorage
-        try {
-            const recentSearches = JSON.parse(localStorage.getItem('recent_searches') || '[]') as string[];
-            const matchingRecent = recentSearches.filter(s =>
-                s.toLowerCase().startsWith(partialQuery.toLowerCase())
-            );
-            suggestions.push(...matchingRecent.slice(0, limit));
-        } catch {
-            // Ignore parsing errors
-        }
+        const recentSearches = readRecentSearchesFromStorage();
+        const matchingRecent = recentSearches.filter(s =>
+            s.toLowerCase().startsWith(partialQuery.toLowerCase())
+        );
+        suggestions.push(...matchingRecent.slice(0, limit));
 
         // Common search patterns/suggestions
         const commonPatterns = [
@@ -482,7 +498,7 @@ export class SearchService {
      */
     static saveRecentSearch(query: string): void {
         try {
-            const recentSearches = JSON.parse(localStorage.getItem('recent_searches') || '[]') as string[];
+            const recentSearches = readRecentSearchesFromStorage();
 
             // Remove if already exists
             const filtered = recentSearches.filter(s => s !== query);
@@ -493,7 +509,7 @@ export class SearchService {
             // Keep only last 20
             const trimmed = filtered.slice(0, 20);
 
-            localStorage.setItem('recent_searches', JSON.stringify(trimmed));
+            localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(trimmed));
         } catch {
             // Ignore errors
         }
@@ -510,11 +526,7 @@ export class SearchService {
      * Get recent searches
      */
     static getRecentSearches(): string[] {
-        try {
-            return JSON.parse(localStorage.getItem('recent_searches') || '[]') as string[];
-        } catch {
-            return [];
-        }
+        return readRecentSearchesFromStorage();
     }
 
     /**
