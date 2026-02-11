@@ -10,7 +10,6 @@ import {
     TopHeaderModelUtilityControls,
     TopHeaderPrimaryActions,
     TopHeaderSecondaryActions,
-    type IntegrationAvailability,
 } from '../components/chat/ChatHeaderCluster';
 import {
     ChatInspectorTabPanel,
@@ -31,8 +30,6 @@ import { ChatSidebar, type ChatSidebarPanels } from '../components/chat/ChatSide
 import { ChatWorkspaceShell } from '../components/chat/ChatWorkspaceShell';
 import type { LaunchReadinessStep } from '../components/ChatEmptyState';
 import type { LogEntry } from '../components/RequestResponseLog';
-import type { Tutorial } from '../services/onboarding';
-import { crashRecoveryService } from '../services/crashRecovery';
 import type { CloudSyncStatus } from '../services/cloudSync';
 const PromptManager = React.lazy(() => import('../components/PromptManager'));
 import { useChat } from '../hooks/useChat';
@@ -41,9 +38,12 @@ import { useConversationTree } from '../hooks/useConversationTree';
 import { useChatComposerInteractions } from '../hooks/useChatComposerInteractions';
 import { useChatContextOptimizer } from '../hooks/useChatContextOptimizer';
 import { useChatComposerControlBar } from '../hooks/useChatComposerControlBar';
+import { useChatDevMonitors } from '../hooks/useChatDevMonitors';
 import { useChatDiagnosticsPanel } from '../hooks/useChatDiagnosticsPanel';
+import { useChatExternalActions } from '../hooks/useChatExternalActions';
 import { useChatGestureInteractions } from '../hooks/useChatGestureInteractions';
 import { useChatHeaderActions } from '../hooks/useChatHeaderActions';
+import { useChatLifecycleState } from '../hooks/useChatLifecycleState';
 import { useChatKeyboardController } from '../hooks/useChatKeyboardController';
 import { useChatMessageActionsController } from '../hooks/useChatMessageActionsController';
 import { useChatHeaderUtilityControls } from '../hooks/useChatHeaderUtilityControls';
@@ -52,8 +52,20 @@ import { formatPerfMs, useChatPerfBenchmarks } from '../hooks/useChatPerfBenchma
 import { useChatSendPipeline } from '../hooks/useChatSendPipeline';
 import { useChatSessionIntegrations } from '../hooks/useChatSessionIntegrations';
 import { useChatSlashPrompts } from '../hooks/useChatSlashPrompts';
+import { useChatStartupRecovery } from '../hooks/useChatStartupRecovery';
 import { buildReadinessSteps, getDiagnosticsStatus } from '../lib/chatDiagnosticsModels';
-import { readIntegrationAvailability } from '../lib/chatIntegrations';
+import {
+    loadActivityLogService,
+    loadAnalyticsStore,
+    loadAutoCategorizationService,
+    loadAutoTaggingService,
+    loadCloudSyncService,
+    loadContextManagementService,
+    loadMultiModalAIService,
+    loadProjectContextService,
+    loadPromptVariableService,
+    loadWorkflowsService,
+} from '../lib/chatLazyServices';
 import {
     areSearchResultIndicesEqual,
     findChatSearchMatches,
@@ -70,10 +82,7 @@ import {
 import { useMCP } from '../hooks/useMCP';
 import type { UsageStatsRecord } from '../services/analyticsStore';
 import type { ProjectContext } from '../services/projectContext';
-import { HistoryService } from '../services/history';
 import type { ConversationTemplate } from '../services/templates';
-import { RecoveryState } from '../../shared/types';
-import SkeletonLoader from '../components/SkeletonLoader';
 
 const KeyboardShortcutsModal = React.lazy(() => import('../components/KeyboardShortcutsModal'));
 const RequestResponseLog = React.lazy(() => import('../components/RequestResponseLog'));
@@ -154,124 +163,13 @@ const FederatedLearningPanel = React.lazy(() =>
     import('../components/FederatedLearningPanel').then((mod) => ({ default: mod.FederatedLearningPanel }))
 );
 
-const RECOVERY_CLEAN_EXIT_KEY = 'app_recovery_clean_exit';
 const CHAT_PERF_HISTORY_KEY = 'chat_message_perf_benchmarks_v1';
 const CHAT_DEV_MONITORS_ENABLED_KEY = 'chat_dev_monitors_enabled_v1';
-const ONBOARDING_COMPLETED_KEY = 'onboarding_completed';
 const ACTIVITY_LOG_COUNT_KEY = 'api_activity_log_count';
 const PROJECT_CONTEXT_FEATURE_ENABLED_KEY = 'project_context_feature_enabled_v1';
-const CLOUD_SYNC_CONFIG_KEY = 'cloud_sync_config_v1';
-const MCP_SERVERS_CONFIG_KEY = 'mcp_servers';
-const GITHUB_CREDENTIAL_MARKER_KEY = 'secure_marker_github_api_key';
-const GITHUB_CREDENTIAL_LEGACY_KEY = 'github_api_key';
 const MAX_ACTIVITY_LOG_ENTRIES = 200;
 
-type OnboardingServiceModule = typeof import('../services/onboarding');
-type CloudSyncService = typeof import('../services/cloudSync')['cloudSyncService'];
-type MultiModalAIService = typeof import('../services/multiModalAI')['multiModalAIService'];
-type AutoCategorizationService = typeof import('../services/autoCategorization')['autoCategorizationService'];
-type AutoTaggingService = typeof import('../services/autoTagging')['autoTaggingService'];
-type WorkflowsService = typeof import('../services/workflows')['workflowsService'];
-type ApiClientService = typeof import('../services/apiClient')['apiClientService'];
-type ProjectContextService = typeof import('../services/projectContext')['projectContextService'];
-type PromptVariableServiceType = typeof import('../services/promptVariables')['PromptVariableService'];
 type ContextManagementServiceType = typeof import('../services/contextManagement')['ContextManagementService'];
-type AnalyticsStoreModule = typeof import('../services/analyticsStore');
-type ActivityLogServiceType = typeof import('../services/activityLog')['activityLogService'];
-
-let cloudSyncServicePromise: Promise<CloudSyncService> | null = null;
-let multiModalAIServicePromise: Promise<MultiModalAIService> | null = null;
-let autoCategorizationServicePromise: Promise<AutoCategorizationService> | null = null;
-let autoTaggingServicePromise: Promise<AutoTaggingService> | null = null;
-let workflowsServicePromise: Promise<WorkflowsService> | null = null;
-let apiClientServicePromise: Promise<ApiClientService> | null = null;
-let projectContextServicePromise: Promise<ProjectContextService> | null = null;
-let promptVariableServicePromise: Promise<PromptVariableServiceType> | null = null;
-let contextManagementServicePromise: Promise<ContextManagementServiceType> | null = null;
-let analyticsStorePromise: Promise<AnalyticsStoreModule> | null = null;
-let activityLogServicePromise: Promise<ActivityLogServiceType> | null = null;
-
-const loadOnboardingService = async () => {
-    const onboardingModule: OnboardingServiceModule = await import('../services/onboarding');
-    return onboardingModule.onboardingService;
-};
-
-const loadCloudSyncService = async (): Promise<CloudSyncService> => {
-    if (!cloudSyncServicePromise) {
-        cloudSyncServicePromise = import('../services/cloudSync').then((mod) => mod.cloudSyncService);
-    }
-    return cloudSyncServicePromise;
-};
-
-const loadMultiModalAIService = async (): Promise<MultiModalAIService> => {
-    if (!multiModalAIServicePromise) {
-        multiModalAIServicePromise = import('../services/multiModalAI').then((mod) => mod.multiModalAIService);
-    }
-    return multiModalAIServicePromise;
-};
-
-const loadAutoCategorizationService = async (): Promise<AutoCategorizationService> => {
-    if (!autoCategorizationServicePromise) {
-        autoCategorizationServicePromise = import('../services/autoCategorization').then((mod) => mod.autoCategorizationService);
-    }
-    return autoCategorizationServicePromise;
-};
-
-const loadAutoTaggingService = async (): Promise<AutoTaggingService> => {
-    if (!autoTaggingServicePromise) {
-        autoTaggingServicePromise = import('../services/autoTagging').then((mod) => mod.autoTaggingService);
-    }
-    return autoTaggingServicePromise;
-};
-
-const loadWorkflowsService = async (): Promise<WorkflowsService> => {
-    if (!workflowsServicePromise) {
-        workflowsServicePromise = import('../services/workflows').then((mod) => mod.workflowsService);
-    }
-    return workflowsServicePromise;
-};
-
-const loadApiClientService = async (): Promise<ApiClientService> => {
-    if (!apiClientServicePromise) {
-        apiClientServicePromise = import('../services/apiClient').then((mod) => mod.apiClientService);
-    }
-    return apiClientServicePromise;
-};
-
-const loadProjectContextService = async (): Promise<ProjectContextService> => {
-    if (!projectContextServicePromise) {
-        projectContextServicePromise = import('../services/projectContext').then((mod) => mod.projectContextService);
-    }
-    return projectContextServicePromise;
-};
-
-const loadPromptVariableService = async (): Promise<PromptVariableServiceType> => {
-    if (!promptVariableServicePromise) {
-        promptVariableServicePromise = import('../services/promptVariables').then((mod) => mod.PromptVariableService);
-    }
-    return promptVariableServicePromise;
-};
-
-const loadContextManagementService = async (): Promise<ContextManagementServiceType> => {
-    if (!contextManagementServicePromise) {
-        contextManagementServicePromise = import('../services/contextManagement').then((mod) => mod.ContextManagementService);
-    }
-    return contextManagementServicePromise;
-};
-
-const loadAnalyticsStore = async (): Promise<AnalyticsStoreModule> => {
-    if (!analyticsStorePromise) {
-        analyticsStorePromise = import('../services/analyticsStore');
-    }
-    return analyticsStorePromise;
-};
-
-const loadActivityLogService = async (): Promise<ActivityLogServiceType> => {
-    if (!activityLogServicePromise) {
-        activityLogServicePromise = import('../services/activityLog').then((mod) => mod.activityLogService);
-    }
-    return activityLogServicePromise;
-};
 
 const readPersistedProjectContextFeatureEnabled = (): boolean => {
     try {
@@ -291,88 +189,6 @@ const persistProjectContextFeatureEnabled = (enabled: boolean): void => {
     } catch {
         // Ignore local persistence errors for this optional UI flag.
     }
-};
-
-const readCloudSyncAuthSnapshot = (): boolean => {
-    try {
-        const raw = localStorage.getItem(CLOUD_SYNC_CONFIG_KEY);
-        if (!raw) return false;
-        const parsed = JSON.parse(raw) as Partial<{
-            token?: string;
-            accountId?: string;
-            encryptionSalt?: string;
-        }>;
-        return Boolean(parsed.token && parsed.accountId && parsed.encryptionSalt);
-    } catch {
-        return false;
-    }
-};
-
-const readHasConfiguredMcpServers = (): boolean => {
-    try {
-        const raw = localStorage.getItem(MCP_SERVERS_CONFIG_KEY);
-        if (!raw) return false;
-        const parsed = JSON.parse(raw) as unknown;
-        return Array.isArray(parsed) && parsed.length > 0;
-    } catch {
-        return false;
-    }
-};
-
-const readHasGithubCredentialSnapshot = (): boolean => {
-    try {
-        return Boolean(
-            localStorage.getItem(GITHUB_CREDENTIAL_MARKER_KEY) ||
-            localStorage.getItem(GITHUB_CREDENTIAL_LEGACY_KEY)
-        );
-    } catch {
-        return false;
-    }
-};
-
-type ResponsiveBreakpoint = 'mobile' | 'tablet' | 'desktop' | 'wide';
-
-interface ResponsiveConfig {
-    breakpoint: ResponsiveBreakpoint;
-    isMobile: boolean;
-    isTablet: boolean;
-    isDesktop: boolean;
-    isWide: boolean;
-    width: number;
-    height: number;
-}
-
-const applyResponsiveClasses = (config: ResponsiveConfig): void => {
-    if (typeof document === 'undefined') return;
-
-    document.documentElement.setAttribute('data-breakpoint', config.breakpoint);
-    document.documentElement.classList.toggle('is-mobile', config.isMobile);
-    document.documentElement.classList.toggle('is-tablet', config.isTablet);
-    document.documentElement.classList.toggle('is-desktop', config.isDesktop);
-    document.documentElement.classList.toggle('is-wide', config.isWide);
-};
-
-const getFallbackResponsiveConfig = (): ResponsiveConfig => {
-    const width = typeof window === 'undefined' ? 1280 : window.innerWidth;
-    const height = typeof window === 'undefined' ? 720 : window.innerHeight;
-    const breakpoint = width < 640 ? 'mobile' : width < 1024 ? 'tablet' : width < 1920 ? 'desktop' : 'wide';
-    return {
-        breakpoint,
-        isMobile: breakpoint === 'mobile',
-        isTablet: breakpoint === 'tablet',
-        isDesktop: breakpoint === 'desktop' || breakpoint === 'wide',
-        isWide: breakpoint === 'wide',
-        width,
-        height,
-    };
-};
-
-const EMPTY_INTEGRATION_AVAILABILITY: IntegrationAvailability = {
-    notion: false,
-    slack: false,
-    discord: false,
-    email: false,
-    calendar: false,
 };
 
 const readPersistedApiLogCount = (): number => {
@@ -469,25 +285,27 @@ const Chat: React.FC = () => {
         loadedMessageIndices
     } = useChat(handleApiLog, streamingEnabled);
 
+    const {
+        showTutorial,
+        currentTutorial,
+        showRecoveryDialog,
+        setShowRecoveryDialog,
+        recoveryState,
+        handleRestoreSession,
+        handleDismissRecovery,
+        handleCompleteTutorial,
+        handleSkipTutorial,
+    } = useChatStartupRecovery({
+        loadSession,
+        setInput,
+    });
+
     // Simulate initial session loading for skeleton UI
     React.useEffect(() => {
         const timer = setTimeout(() => {
             setIsLoadingSessions(false);
         }, 300);
         return () => clearTimeout(timer);
-    }, []);
-
-    React.useEffect(() => {
-        const refreshConfiguredMcpServers = () => {
-            setHasConfiguredMcpServers(readHasConfiguredMcpServers());
-        };
-
-        window.addEventListener('focus', refreshConfiguredMcpServers);
-        window.addEventListener('storage', refreshConfiguredMcpServers);
-        return () => {
-            window.removeEventListener('focus', refreshConfiguredMcpServers);
-            window.removeEventListener('storage', refreshConfiguredMcpServers);
-        };
     }, []);
 
     // Show skeleton loaders on initial message load
@@ -505,7 +323,25 @@ const Chat: React.FC = () => {
     }, [battleMode, availableModels, currentModel, secondaryModel, setSecondaryModel]);
 
     const { prompts } = usePrompts();
-    const [hasConfiguredMcpServers, setHasConfiguredMcpServers] = React.useState(readHasConfiguredMcpServers);
+    const [searchQuery, setSearchQuery] = React.useState('');
+    const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState('');
+    const [showSearch, setShowSearch] = React.useState(false);
+    const [searchResults, setSearchResults] = React.useState<number[]>([]);
+    const [currentSearchIndex, setCurrentSearchIndex] = React.useState(0);
+    const [showSearchResultsList, setShowSearchResultsList] = React.useState(false);
+    const {
+        hasConfiguredMcpServers,
+        isCompactViewport,
+        VirtuosoComponent,
+        isCloudSyncAuthenticated,
+        setIsCloudSyncAuthenticated,
+        githubConfigured,
+        integrationAvailability,
+    } = useChatLifecycleState({
+        historyLength: history.length,
+        showSearchResultsList,
+        searchResultsLength: searchResults.length,
+    });
     const {
         tools: mcpTools,
         connectedCount: mcpConnectedCount,
@@ -519,25 +355,9 @@ const Chat: React.FC = () => {
     const [editingMessageIndex, setEditingMessageIndex] = React.useState<number | null>(null);
     const [editedMessageContent, setEditedMessageContent] = React.useState<string>('');
     const [showShortcutsModal, setShowShortcutsModal] = React.useState(false);
-    const [searchQuery, setSearchQuery] = React.useState('');
-    const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState('');
-    const [showSearch, setShowSearch] = React.useState(false);
-    const [searchResults, setSearchResults] = React.useState<number[]>([]);
-    const [currentSearchIndex, setCurrentSearchIndex] = React.useState(0);
-    const [showSearchResultsList, setShowSearchResultsList] = React.useState(false);
     const virtuosoRef = React.useRef<any>(null);
-    const [VirtuosoComponent, setVirtuosoComponent] = React.useState<any>(null);
     const searchResultPreviewCacheRef = React.useRef<Map<number, SearchResultPreviewCacheEntry>>(new Map());
     const rowMetadataCacheRef = React.useRef(createChatRowMetadataCacheState());
-
-    // FPS monitoring refs
-    const fpsFrameCount = React.useRef(0);
-    const fpsLastTime = React.useRef(performance.now());
-    const fpsAnimationFrameId = React.useRef<number | null>(null);
-
-    // Memory monitoring refs
-    const memoryMonitorInterval = React.useRef<NodeJS.Timeout | null>(null);
-    const lastMemoryWarning = React.useRef<number>(0);
 
     const [hasCompletedLaunchChecklist, setHasCompletedLaunchChecklist] = React.useState<boolean>(() => {
         return localStorage.getItem('chat_launch_checklist_completed') === '1';
@@ -559,8 +379,6 @@ const Chat: React.FC = () => {
     const [includeContextInMessages, setIncludeContextInMessages] = React.useState(true);
     const [showGithubInput, setShowGithubInput] = React.useState(false);
     const [githubUrl, setGithubUrl] = React.useState('');
-    const [isFetchingGithub, setIsFetchingGithub] = React.useState(false);
-    const [githubConfigured, setGithubConfigured] = React.useState<boolean>(readHasGithubCredentialSnapshot);
 
     // Conversation branching state
     const [showTreeView, setShowTreeView] = React.useState(false);
@@ -592,11 +410,7 @@ const Chat: React.FC = () => {
     const [showCodeIntegration, setShowCodeIntegration] = React.useState(false);
     const [selectedCode, setSelectedCode] = React.useState<{ code: string; language: string } | null>(null);
     const [showWorkspaceViews, setShowWorkspaceViews] = React.useState(false);
-    const [responsiveConfig, setResponsiveConfig] = React.useState<ResponsiveConfig>(() => getFallbackResponsiveConfig());
     const [contextManagementService, setContextManagementService] = React.useState<ContextManagementServiceType | null>(null);
-    const isCompactViewport = responsiveConfig.isMobile || responsiveConfig.isTablet;
-    const [showTutorial, setShowTutorial] = React.useState(false);
-    const [currentTutorial, setCurrentTutorial] = React.useState<Tutorial | null>(null);
     const [showBCI, setShowBCI] = React.useState(false);
     const [showMultiModal, setShowMultiModal] = React.useState(false);
     const [showCollaboration, setShowCollaboration] = React.useState(false);
@@ -604,15 +418,9 @@ const Chat: React.FC = () => {
     const [showTeamWorkspaces, setShowTeamWorkspaces] = React.useState(false);
     const [showEnterpriseCompliance, setShowEnterpriseCompliance] = React.useState(false);
     const [cloudSyncStatus, setCloudSyncStatus] = React.useState<CloudSyncStatus | null>(null);
-    const [isCloudSyncAuthenticated, setIsCloudSyncAuthenticated] = React.useState<boolean>(readCloudSyncAuthSnapshot);
     const [showBlockchain, setShowBlockchain] = React.useState(false);
     const [showAIAgents, setShowAIAgents] = React.useState(false);
     const [showFederatedLearning, setShowFederatedLearning] = React.useState(false);
-    const [integrationAvailability, setIntegrationAvailability] = React.useState<IntegrationAvailability>(EMPTY_INTEGRATION_AVAILABILITY);
-
-    // Recovery dialog state
-    const [showRecoveryDialog, setShowRecoveryDialog] = React.useState(false);
-    const [recoveryState, setRecoveryState] = React.useState<RecoveryState | null>(null);
 
     // Template library dialog state
     const [showTemplateLibrary, setShowTemplateLibrary] = React.useState(false);
@@ -637,20 +445,6 @@ const Chat: React.FC = () => {
         }
     }, []);
 
-    React.useEffect(() => {
-        const updateResponsiveConfig = () => {
-            const nextConfig = getFallbackResponsiveConfig();
-            setResponsiveConfig(nextConfig);
-            applyResponsiveClasses(nextConfig);
-        };
-
-        updateResponsiveConfig();
-        window.addEventListener('resize', updateResponsiveConfig);
-        return () => {
-            window.removeEventListener('resize', updateResponsiveConfig);
-        };
-    }, []);
-
     const shouldLoadContextManagement = history.length > 0 || sidebarOpen || projectContextFeatureEnabled;
     React.useEffect(() => {
         if (!shouldLoadContextManagement || contextManagementService) {
@@ -671,19 +465,6 @@ const Chat: React.FC = () => {
             isMounted = false;
         };
     }, [shouldLoadContextManagement, contextManagementService]);
-
-    React.useEffect(() => {
-        const refreshAuthSnapshot = () => {
-            setIsCloudSyncAuthenticated(readCloudSyncAuthSnapshot());
-        };
-
-        window.addEventListener('focus', refreshAuthSnapshot);
-        window.addEventListener('storage', refreshAuthSnapshot);
-        return () => {
-            window.removeEventListener('focus', refreshAuthSnapshot);
-            window.removeEventListener('storage', refreshAuthSnapshot);
-        };
-    }, []);
 
     const shouldLoadCloudSyncService = showCloudSync || isCloudSyncAuthenticated;
     React.useEffect(() => {
@@ -831,174 +612,6 @@ const Chat: React.FC = () => {
         }
     }, [devMonitorsEnabled]);
 
-    React.useEffect(() => {
-        const shouldLoadVirtuoso =
-            history.length > 0 || (showSearchResultsList && searchResults.length > 0);
-        if (!shouldLoadVirtuoso || VirtuosoComponent) return;
-
-        let cancelled = false;
-        import('react-virtuoso')
-            .then((mod) => {
-                if (cancelled) return;
-                setVirtuosoComponent(() => mod.Virtuoso);
-            })
-            .catch(() => {
-                // Keep fallback UI if loading fails; app remains usable.
-            });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [history.length, showSearchResultsList, searchResults.length, VirtuosoComponent]);
-
-    React.useEffect(() => {
-        if (history.length === 0) {
-            setIntegrationAvailability(EMPTY_INTEGRATION_AVAILABILITY);
-            return;
-        }
-
-        const refresh = () => {
-            setIntegrationAvailability(readIntegrationAvailability());
-        };
-        refresh();
-        const handleStorage = () => refresh();
-        const handleFocus = () => refresh();
-        const handleCredentialsUpdated = () => refresh();
-
-        window.addEventListener('storage', handleStorage);
-        window.addEventListener('focus', handleFocus);
-        window.addEventListener('credentials-updated', handleCredentialsUpdated as EventListener);
-        return () => {
-            window.removeEventListener('storage', handleStorage);
-            window.removeEventListener('focus', handleFocus);
-            window.removeEventListener('credentials-updated', handleCredentialsUpdated as EventListener);
-        };
-    }, [history.length]);
-
-    // Check for onboarding on mount
-    React.useEffect(() => {
-        if (localStorage.getItem(ONBOARDING_COMPLETED_KEY) === 'true') {
-            return;
-        }
-
-        let cancelled = false;
-        let timeoutId: ReturnType<typeof setTimeout> | null = null;
-        let idleId: number | null = null;
-        const idleWindow = window as Window & {
-            requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
-            cancelIdleCallback?: (handle: number) => void;
-        };
-
-        const checkOnboarding = async () => {
-            try {
-                if (localStorage.getItem(ONBOARDING_COMPLETED_KEY) === 'true') {
-                    return;
-                }
-
-                const onboardingService = await loadOnboardingService();
-                if (cancelled || onboardingService.hasCompletedOnboarding()) {
-                    return;
-                }
-
-                const tutorials = onboardingService.getTutorials();
-                const welcomeTutorial = tutorials.find(t => t.id === 'welcome');
-                if (!cancelled && welcomeTutorial && !welcomeTutorial.completed) {
-                    setCurrentTutorial(welcomeTutorial);
-                    setShowTutorial(true);
-                }
-            } catch {
-                // Ignore onboarding initialization failures to avoid blocking chat startup.
-            }
-        };
-
-        if (idleWindow.requestIdleCallback) {
-            idleId = idleWindow.requestIdleCallback(() => {
-                void checkOnboarding();
-            }, { timeout: 2500 });
-        } else {
-            timeoutId = setTimeout(() => {
-                void checkOnboarding();
-            }, 800);
-        }
-
-        return () => {
-            cancelled = true;
-            if (timeoutId) {
-                clearTimeout(timeoutId);
-            }
-            if (idleId !== null && idleWindow.cancelIdleCallback) {
-                idleWindow.cancelIdleCallback(idleId);
-            }
-        };
-    }, []);
-
-    const markRecoveryExitClean = React.useCallback(() => {
-        try {
-            localStorage.setItem(RECOVERY_CLEAN_EXIT_KEY, 'true');
-        } catch {
-            // Ignore storage failures; recovery still works best-effort.
-        }
-    }, []);
-
-    // Check for crash recovery state on mount
-    React.useEffect(() => {
-        let hadUncleanExit = false;
-        try {
-            hadUncleanExit = localStorage.getItem(RECOVERY_CLEAN_EXIT_KEY) === 'false';
-        } catch {
-            hadUncleanExit = false;
-        }
-
-        const savedRecoveryState = crashRecoveryService.getRecoveryState();
-        if (savedRecoveryState && hadUncleanExit) {
-            setRecoveryState(savedRecoveryState);
-            setShowRecoveryDialog(true);
-        }
-
-        // Mark current app run as active; if it crashes before clean shutdown,
-        // this flag remains false and recovery will be offered next launch.
-        try {
-            localStorage.setItem(RECOVERY_CLEAN_EXIT_KEY, 'false');
-        } catch {
-            // Ignore storage failures; recovery still works best-effort.
-        }
-    }, []);
-
-    // Mark intentional navigation/unload as clean so tab switches don't trigger recovery.
-    React.useEffect(() => {
-        window.addEventListener('beforeunload', markRecoveryExitClean);
-        return () => {
-            markRecoveryExitClean();
-            window.removeEventListener('beforeunload', markRecoveryExitClean);
-        };
-    }, [markRecoveryExitClean]);
-
-    // Recovery dialog handlers
-    const handleRestoreSession = () => {
-        if (!recoveryState) return;
-
-        // Restore the session
-        loadSession(recoveryState.sessionId);
-
-        // Restore draft message if exists
-        if (recoveryState.draftMessage) {
-            setInput(recoveryState.draftMessage);
-        }
-
-        // Clear recovery state
-        HistoryService.clearRecoveryState();
-        markRecoveryExitClean();
-        setShowRecoveryDialog(false);
-        setRecoveryState(null);
-    };
-
-    const handleDismissRecovery = () => {
-        HistoryService.clearRecoveryState();
-        markRecoveryExitClean();
-        setShowRecoveryDialog(false);
-        setRecoveryState(null);
-    };
-
     // Sync tree with history when branching is enabled or when history changes
     React.useEffect(() => {
         if (branchingEnabled && history.length > 0) {
@@ -1008,164 +621,30 @@ const Chat: React.FC = () => {
         }
     }, [branchingEnabled, history.length]); // Run when branching is enabled OR history length changes
 
-    // FPS monitoring for Virtuoso scroll performance
-    React.useEffect(() => {
-        if (!devMonitorsEnabled) return;
-
-        let isScrolling = false;
-        let scrollTimeout: NodeJS.Timeout;
-
-        const measureFPS = () => {
-            fpsFrameCount.current++;
-            const now = performance.now();
-            const delta = now - fpsLastTime.current;
-
-            // Log FPS every second during scrolling
-            if (delta >= 1000 && isScrolling) {
-                const fps = Math.round((fpsFrameCount.current * 1000) / delta);
-                console.log(`[FPS Monitor] Virtuoso Scroll: ${fps} FPS`);
-
-                fpsFrameCount.current = 0;
-                fpsLastTime.current = now;
-            }
-
-            if (isScrolling) {
-                fpsAnimationFrameId.current = requestAnimationFrame(measureFPS);
-            }
-        };
-
-        const handleScroll = () => {
-            if (!isScrolling) {
-                isScrolling = true;
-                fpsFrameCount.current = 0;
-                fpsLastTime.current = performance.now();
-                fpsAnimationFrameId.current = requestAnimationFrame(measureFPS);
-            }
-
-            clearTimeout(scrollTimeout);
-            scrollTimeout = setTimeout(() => {
-                isScrolling = false;
-                if (fpsAnimationFrameId.current !== null) {
-                    cancelAnimationFrame(fpsAnimationFrameId.current);
-                    fpsAnimationFrameId.current = null;
-                }
-            }, 150);
-        };
-
-        // Get the Virtuoso scroller element
-        const virtuosoElement = virtuosoRef.current?.getScrollerElement?.();
-        if (virtuosoElement) {
-            virtuosoElement.addEventListener('scroll', handleScroll, { passive: true });
-        }
-
-        return () => {
-            if (virtuosoElement) {
-                virtuosoElement.removeEventListener('scroll', handleScroll);
-            }
-            clearTimeout(scrollTimeout);
-            if (fpsAnimationFrameId.current !== null) {
-                cancelAnimationFrame(fpsAnimationFrameId.current);
-            }
-        };
-    }, [devMonitorsEnabled, VirtuosoComponent, history.length]);
-
-    // Memory usage monitoring for long conversations
-    React.useEffect(() => {
-        if (!devMonitorsEnabled) return;
-
-        const monitorMemory = () => {
-            // Check if performance.memory API is available (Chrome/Chromium)
-            if ((performance as any).memory) {
-                const memory = (performance as any).memory;
-                const usedMB = Math.round(memory.usedJSHeapSize / 1024 / 1024);
-                const totalMB = Math.round(memory.totalJSHeapSize / 1024 / 1024);
-                const limitMB = Math.round(memory.jsHeapSizeLimit / 1024 / 1024);
-                const usagePercent = Math.round((memory.usedJSHeapSize / memory.jsHeapSizeLimit) * 100);
-
-                // Log memory usage every 30 seconds
-                console.log(`[Memory Monitor] Used: ${usedMB}MB / ${limitMB}MB (${usagePercent}%) | Total Allocated: ${totalMB}MB | Messages: ${history.length}`);
-
-                // Warn if memory usage is high (> 75% of limit)
-                if (usagePercent > 75) {
-                    const now = Date.now();
-                    // Only show warning once per minute to avoid spam
-                    if (now - lastMemoryWarning.current > 60000) {
-                        console.warn(`[Memory Monitor] HIGH MEMORY USAGE: ${usedMB}MB / ${limitMB}MB (${usagePercent}%) - Consider closing some conversations`);
-                        lastMemoryWarning.current = now;
-                    }
-                }
-
-                // Critical warning if approaching 2GB limit
-                if (usedMB > 1800) {
-                    console.error(`[Memory Monitor] CRITICAL: Memory usage exceeds 1.8GB (${usedMB}MB) - Performance may degrade`);
-                }
-            }
-        };
-
-        // Start monitoring - check every 30 seconds
-        memoryMonitorInterval.current = setInterval(monitorMemory, 30000);
-
-        // Initial check
-        monitorMemory();
-
-        return () => {
-            if (memoryMonitorInterval.current) {
-                clearInterval(memoryMonitorInterval.current);
-            }
-        };
-    }, [devMonitorsEnabled, history.length]); // Re-run when history length changes to log message count
-
-    React.useEffect(() => {
-        const refreshGithubConfiguredSnapshot = () => {
-            setGithubConfigured(readHasGithubCredentialSnapshot());
-        };
-
-        refreshGithubConfiguredSnapshot();
-        window.addEventListener('credentials-updated', refreshGithubConfiguredSnapshot as EventListener);
-        window.addEventListener('focus', refreshGithubConfiguredSnapshot);
-        window.addEventListener('storage', refreshGithubConfiguredSnapshot);
-
-        return () => {
-            window.removeEventListener('credentials-updated', refreshGithubConfiguredSnapshot as EventListener);
-            window.removeEventListener('focus', refreshGithubConfiguredSnapshot);
-            window.removeEventListener('storage', refreshGithubConfiguredSnapshot);
-        };
-    }, []);
-
-    // GitHub file fetching
-    const executeGithubFetch = async () => {
-        if (!githubUrl.trim()) return;
-
-        setIsFetchingGithub(true);
-        try {
-            const { githubService } = await import('../services/github');
-            const parsed = githubService.parseGitHubUrl(githubUrl.trim());
-            if (!parsed) {
-                toast.error('Invalid GitHub URL. Use format: owner/repo/path or full GitHub URL');
-                return;
-            }
-
-            const result = await githubService.fetchFileContent(
-                parsed.owner,
-                parsed.repo,
-                parsed.path,
-                parsed.ref
-            );
-
-            if (result.success && result.content) {
-                const content = `[CONTEXT FROM GITHUB: ${parsed.owner} /${parsed.repo}/${parsed.path}]\n\n\`\`\`${parsed.path.split('.').pop() || 'text'}\n${result.content}\n\`\`\``;
-                appendMessage({ role: 'user', content });
-                toast.success("GitHub file added to conversation context.");
-                setGithubUrl('');
-            } else {
-                toast.error(result.error || 'Failed to fetch file');
-            }
-        } catch (err: any) {
-            toast.error(err.message || 'Failed to fetch from GitHub');
-        } finally {
-            setIsFetchingGithub(false);
-        }
-    };
+    useChatDevMonitors({
+        enabled: devMonitorsEnabled,
+        historyLength: history.length,
+        virtuosoRef,
+        virtuosoReadyKey: VirtuosoComponent,
+    });
+    const {
+        isFetchingGithub,
+        executeGithubFetch,
+        executeChatCompletion,
+        handleInsertToFile,
+    } = useChatExternalActions({
+        availableModels,
+        currentModel,
+        temperature,
+        topP,
+        maxTokens,
+        appendMessage,
+        githubUrl,
+        setGithubUrl,
+        mcpAvailable,
+        mcpTools,
+        executeMcpTool,
+    });
 
     const currentModelObj = React.useMemo(
         () => availableModels.find(m => m.id === currentModel),
@@ -1546,109 +1025,6 @@ const Chat: React.FC = () => {
         setEditedMessageContent,
         handleLoadSession,
     });
-
-    const executeChatCompletion = React.useCallback(async (params: {
-        prompt: string;
-        systemPrompt?: string;
-        modelId?: string;
-        temperature?: number;
-        topP?: number;
-        maxTokens?: number;
-    }): Promise<{ content: string; tokensUsed?: number }> => {
-        const testMessages: Array<{ role: 'system' | 'user'; content: string }> = [];
-        if (params.systemPrompt) {
-            testMessages.push({ role: 'system', content: params.systemPrompt });
-        }
-        testMessages.push({ role: 'user', content: params.prompt });
-
-        const selectedModelId = params.modelId || currentModel || availableModels[0]?.id;
-        if (!selectedModelId) {
-            throw new Error('No model selected');
-        }
-
-        const selectedTemperature = params.temperature ?? temperature;
-        const selectedTopP = params.topP ?? topP;
-        const selectedMaxTokens = params.maxTokens ?? maxTokens;
-        const apiClientService = await loadApiClientService();
-
-        const request = await apiClientService.buildChatCompletionRequest(
-            selectedModelId,
-            testMessages,
-            {
-                temperature: selectedTemperature,
-                topP: selectedTopP,
-                maxTokens: selectedMaxTokens,
-                stream: false,
-            }
-        );
-        const response = await apiClientService.makeRequest(request);
-
-        if (response.status < 200 || response.status >= 300) {
-            throw new Error(`API error (${response.status}): ${response.statusText}`);
-        }
-
-        const data = response.body as any;
-        const content = data?.choices?.[0]?.message?.content || '';
-        const tokensUsed = data?.usage?.total_tokens;
-
-        return { content, tokensUsed };
-    }, [availableModels, currentModel, maxTokens, temperature, topP]);
-
-    const handleInsertToFile = React.useCallback(async (code: string, language: string, filePath: string) => {
-        if (!mcpAvailable || mcpTools.length === 0) {
-            toast.error('No connected MCP tools available for file writing');
-            return;
-        }
-
-        const writeTool = mcpTools.find(tool => {
-            const name = tool.name.toLowerCase();
-            if (!name.includes('write')) return false;
-            if (!name.includes('file') && !name.includes('document')) return false;
-
-            const props = tool.inputSchema?.properties || {};
-            return (
-                Object.prototype.hasOwnProperty.call(props, 'path') ||
-                Object.prototype.hasOwnProperty.call(props, 'filePath') ||
-                Object.prototype.hasOwnProperty.call(props, 'filepath') ||
-                Object.prototype.hasOwnProperty.call(props, 'uri')
-            );
-        });
-
-        if (!writeTool) {
-            toast.error('No MCP write_file-compatible tool found');
-            return;
-        }
-
-        const props = writeTool.inputSchema?.properties || {};
-        const hasProp = (key: string) => Object.prototype.hasOwnProperty.call(props, key);
-        const args: Record<string, unknown> = {};
-
-        if (hasProp('path')) args.path = filePath;
-        else if (hasProp('filePath')) args.filePath = filePath;
-        else if (hasProp('filepath')) args.filepath = filePath;
-        else if (hasProp('uri')) args.uri = filePath;
-
-        if (hasProp('content')) args.content = code;
-        else if (hasProp('text')) args.text = code;
-        else args.content = code;
-
-        if (hasProp('language')) args.language = language;
-        if (hasProp('append')) args.append = false;
-
-        const result = await executeMcpTool({
-            id: crypto.randomUUID(),
-            name: writeTool.name,
-            arguments: args,
-            serverId: writeTool.serverId,
-        });
-
-        if (result.isError) {
-            toast.error(`MCP write failed: ${result.content}`);
-            return;
-        }
-
-        toast.success(`Inserted code into ${filePath}`);
-    }, [executeMcpTool, mcpAvailable, mcpTools]);
 
     const handleRateMessage = (index: number, rating: 'up' | 'down') => {
         setMessageRatings(prev => {
@@ -2649,19 +2025,8 @@ const Chat: React.FC = () => {
                             <React.Suspense fallback={null}>
                                 <InteractiveTutorial
                                     tutorial={currentTutorial}
-                                    onComplete={() => {
-                                        setShowTutorial(false);
-                                        setCurrentTutorial(null);
-                                        void loadOnboardingService()
-                                            .then((onboardingService) => onboardingService.completeOnboarding())
-                                            .catch(() => {
-                                                // Ignore onboarding persistence failures.
-                                            });
-                                    }}
-                                    onSkip={() => {
-                                        setShowTutorial(false);
-                                        setCurrentTutorial(null);
-                                    }}
+                                    onComplete={handleCompleteTutorial}
+                                    onSkip={handleSkipTutorial}
                                 />
                             </React.Suspense>
                         ) : null,
