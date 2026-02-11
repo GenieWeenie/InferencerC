@@ -34,6 +34,29 @@ export interface DownloadProgress {
     eta?: number; // seconds remaining
 }
 
+interface HFModelSearchResponseItem {
+    id?: string;
+    author?: string;
+    modelId?: string;
+    downloads?: number;
+    likes?: number;
+    tags?: string[];
+    lastModified?: string;
+    private?: boolean;
+}
+
+interface HFModelTreeResponseItem {
+    path?: string;
+    size?: number;
+}
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+    return fallback;
+};
+
 // Popular quantization types and their descriptions
 export const QUANTIZATION_INFO: Record<string, { name: string; description: string; quality: number }> = {
     'Q2_K': { name: 'Q2_K', description: 'Smallest, lowest quality', quality: 1 },
@@ -109,19 +132,20 @@ class ModelDownloader {
                 throw new Error(`HuggingFace API error: ${response.status}`);
             }
 
-            const data = await response.json();
+            const rawData: unknown = await response.json();
+            const data = Array.isArray(rawData) ? (rawData as HFModelSearchResponseItem[]) : [];
 
-            return data.map((model: any) => ({
-                id: model.id || model.modelId,
+            return data.map((model) => ({
+                id: model.id || model.modelId || '',
                 author: model.author || model.id?.split('/')[0] || 'Unknown',
-                modelId: model.modelId || model.id?.split('/')[1] || model.id,
+                modelId: model.modelId || model.id?.split('/')[1] || model.id || '',
                 downloads: model.downloads || 0,
                 likes: model.likes || 0,
                 tags: model.tags || [],
                 lastModified: model.lastModified || '',
                 private: model.private || false
             }));
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Failed to search models:', error);
             throw error;
         }
@@ -138,14 +162,15 @@ class ModelDownloader {
                 throw new Error(`Failed to fetch model files: ${response.status}`);
             }
 
-            const files: any[] = await response.json();
+            const rawFiles: unknown = await response.json();
+            const files = Array.isArray(rawFiles) ? (rawFiles as HFModelTreeResponseItem[]) : [];
 
             // Filter for GGUF files
             const ggufFiles = files
-                .filter(f => f.path?.toLowerCase().endsWith('.gguf'))
+                .filter((f) => f.path?.toLowerCase().endsWith('.gguf'))
                 .map(f => {
                     // Extract quantization from filename
-                    const name = f.path;
+                    const name = f.path ?? '';
                     let quantization = 'Unknown';
 
                     for (const quant of Object.keys(QUANTIZATION_INFO)) {
@@ -170,7 +195,7 @@ class ModelDownloader {
                 });
 
             return ggufFiles;
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Failed to get model files:', error);
             throw error;
         }
@@ -274,9 +299,9 @@ class ModelDownloader {
                     progress.percentage = 100;
                 }
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             progress.status = 'error';
-            progress.error = error.message;
+            progress.error = getErrorMessage(error, 'Download failed');
         }
 
         this.notifyListeners();

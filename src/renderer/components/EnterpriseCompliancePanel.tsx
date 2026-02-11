@@ -26,6 +26,13 @@ interface EnterpriseCompliancePanelProps {
     onClose: () => void;
 }
 
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+    return fallback;
+};
+
 const downloadFile = (fileName: string, mimeType: string, content: string) => {
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
@@ -86,8 +93,8 @@ export const EnterpriseCompliancePanel: React.FC<EnterpriseCompliancePanelProps>
             enterpriseComplianceService.updateSSOConfig(ssoConfig);
             toast.success('SSO configuration saved');
             refresh();
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to save SSO configuration');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to save SSO configuration'));
         }
     };
 
@@ -96,8 +103,8 @@ export const EnterpriseCompliancePanel: React.FC<EnterpriseCompliancePanelProps>
             enterpriseComplianceService.updateRetentionPolicy(retentionPolicy);
             toast.success('Retention policy updated');
             refresh();
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to update retention policy');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to update retention policy'));
         }
     };
 
@@ -116,8 +123,8 @@ export const EnterpriseCompliancePanel: React.FC<EnterpriseCompliancePanelProps>
 
             toast.success(`${protocol.toUpperCase()} login completed (mock flow)`);
             refresh();
-        } catch (error: any) {
-            toast.error(error?.message || 'Mock login failed');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Mock login failed'));
         }
     };
 
@@ -130,8 +137,8 @@ export const EnterpriseCompliancePanel: React.FC<EnterpriseCompliancePanelProps>
             });
             downloadFile(report.fileName, report.mimeType, report.content);
             toast.success(`Exported ${report.recordCount} records`);
-        } catch (error: any) {
-            toast.error(error?.message || 'Compliance export failed');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Compliance export failed'));
         }
     };
 
@@ -369,7 +376,12 @@ export const EnterpriseCompliancePanel: React.FC<EnterpriseCompliancePanelProps>
                                 />
                                 <select
                                     value={resultFilter}
-                                    onChange={(e) => setResultFilter(e.target.value as any)}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (value === 'all' || value === 'success' || value === 'failure' || value === 'info') {
+                                            setResultFilter(value);
+                                        }
+                                    }}
                                     className="px-2 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200"
                                 >
                                     <option value="all">All results</option>
@@ -406,7 +418,12 @@ export const EnterpriseCompliancePanel: React.FC<EnterpriseCompliancePanelProps>
                             <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-sm">
                                 <select
                                     value={exportStandard}
-                                    onChange={(e) => setExportStandard(e.target.value as any)}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (value === 'soc2' || value === 'gdpr') {
+                                            setExportStandard(value);
+                                        }
+                                    }}
                                     className="px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200"
                                 >
                                     <option value="soc2">SOC 2</option>
@@ -414,7 +431,12 @@ export const EnterpriseCompliancePanel: React.FC<EnterpriseCompliancePanelProps>
                                 </select>
                                 <select
                                     value={exportFormat}
-                                    onChange={(e) => setExportFormat(e.target.value as any)}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (value === 'json' || value === 'csv') {
+                                            setExportFormat(value);
+                                        }
+                                    }}
                                     className="px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200"
                                 >
                                     <option value="json">JSON</option>

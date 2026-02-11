@@ -31,6 +31,13 @@ interface TeamWorkspacesPanelProps {
 
 const roleOrder: WorkspaceRole[] = ['admin', 'member', 'viewer'];
 
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+    return fallback;
+};
+
 const providerFromModel = (model: Model): string => {
     if (model.id.startsWith('openrouter/')) return 'openrouter';
     if (model.type === 'local-folder') return 'local';
@@ -124,8 +131,8 @@ export const TeamWorkspacesPanel: React.FC<TeamWorkspacesPanelProps> = ({
             setNewWorkspaceDescription('');
             setActiveWorkspace(created.id);
             toast.success('Workspace created');
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to create workspace');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to create workspace'));
         }
     };
 
@@ -148,8 +155,8 @@ export const TeamWorkspacesPanel: React.FC<TeamWorkspacesPanelProps> = ({
             navigator.clipboard.writeText(invite.inviteLink);
             refresh();
             toast.success('Invite link copied to clipboard');
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to generate invite');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to generate invite'));
         }
     };
 
@@ -159,8 +166,8 @@ export const TeamWorkspacesPanel: React.FC<TeamWorkspacesPanelProps> = ({
             setJoinToken('');
             setActiveWorkspace(workspace.id);
             toast.success(`Joined workspace: ${workspace.name}`);
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to accept invite');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to accept invite'));
         }
     };
 
@@ -174,8 +181,8 @@ export const TeamWorkspacesPanel: React.FC<TeamWorkspacesPanelProps> = ({
         try {
             teamWorkspacesService.setConversationCollection(activeWorkspace.id, Array.from(next));
             refresh();
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to update collection');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to update collection'));
         }
     };
 
@@ -189,8 +196,8 @@ export const TeamWorkspacesPanel: React.FC<TeamWorkspacesPanelProps> = ({
         try {
             teamWorkspacesService.setSharedTemplates(activeWorkspace.id, Array.from(next));
             refresh();
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to update shared templates');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to update shared templates'));
         }
     };
 
@@ -206,8 +213,8 @@ export const TeamWorkspacesPanel: React.FC<TeamWorkspacesPanelProps> = ({
                 allowedProviders: Array.from(next),
             });
             refresh();
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to update provider policy');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to update provider policy'));
         }
     };
 
@@ -223,8 +230,8 @@ export const TeamWorkspacesPanel: React.FC<TeamWorkspacesPanelProps> = ({
                 allowedModelIds: Array.from(next),
             });
             refresh();
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to update model policy');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to update model policy'));
         }
     };
 
@@ -242,8 +249,8 @@ export const TeamWorkspacesPanel: React.FC<TeamWorkspacesPanelProps> = ({
         try {
             teamWorkspacesService.updateMemberRole(activeWorkspace.id, memberId, role);
             refresh();
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to update role');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to update role'));
         }
     };
 
@@ -253,8 +260,8 @@ export const TeamWorkspacesPanel: React.FC<TeamWorkspacesPanelProps> = ({
             teamWorkspacesService.removeMember(activeWorkspace.id, memberId);
             refresh();
             toast.success('Member removed');
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to remove member');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to remove member'));
         }
     };
 

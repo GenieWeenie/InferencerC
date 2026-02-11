@@ -4,9 +4,10 @@ import Chat from './pages/Chat';
 import StatusBar from './components/StatusBar';
 import TitleBar from './components/TitleBar';
 import { MessageSquare, FolderOpen, Settings as SettingsIcon, Hexagon, Zap, LayoutGrid, Loader2, Menu, X } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 // Lazy load heavy pages
-function lazyWithRetry<T extends React.ComponentType<any>>(
+function lazyWithRetry<T extends React.ComponentType<object>>(
   importFn: () => Promise<{ default: T }>,
   key: string
 ) {
@@ -64,7 +65,8 @@ import { useShortcutEditor } from './hooks/useKeyboardShortcuts';
 import { useCommandRegistry } from './hooks/useCommandRegistry';
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'chat' | 'models' | 'settings'>('chat');
+  type AppTabId = 'chat' | 'models' | 'settings';
+  const [activeTab, setActiveTab] = useState<AppTabId>('chat');
   const { isOpen, close } = useCommandPalette();
   const { isOpen: isShortcutEditorOpen, toggle: toggleShortcutEditor, close: closeShortcutEditor } = useShortcutEditor();
 
@@ -179,7 +181,7 @@ const App: React.FC = () => {
     togglePerformanceMonitor: () => setShowPerformance(prev => !prev),
   });
 
-  const NavItem = ({ id, icon: Icon, label }: { id: typeof activeTab, icon: any, label: string }) => (
+  const NavItem = ({ id, icon: Icon, label }: { id: AppTabId; icon: LucideIcon; label: string }) => (
     <button
       onClick={() => setActiveTab(id)}
       className={`group relative flex items-center justify-center w-12 h-12 mb-3 rounded-2xl transition-all duration-300 ${activeTab === id

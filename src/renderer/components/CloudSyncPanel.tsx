@@ -28,6 +28,13 @@ interface CloudSyncPanelProps {
     onClose: () => void;
 }
 
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+    return fallback;
+};
+
 const formatBytes = (value: number): string => {
     if (!Number.isFinite(value) || value <= 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB'];
@@ -74,9 +81,9 @@ export const CloudSyncPanel: React.FC<CloudSyncPanelProps> = ({ isOpen, onClose 
         try {
             const nextProfile = await cloudSyncService.getProfile();
             setProfile(nextProfile);
-        } catch (error: any) {
+        } catch (error: unknown) {
             setProfile(null);
-            toast.error(error?.message || 'Failed to load cloud profile');
+            toast.error(getErrorMessage(error, 'Failed to load cloud profile'));
         }
 
         setStatus(cloudSyncService.getSyncStatus());
@@ -126,8 +133,8 @@ export const CloudSyncPanel: React.FC<CloudSyncPanelProps> = ({ isOpen, onClose 
             setConfig(cloudSyncService.getConfig());
             setPassword('');
             await refreshProfile();
-        } catch (error: any) {
-            toast.error(error?.message || 'Authentication failed');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Authentication failed'));
         } finally {
             setIsBusy(false);
         }
@@ -142,8 +149,8 @@ export const CloudSyncPanel: React.FC<CloudSyncPanelProps> = ({ isOpen, onClose 
             setStatus(null);
             setPassphrase('');
             toast.info('Logged out of cloud sync');
-        } catch (error: any) {
-            toast.error(error?.message || 'Failed to log out');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Failed to log out'));
         } finally {
             setIsBusy(false);
         }
@@ -203,8 +210,8 @@ export const CloudSyncPanel: React.FC<CloudSyncPanelProps> = ({ isOpen, onClose 
             setStatus(cloudSyncService.getSyncStatus());
             await refreshProfile();
             toast.success('Sync completed');
-        } catch (error: any) {
-            toast.error(error?.message || 'Sync failed');
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, 'Sync failed'));
         } finally {
             setIsSyncing(false);
         }

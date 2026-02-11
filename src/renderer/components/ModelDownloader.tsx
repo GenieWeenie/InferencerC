@@ -14,11 +14,21 @@ import {
     RECOMMENDED_MODELS
 } from '../services/modelDownloader';
 
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+    return fallback;
+};
+
 /**
  * Model Downloader Component
  * Browse and download GGUF models from HuggingFace
  */
 const ModelDownloader: React.FC = () => {
+    type ModelDownloaderTabId = 'recommended' | 'search' | 'downloads';
+    type SelectableModel = HFModel | { id: string; name: string };
+
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<HFModel[]>([]);
     const [isSearching, setIsSearching] = useState(false);
@@ -26,7 +36,7 @@ const ModelDownloader: React.FC = () => {
     const [modelFiles, setModelFiles] = useState<GGUFFile[]>([]);
     const [isLoadingFiles, setIsLoadingFiles] = useState(false);
     const [downloads, setDownloads] = useState<DownloadProgress[]>([]);
-    const [activeTab, setActiveTab] = useState<'recommended' | 'search' | 'downloads'>('recommended');
+    const [activeTab, setActiveTab] = useState<ModelDownloaderTabId>('recommended');
 
     // Subscribe to download updates
     useEffect(() => {
@@ -43,25 +53,27 @@ const ModelDownloader: React.FC = () => {
             const results = await modelDownloader.searchModels(searchQuery + ' gguf');
             setSearchResults(results);
             setActiveTab('search');
-        } catch (error: any) {
-            toast.error(`Search failed: ${error.message}`);
+        } catch (error: unknown) {
+            toast.error(`Search failed: ${getErrorMessage(error, 'Unknown search error')}`);
         } finally {
             setIsSearching(false);
         }
     }, [searchQuery]);
 
     // Load files for a model
-    const handleSelectModel = useCallback(async (model: HFModel | { id: string; name: string }) => {
-        const modelObj = 'author' in model ? model : {
-            id: model.id,
-            author: model.id.split('/')[0],
-            modelId: model.id.split('/')[1] || model.id,
-            downloads: 0,
-            likes: 0,
-            tags: [],
-            lastModified: '',
-            private: false
-        } as HFModel;
+    const handleSelectModel = useCallback(async (model: SelectableModel) => {
+        const modelObj: HFModel = 'author' in model
+            ? model
+            : {
+                id: model.id,
+                author: model.id.split('/')[0] || 'Unknown',
+                modelId: model.id.split('/')[1] || model.id,
+                downloads: 0,
+                likes: 0,
+                tags: [],
+                lastModified: '',
+                private: false
+            };
 
         setSelectedModel(modelObj);
         setIsLoadingFiles(true);
@@ -70,8 +82,8 @@ const ModelDownloader: React.FC = () => {
         try {
             const files = await modelDownloader.getModelFiles(modelObj.id);
             setModelFiles(files);
-        } catch (error: any) {
-            toast.error(`Failed to load files: ${error.message}`);
+        } catch (error: unknown) {
+            toast.error(`Failed to load files: ${getErrorMessage(error, 'Unknown file load error')}`);
         } finally {
             setIsLoadingFiles(false);
         }
@@ -86,8 +98,8 @@ const ModelDownloader: React.FC = () => {
             setActiveTab('downloads');
             await modelDownloader.downloadModel(selectedModel.id, file);
             toast.success(`Download complete: ${file.name}`);
-        } catch (error: any) {
-            toast.error(`Download failed: ${error.message}`);
+        } catch (error: unknown) {
+            toast.error(`Download failed: ${getErrorMessage(error, 'Unknown download error')}`);
         }
     }, [selectedModel]);
 
@@ -168,10 +180,10 @@ const ModelDownloader: React.FC = () => {
                     { id: 'recommended', label: 'Recommended', icon: Star },
                     { id: 'search', label: 'Search Results', icon: Search, count: searchResults.length },
                     { id: 'downloads', label: 'Downloads', icon: Download, count: downloads.length }
-                ].map(tab => (
+                ].map((tab: { id: ModelDownloaderTabId; label: string; icon: React.ComponentType<{ size?: number | string }>; count?: number }) => (
                     <button
                         key={tab.id}
-                        onClick={() => setActiveTab(tab.id as any)}
+                        onClick={() => setActiveTab(tab.id)}
                         className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === tab.id
                             ? 'bg-slate-700 text-white'
                             : 'text-slate-400 hover:text-white hover:bg-slate-700/50'

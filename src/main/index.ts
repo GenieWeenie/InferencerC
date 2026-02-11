@@ -1,11 +1,33 @@
 import { app, BrowserWindow, ipcMain, dialog, screen, safeStorage } from 'electron';
 import { autoUpdater } from 'electron-updater';
+import type { ProgressInfo, UpdateDownloadedEvent, UpdateInfo } from 'electron-updater';
 import path from 'path';
 import fs from 'fs';
 import { startServer } from '../server/index';
 import chokidar from 'chokidar';
 import { MCPClientManager } from './mcp-client';
-import { MCPServerConfig } from './mcp-types';
+import { MCPServerConfig, JSONValue } from './mcp-types';
+import type { RecoveryState } from '../shared/types';
+
+interface AppUpdateCheckResponse {
+  available: boolean;
+  version?: string;
+  message?: string;
+  error?: string;
+}
+
+interface MCPExecuteToolParams {
+  serverId: string;
+  toolName: string;
+  arguments?: Record<string, JSONValue>;
+}
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+};
 
 // Start the local inference server
 startServer();
@@ -27,23 +49,23 @@ if (app.isPackaged) {
     console.log('Checking for updates...');
   });
 
-  autoUpdater.on('update-available', (info: any) => {
+  autoUpdater.on('update-available', (info: UpdateInfo) => {
     console.log('Update available:', info.version);
   });
 
-  autoUpdater.on('update-not-available', (info: any) => {
+  autoUpdater.on('update-not-available', (_info: UpdateInfo) => {
     console.log('Update not available');
   });
 
-  autoUpdater.on('error', (err: any) => {
+  autoUpdater.on('error', (err: Error) => {
     console.error('Auto-updater error:', err);
   });
 
-  autoUpdater.on('download-progress', (progressObj: any) => {
+  autoUpdater.on('download-progress', (progressObj: ProgressInfo) => {
     console.log('Download progress:', progressObj.percent);
   });
 
-  autoUpdater.on('update-downloaded', (info: any) => {
+  autoUpdater.on('update-downloaded', (info: UpdateDownloadedEvent) => {
     console.log('Update downloaded:', info.version);
     // Notify renderer process
     BrowserWindow.getAllWindows().forEach(win => {
@@ -58,14 +80,19 @@ ipcMain.handle('app-version', () => {
 });
 
 ipcMain.handle('check-for-updates', async () => {
+  const noUpdateResponse: AppUpdateCheckResponse = {
+    available: false,
+    message: 'Updates only available in packaged app',
+  };
   if (!app.isPackaged) {
-    return { available: false, message: 'Updates only available in packaged app' };
+    return noUpdateResponse;
   }
   try {
     const result = await autoUpdater.checkForUpdates();
-    return { available: !!result, version: result?.updateInfo.version };
-  } catch (error: any) {
-    return { available: false, error: error.message };
+    const updateResponse: AppUpdateCheckResponse = { available: !!result, version: result?.updateInfo.version };
+    return updateResponse;
+  } catch (error: unknown) {
+    return { available: false, error: getErrorMessage(error, 'Failed to check for updates') };
   }
 });
 
@@ -100,13 +127,13 @@ const saveSecureStorage = (store: Record<string, string>): void => {
   }
 };
 
-ipcMain.handle('save-recovery-state', async (event, state: any) => {
+ipcMain.handle('save-recovery-state', async (_event, state: RecoveryState) => {
   try {
     fs.writeFileSync(RECOVERY_STATE_PATH, JSON.stringify(state));
     return { success: true };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to save recovery state:', error);
-    return { success: false, error: error.message };
+    return { success: false, error: getErrorMessage(error, 'Failed to save recovery state') };
   }
 });
 
@@ -117,9 +144,9 @@ ipcMain.handle('get-recovery-state', async () => {
       return { success: true, state: JSON.parse(data) };
     }
     return { success: true, state: null };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to load recovery state:', error);
-    return { success: false, error: error.message, state: null };
+    return { success: false, error: getErrorMessage(error, 'Failed to load recovery state'), state: null };
   }
 });
 
@@ -129,9 +156,9 @@ ipcMain.handle('clear-recovery-state', async () => {
       fs.unlinkSync(RECOVERY_STATE_PATH);
     }
     return { success: true };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to clear recovery state:', error);
-    return { success: false, error: error.message };
+    return { success: false, error: getErrorMessage(error, 'Failed to clear recovery state') };
   }
 });
 
@@ -163,8 +190,8 @@ ipcMain.handle('secure-storage:set-item', async (_event, key: string, value: str
     store[key] = encrypted.toString('base64');
     saveSecureStorage(store);
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message || 'Failed to store secret' };
+  } catch (error: unknown) {
+    return { success: false, error: getErrorMessage(error, 'Failed to store secret') };
   }
 });
 
@@ -182,8 +209,8 @@ ipcMain.handle('secure-storage:get-item', async (_event, key: string) => {
 
     const decrypted = safeStorage.decryptString(Buffer.from(encoded, 'base64'));
     return { success: true, value: decrypted };
-  } catch (error: any) {
-    return { success: false, error: error.message || 'Failed to load secret', value: null };
+  } catch (error: unknown) {
+    return { success: false, error: getErrorMessage(error, 'Failed to load secret'), value: null };
   }
 });
 
@@ -195,8 +222,8 @@ ipcMain.handle('secure-storage:remove-item', async (_event, key: string) => {
       saveSecureStorage(store);
     }
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message || 'Failed to remove secret' };
+  } catch (error: unknown) {
+    return { success: false, error: getErrorMessage(error, 'Failed to remove secret') };
   }
 });
 
@@ -596,8 +623,8 @@ function createWindow() {
       
       readDir(folderPath, folderPath);
       return { success: true, files };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      return { success: false, error: getErrorMessage(error, 'Failed to read folder files') };
     }
   });
 
@@ -623,8 +650,8 @@ function createWindow() {
 
       folderWatchers.set(folderPath, watcher);
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      return { success: false, error: getErrorMessage(error, 'Failed to watch folder') };
     }
   });
 
@@ -649,10 +676,10 @@ function createWindow() {
         commitHash: 'mock-commit-hash',
         error: undefined,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       return {
         success: false,
-        error: error.message || 'Git commit failed',
+        error: getErrorMessage(error, 'Git commit failed'),
       };
     }
   });
@@ -662,10 +689,10 @@ function createWindow() {
     try {
       const result = await mcpClientManager.connect(server);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       return {
         success: false,
-        error: error.message || 'Failed to connect to MCP server',
+        error: getErrorMessage(error, 'Failed to connect to MCP server'),
       };
     }
   });
@@ -675,26 +702,26 @@ function createWindow() {
     try {
       const result = await mcpClientManager.disconnect(serverId);
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       return {
         success: false,
-        error: error.message || 'Failed to disconnect from MCP server',
+        error: getErrorMessage(error, 'Failed to disconnect from MCP server'),
       };
     }
   });
 
   // MCP Execute Tool Handler
-  ipcMain.handle('mcp-execute-tool', async (event, params: { serverId: string; toolName: string; arguments?: Record<string, any> }) => {
+  ipcMain.handle('mcp-execute-tool', async (_event, params: MCPExecuteToolParams) => {
     try {
       const result = await mcpClientManager.callTool(params.serverId, params.toolName, params.arguments);
       return {
         success: true,
         result,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       return {
         success: false,
-        error: error.message || 'Failed to execute tool',
+        error: getErrorMessage(error, 'Failed to execute tool'),
       };
     }
   });
@@ -746,8 +773,8 @@ function createWindow() {
         try {
           const context = vm.createContext({
             console: {
-              log: (...args: any[]) => args.join(' '),
-              error: (...args: any[]) => args.join(' '),
+              log: (...args: unknown[]) => args.join(' '),
+              error: (...args: unknown[]) => args.join(' '),
             }
           });
           const result = vm.runInContext(code, context, { timeout: 2000 });
@@ -756,10 +783,10 @@ function createWindow() {
             output: String(result || 'Execution completed'),
             exitCode: 0
           };
-        } catch (err: any) {
+        } catch (err: unknown) {
           return {
             success: false,
-            output: `Error: ${err.message}`,
+            output: `Error: ${getErrorMessage(err, 'Unknown execution error')}`,
             exitCode: 1
           };
         }
@@ -770,10 +797,10 @@ function createWindow() {
           exitCode: -1
         };
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       return {
         success: false,
-        output: `Execution error: ${error.message}`,
+        output: `Execution error: ${getErrorMessage(error, 'Unknown execution error')}`,
         exitCode: -1
       };
     }

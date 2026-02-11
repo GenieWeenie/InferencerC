@@ -2,6 +2,7 @@
  * Project Context Service
  * Manages project folder selection, file reading, and watching
  */
+import type { FolderChangedEventPayload } from './mcp';
 
 export interface ProjectFile {
   path: string;
@@ -85,7 +86,7 @@ class ProjectContextService {
 
         // Listen for file changes
         if (window.electronAPI.onFolderChanged) {
-          window.electronAPI.onFolderChanged((event: any, data: { path: string; type: string; file: string }) => {
+          window.electronAPI.onFolderChanged((_event: unknown, data: FolderChangedEventPayload) => {
             if (data.path === this.currentContext?.folderPath) {
               // Reload folder on change
               this.loadFolder(data.path);

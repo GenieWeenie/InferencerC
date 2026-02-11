@@ -20,10 +20,18 @@ import {
   JSONRPCResponse,
   JSONRPCErrorResponse,
   JSONRPCMessage,
+  JSONRPCParams,
   PendingRequest,
   MCPMethod,
-  MCPErrorCode,
+  JSONValue,
 } from './mcp-types';
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+};
 
 /**
  * MCP Client for communicating with MCP servers via stdio
@@ -117,11 +125,11 @@ export class MCPClient extends EventEmitter {
       this.emit('statusChange', this.status);
 
       return { success: true, tools: this.tools };
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.status = 'error';
       this.emit('statusChange', this.status);
       this.cleanup();
-      return { success: false, error: error.message || 'Failed to connect to MCP server' };
+      return { success: false, error: getErrorMessage(error, 'Failed to connect to MCP server') };
     }
   }
 
@@ -171,7 +179,7 @@ export class MCPClient extends EventEmitter {
   /**
    * Execute a tool call
    */
-  async callTool(toolName: string, args?: Record<string, any>): Promise<MCPToolCallResult> {
+  async callTool(toolName: string, args?: Record<string, JSONValue>): Promise<MCPToolCallResult> {
     if (this.status !== 'connected') {
       throw new Error('Not connected to MCP server');
     }
@@ -188,7 +196,7 @@ export class MCPClient extends EventEmitter {
   /**
    * Send a JSON-RPC request and wait for response
    */
-  private async sendRequest<T = any>(method: string, params?: any): Promise<T> {
+  private async sendRequest<T = JSONValue>(method: string, params?: JSONRPCParams): Promise<T> {
     return new Promise((resolve, reject) => {
       const id = ++this.requestIdCounter;
 
@@ -203,8 +211,8 @@ export class MCPClient extends EventEmitter {
       const pending: PendingRequest = {
         id,
         method,
-        resolve,
-        reject,
+        resolve: (value: unknown) => resolve(value as T),
+        reject: (error: Error) => reject(error),
         timestamp: Date.now(),
       };
       this.pendingRequests.set(id, pending);
@@ -258,8 +266,8 @@ export class MCPClient extends EventEmitter {
       try {
         const message: JSONRPCMessage = JSON.parse(line);
         this.handleMessage(message);
-      } catch (error: any) {
-        this.emit('error', new Error(`Failed to parse JSON-RPC message: ${error.message}`));
+      } catch (error: unknown) {
+        this.emit('error', new Error(`Failed to parse JSON-RPC message: ${getErrorMessage(error, 'unknown parse error')}`));
       }
     }
   }
@@ -421,7 +429,7 @@ export class MCPClientManager {
   async callTool(
     serverId: string,
     toolName: string,
-    args?: Record<string, any>
+    args?: Record<string, JSONValue>
   ): Promise<MCPToolCallResult> {
     const client = this.clients.get(serverId);
     if (!client) {

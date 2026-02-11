@@ -12,19 +12,23 @@
 /**
  * JSON-RPC 2.0 Request
  */
+export type JSONPrimitive = string | number | boolean | null;
+export type JSONValue = JSONPrimitive | JSONValue[] | { [key: string]: JSONValue };
+export type JSONRPCParams = object | unknown[];
+
 export interface JSONRPCRequest {
     jsonrpc: '2.0';
     method: string;
-    params?: Record<string, any> | any[];
+    params?: JSONRPCParams;
     id?: string | number | null;
 }
 
 /**
  * JSON-RPC 2.0 Response (Success)
  */
-export interface JSONRPCResponse {
+export interface JSONRPCResponse<T = JSONValue> {
     jsonrpc: '2.0';
-    result: any;
+    result: T;
     id: string | number | null;
 }
 
@@ -34,7 +38,7 @@ export interface JSONRPCResponse {
 export interface JSONRPCError {
     code: number;
     message: string;
-    data?: any;
+    data?: JSONValue;
 }
 
 /**
@@ -52,7 +56,7 @@ export interface JSONRPCErrorResponse {
 export interface JSONRPCNotification {
     jsonrpc: '2.0';
     method: string;
-    params?: Record<string, any> | any[];
+    params?: JSONRPCParams;
 }
 
 /**
@@ -130,7 +134,7 @@ export interface MCPInitializeResult {
  */
 export interface MCPToolInputSchema {
     type: 'object';
-    properties?: Record<string, any>;
+    properties?: Record<string, JSONValue>;
     required?: string[];
     additionalProperties?: boolean;
 }
@@ -161,7 +165,7 @@ export interface MCPToolsListResult {
  */
 export interface MCPToolCallParams {
     name: string;
-    arguments?: Record<string, any>;
+    arguments?: Record<string, JSONValue>;
 }
 
 /**
@@ -296,7 +300,7 @@ export type MCPLogLevel = 'debug' | 'info' | 'notice' | 'warning' | 'error' | 'c
 export interface MCPLoggingMessageParams {
     level: MCPLogLevel;
     logger?: string;
-    data: any;
+    data: JSONValue;
 }
 
 /**
@@ -417,7 +421,7 @@ export interface MCPServerInstance {
 export interface PendingRequest {
     id: string | number;
     method: string;
-    resolve: (value: any) => void;
-    reject: (error: any) => void;
+    resolve: (value: unknown) => void;
+    reject: (error: Error) => void;
     timestamp: number;
 }

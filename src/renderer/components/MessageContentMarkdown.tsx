@@ -1,16 +1,19 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 interface MessageContentMarkdownProps {
     content: string;
 }
 
+type MarkdownCodeComponentProps = Parameters<NonNullable<Components['code']>>[0];
+
 const MessageContentMarkdown: React.FC<MessageContentMarkdownProps> = ({ content }) => (
     <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-            code({ inline, className, children, ...props }: any) {
+            code({ inline, className, children, ...props }: MarkdownCodeComponentProps) {
                 const codeString = String(children).replace(/\n$/, '');
                 const isBlock = !inline && codeString.includes('\n');
                 return isBlock ? (
