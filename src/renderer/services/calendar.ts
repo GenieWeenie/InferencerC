@@ -49,6 +49,14 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 class CalendarService {
     private config: CalendarConfig | null = null;
     private readonly STORAGE_KEY = 'calendar_config';
@@ -61,14 +69,15 @@ class CalendarService {
         if (!isRecord(value)) {
             return null;
         }
-        if (!CALENDAR_PROVIDERS.has(value.provider as CalendarConfig['provider'])) {
+        const providerValue = sanitizeNonEmptyString(value.provider);
+        if (!providerValue || !CALENDAR_PROVIDERS.has(providerValue as CalendarConfig['provider'])) {
             return null;
         }
         return {
-            provider: value.provider as CalendarConfig['provider'],
-            apiKey: typeof value.apiKey === 'string' && value.apiKey.trim().length > 0 ? value.apiKey : undefined,
-            clientId: typeof value.clientId === 'string' && value.clientId.trim().length > 0 ? value.clientId : undefined,
-            accessToken: typeof value.accessToken === 'string' && value.accessToken.trim().length > 0 ? value.accessToken : undefined,
+            provider: providerValue as CalendarConfig['provider'],
+            apiKey: sanitizeNonEmptyString(value.apiKey) || undefined,
+            clientId: sanitizeNonEmptyString(value.clientId) || undefined,
+            accessToken: sanitizeNonEmptyString(value.accessToken) || undefined,
         };
     }
 

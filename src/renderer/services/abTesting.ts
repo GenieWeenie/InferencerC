@@ -95,19 +95,31 @@ const parseJson = (raw: string): { ok: true; value: unknown } | { ok: false } =>
     }
 };
 
+const sanitizeString = (value: unknown): string | null => {
+    return typeof value === 'string' ? value.trim() : null;
+};
+
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    const normalized = sanitizeString(value);
+    return normalized && normalized.length > 0 ? normalized : null;
+};
+
 const sanitizeVariant = (value: unknown): ABTestVariant | null => {
     if (!isRecord(value)) {
         return null;
     }
-    if (typeof value.id !== 'string' || typeof value.name !== 'string' || typeof value.prompt !== 'string') {
+    const id = sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    const prompt = sanitizeNonEmptyString(value.prompt);
+    if (!id || !name || !prompt) {
         return null;
     }
     return {
-        id: value.id,
-        name: value.name,
-        prompt: value.prompt,
-        systemPrompt: typeof value.systemPrompt === 'string' ? value.systemPrompt : undefined,
-        modelId: typeof value.modelId === 'string' ? value.modelId : undefined,
+        id,
+        name,
+        prompt,
+        systemPrompt: sanitizeNonEmptyString(value.systemPrompt) || undefined,
+        modelId: sanitizeNonEmptyString(value.modelId) || undefined,
         temperature: typeof value.temperature === 'number' && Number.isFinite(value.temperature) ? value.temperature : undefined,
         topP: typeof value.topP === 'number' && Number.isFinite(value.topP) ? value.topP : undefined,
         maxTokens: typeof value.maxTokens === 'number' && Number.isFinite(value.maxTokens) ? value.maxTokens : undefined,
@@ -118,12 +130,16 @@ const sanitizeChatMessage = (value: unknown): ChatMessage | null => {
     if (!isRecord(value)) {
         return null;
     }
-    if (!MESSAGE_ROLES.has(value.role as ChatMessage['role']) || typeof value.content !== 'string') {
+    if (!MESSAGE_ROLES.has(value.role as ChatMessage['role'])) {
+        return null;
+    }
+    const content = sanitizeString(value.content);
+    if (content === null) {
         return null;
     }
     return {
         role: value.role as ChatMessage['role'],
-        content: value.content,
+        content,
     };
 };
 
@@ -190,9 +206,9 @@ const sanitizeABTest = (value: unknown): ABTest | null => {
         return null;
     }
     if (
-        typeof value.id !== 'string'
-        || typeof value.name !== 'string'
-        || typeof value.input !== 'string'
+        !sanitizeNonEmptyString(value.id)
+        || !sanitizeNonEmptyString(value.name)
+        || !sanitizeNonEmptyString(value.input)
         || typeof value.createdAt !== 'number'
         || !Number.isFinite(value.createdAt)
         || !TEST_STATUSES.has(value.status as ABTest['status'])
@@ -215,11 +231,11 @@ const sanitizeABTest = (value: unknown): ABTest | null => {
         : undefined;
 
     return {
-        id: value.id,
-        name: value.name,
-        description: typeof value.description === 'string' ? value.description : undefined,
+        id: sanitizeNonEmptyString(value.id) as string,
+        name: sanitizeNonEmptyString(value.name) as string,
+        description: sanitizeNonEmptyString(value.description) || undefined,
         variants,
-        input: value.input,
+        input: sanitizeNonEmptyString(value.input) as string,
         context,
         createdAt: value.createdAt,
         completedAt: typeof value.completedAt === 'number' && Number.isFinite(value.completedAt) ? value.completedAt : undefined,
@@ -285,7 +301,7 @@ export class ABTestingService {
      * Create a new A/B test
      */
     createTest(name: string, variants: ABTestVariant[], input: string, context?: ChatMessage[]): ABTest {
-        const test: ABTest = {
+        const candidate: ABTest = {
             id: crypto.randomUUID(),
             name,
             variants,
@@ -295,6 +311,10 @@ export class ABTestingService {
             status: 'draft',
         };
 
+        const test = sanitizeABTest(candidate);
+        if (!test) {
+            throw new Error('Invalid A/B test configuration');
+        }
         this.tests.set(test.id, test);
         this.saveTests();
         return test;
@@ -321,7 +341,15 @@ export class ABTestingService {
         const test = this.tests.get(id);
         if (!test) return false;
 
-        const updated = { ...test, ...updates };
+        const updated = sanitizeABTest({
+            ...test,
+            ...updates,
+            id: test.id,
+            createdAt: test.createdAt,
+        });
+        if (!updated) {
+            return false;
+        }
         this.tests.set(id, updated);
         this.saveTests();
         return true;

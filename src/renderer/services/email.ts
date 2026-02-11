@@ -49,6 +49,22 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizePort = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return null;
+    }
+    const normalized = Math.round(value);
+    return normalized >= 1 && normalized <= 65535 ? normalized : null;
+};
+
 class EmailService {
     private config: EmailConfig | null = null;
     private readonly STORAGE_KEY = 'email_config';
@@ -66,33 +82,38 @@ class EmailService {
         if (isRecord(value.smtpConfig) && isRecord(value.smtpConfig.auth)) {
             const smtp = value.smtpConfig;
             const auth = smtp.auth;
+            const host = sanitizeNonEmptyString(smtp.host);
+            const port = sanitizePort(smtp.port);
+            const user = sanitizeNonEmptyString(auth.user);
+            const password = sanitizeNonEmptyString(auth.password);
             if (
-                typeof smtp.host === 'string'
-                && typeof smtp.port === 'number'
-                && Number.isFinite(smtp.port)
+                host
+                && port !== null
                 && typeof smtp.secure === 'boolean'
-                && typeof auth.user === 'string'
-                && typeof auth.password === 'string'
+                && user
+                && password
             ) {
                 smtpConfig = {
-                    host: smtp.host,
-                    port: smtp.port,
+                    host,
+                    port,
                     secure: smtp.secure,
                     auth: {
-                        user: auth.user,
-                        password: auth.password,
+                        user,
+                        password,
                     },
                 };
             }
         }
 
+        const defaultRecipient = sanitizeNonEmptyString(value.defaultRecipient) || undefined;
+        const defaultSubject = sanitizeNonEmptyString(value.defaultSubject) || undefined;
+        if (!defaultRecipient && !defaultSubject && !smtpConfig) {
+            return null;
+        }
+
         return {
-            defaultRecipient: typeof value.defaultRecipient === 'string' && value.defaultRecipient.trim().length > 0
-                ? value.defaultRecipient
-                : undefined,
-            defaultSubject: typeof value.defaultSubject === 'string' && value.defaultSubject.trim().length > 0
-                ? value.defaultSubject
-                : undefined,
+            defaultRecipient,
+            defaultSubject,
             smtpConfig,
         };
     }

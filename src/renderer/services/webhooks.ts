@@ -38,6 +38,31 @@ const parseJson = (raw: string): unknown | null => {
   }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeEvents = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const events: string[] = [];
+  value.forEach((entry) => {
+    const event = sanitizeNonEmptyString(entry);
+    if (!event || seen.has(event)) {
+      return;
+    }
+    seen.add(event);
+    events.push(event);
+  });
+  return events;
+};
+
 class WebhookService {
   private webhooks: WebhookConfig[] = [];
   private readonly STORAGE_KEY = 'app_webhooks';
@@ -46,25 +71,26 @@ class WebhookService {
     this.loadWebhooks();
   }
 
-  private sanitizeWebhook(value: unknown): WebhookConfig | null {
+  private sanitizeWebhook(value: unknown, forceId?: string): WebhookConfig | null {
     if (!isRecord(value)) {
       return null;
     }
-    if (
-      typeof value.id !== 'string'
-      || typeof value.name !== 'string'
-      || typeof value.url !== 'string'
-      || typeof value.enabled !== 'boolean'
-      || !Array.isArray(value.events)
-    ) {
+    const id = forceId || sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    const url = sanitizeNonEmptyString(value.url);
+    if (!id || !name || !url || typeof value.enabled !== 'boolean') {
+      return null;
+    }
+    const events = sanitizeEvents(value.events);
+    if (events.length === 0) {
       return null;
     }
     return {
-      id: value.id,
-      name: value.name,
-      url: value.url,
+      id,
+      name,
+      url,
       enabled: value.enabled,
-      events: value.events.filter((event): event is string => typeof event === 'string'),
+      events,
     };
   }
 
@@ -80,9 +106,19 @@ class WebhookService {
           this.webhooks = [];
           return;
         }
+        const seenIds = new Set<string>();
         this.webhooks = parsed
           .map((entry) => this.sanitizeWebhook(entry))
-          .filter((entry): entry is WebhookConfig => entry !== null);
+          .filter((entry): entry is WebhookConfig => {
+            if (!entry) {
+              return false;
+            }
+            if (seenIds.has(entry.id)) {
+              return false;
+            }
+            seenIds.add(entry.id);
+            return true;
+          });
       }
     } catch (error) {
       console.error('Failed to load webhooks:', error);
@@ -113,10 +149,13 @@ class WebhookService {
    */
   addWebhook(config: Omit<WebhookConfig, 'id'>): string {
     const id = crypto.randomUUID();
-    const webhook: WebhookConfig = {
+    const webhook = this.sanitizeWebhook({
       ...config,
       id,
-    };
+    });
+    if (!webhook) {
+      throw new Error('Invalid webhook configuration');
+    }
     this.webhooks.push(webhook);
     this.saveWebhooks();
     return id;
@@ -129,7 +168,11 @@ class WebhookService {
     const index = this.webhooks.findIndex(w => w.id === id);
     if (index === -1) return false;
 
-    this.webhooks[index] = { ...this.webhooks[index], ...updates };
+    const updated = this.sanitizeWebhook({ ...this.webhooks[index], ...updates }, id);
+    if (!updated) {
+      return false;
+    }
+    this.webhooks[index] = updated;
     this.saveWebhooks();
     return true;
   }

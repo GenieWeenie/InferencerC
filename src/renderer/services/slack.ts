@@ -71,6 +71,14 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 class SlackService {
     private config: SlackConfig | null = null;
     private readonly STORAGE_KEY = 'slack_config';
@@ -83,17 +91,13 @@ class SlackService {
         if (!isRecord(value)) {
             return null;
         }
-        return {
-            webhookUrl: typeof value.webhookUrl === 'string' && value.webhookUrl.trim().length > 0
-                ? value.webhookUrl
-                : undefined,
-            apiToken: typeof value.apiToken === 'string' && value.apiToken.trim().length > 0
-                ? value.apiToken
-                : undefined,
-            defaultChannel: typeof value.defaultChannel === 'string' && value.defaultChannel.trim().length > 0
-                ? value.defaultChannel
-                : undefined,
-        };
+        const webhookUrl = sanitizeNonEmptyString(value.webhookUrl) || undefined;
+        const apiToken = sanitizeNonEmptyString(value.apiToken) || undefined;
+        const defaultChannel = sanitizeNonEmptyString(value.defaultChannel) || undefined;
+        if (!webhookUrl && !apiToken && !defaultChannel) {
+            return null;
+        }
+        return { webhookUrl, apiToken, defaultChannel };
     }
 
     /**

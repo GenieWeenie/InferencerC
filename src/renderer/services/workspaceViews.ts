@@ -37,6 +37,7 @@ const VIEW_MODES = new Set<WorkspaceViewMode>(['list', 'grid', 'kanban', 'compac
 const GROUP_BY_VALUES = new Set<NonNullable<WorkspaceViewConfig['groupBy']>>(['date', 'category', 'model', 'tag', 'none']);
 const SORT_BY_VALUES = new Set<NonNullable<WorkspaceViewConfig['sortBy']>>(['date', 'title', 'messageCount', 'lastActivity']);
 const SORT_ORDER_VALUES = new Set<NonNullable<WorkspaceViewConfig['sortOrder']>>(['asc', 'desc']);
+const MAX_ITEMS_PER_PAGE = 200;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -94,7 +95,7 @@ export class WorkspaceViewsService {
             showPinned: typeof value.showPinned === 'boolean' ? value.showPinned : defaults.showPinned,
             showArchived: typeof value.showArchived === 'boolean' ? value.showArchived : defaults.showArchived,
             itemsPerPage: typeof value.itemsPerPage === 'number' && Number.isFinite(value.itemsPerPage)
-                ? Math.max(1, Math.round(value.itemsPerPage))
+                ? Math.max(1, Math.min(MAX_ITEMS_PER_PAGE, Math.round(value.itemsPerPage)))
                 : defaults.itemsPerPage,
         };
     }

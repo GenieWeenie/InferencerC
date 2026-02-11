@@ -57,6 +57,14 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 class DiscordService {
     private config: DiscordConfig | null = null;
     private readonly STORAGE_KEY = 'discord_config';
@@ -69,13 +77,14 @@ class DiscordService {
         if (!isRecord(value)) {
             return null;
         }
-        if (typeof value.webhookUrl !== 'string' || value.webhookUrl.trim().length === 0) {
+        const webhookUrl = sanitizeNonEmptyString(value.webhookUrl);
+        if (!webhookUrl) {
             return null;
         }
         return {
-            webhookUrl: value.webhookUrl,
-            username: typeof value.username === 'string' && value.username.trim().length > 0 ? value.username : undefined,
-            avatarUrl: typeof value.avatarUrl === 'string' && value.avatarUrl.trim().length > 0 ? value.avatarUrl : undefined,
+            webhookUrl,
+            username: sanitizeNonEmptyString(value.username) || undefined,
+            avatarUrl: sanitizeNonEmptyString(value.avatarUrl) || undefined,
         };
     }
 

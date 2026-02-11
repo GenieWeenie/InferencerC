@@ -41,6 +41,14 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
 export class AccessibilityService {
     private static instance: AccessibilityService;
     private readonly STORAGE_KEY = 'accessibility_config';
@@ -99,17 +107,16 @@ export class AccessibilityService {
         if (!isRecord(value)) {
             return null;
         }
-        if (
-            typeof value.key !== 'string'
-            || typeof value.action !== 'string'
-            || typeof value.description !== 'string'
-        ) {
+        const key = sanitizeNonEmptyString(value.key);
+        const action = sanitizeNonEmptyString(value.action);
+        const description = sanitizeNonEmptyString(value.description);
+        if (!key || !action || !description) {
             return null;
         }
         return {
-            key: value.key,
-            action: value.action,
-            description: value.description,
+            key,
+            action,
+            description,
             ctrl: typeof value.ctrl === 'boolean' ? value.ctrl : undefined,
             shift: typeof value.shift === 'boolean' ? value.shift : undefined,
             alt: typeof value.alt === 'boolean' ? value.alt : undefined,
@@ -169,7 +176,7 @@ export class AccessibilityService {
      */
     updateConfig(config: Partial<AccessibilityConfig>): void {
         const current = this.getConfig();
-        const updated = { ...current, ...config };
+        const updated = this.sanitizeConfig({ ...current, ...config }) || current;
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(updated));
         this.initializeAccessibility();
     }
@@ -212,7 +219,31 @@ export class AccessibilityService {
      * Update keyboard shortcuts
      */
     updateKeyboardShortcuts(shortcuts: KeyboardShortcut[]): void {
-        localStorage.setItem(this.SHORTCUTS_KEY, JSON.stringify(shortcuts));
+        const seen = new Set<string>();
+        const sanitized = shortcuts
+            .map((entry) => this.sanitizeShortcut(entry))
+            .filter((entry): entry is KeyboardShortcut => {
+                if (!entry) {
+                    return false;
+                }
+                const signature = [
+                    entry.key.toLowerCase(),
+                    entry.action.toLowerCase(),
+                    entry.ctrl ? '1' : '0',
+                    entry.shift ? '1' : '0',
+                    entry.alt ? '1' : '0',
+                ].join(':');
+                if (seen.has(signature)) {
+                    return false;
+                }
+                seen.add(signature);
+                return true;
+            });
+        if (sanitized.length === 0) {
+            localStorage.removeItem(this.SHORTCUTS_KEY);
+            return;
+        }
+        localStorage.setItem(this.SHORTCUTS_KEY, JSON.stringify(sanitized));
     }
 
     /**

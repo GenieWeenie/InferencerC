@@ -24,6 +24,54 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const MCP_STATUSES = new Set<MCPServer['status']>([
+    'disconnected',
+    'connecting',
+    'connected',
+    'error',
+]);
+
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+    value.forEach((entry) => {
+        const stringValue = sanitizeNonEmptyString(entry);
+        if (!stringValue || seen.has(stringValue)) {
+            return;
+        }
+        seen.add(stringValue);
+        normalized.push(stringValue);
+    });
+    return normalized;
+};
+
+const sanitizeEnvRecord = (value: unknown): Record<string, string> | undefined => {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+    const normalized: Record<string, string> = {};
+    Object.entries(value).forEach(([key, entry]) => {
+        const normalizedKey = sanitizeNonEmptyString(key);
+        const normalizedValue = sanitizeNonEmptyString(entry);
+        if (!normalizedKey || !normalizedValue) {
+            return;
+        }
+        normalized[normalizedKey] = normalizedValue;
+    });
+    return Object.keys(normalized).length > 0 ? normalized : undefined;
+};
+
 export interface FolderChangedEventPayload {
     path: string;
     type: string;
@@ -188,44 +236,63 @@ class MCPClient {
         this.loadServers();
     }
 
+    private sanitizeServer(
+        value: unknown,
+        options?: {
+            forceId?: string;
+            forceStatus?: MCPServer['status'];
+            forceErrorMessage?: string | undefined;
+            fallbackStatus?: MCPServer['status'];
+        }
+    ): MCPServer | null {
+        if (!isRecord(value)) {
+            return null;
+        }
+        const id = options?.forceId || sanitizeNonEmptyString(value.id);
+        const name = sanitizeNonEmptyString(value.name);
+        const command = sanitizeNonEmptyString(value.command);
+        const args = sanitizeStringArray(value.args);
+        if (!id || !name || !command) {
+            return null;
+        }
+
+        const statusFromValue = MCP_STATUSES.has(value.status as MCPServer['status'])
+            ? value.status as MCPServer['status']
+            : undefined;
+        const status = options?.forceStatus
+            || statusFromValue
+            || options?.fallbackStatus
+            || 'disconnected';
+
+        return {
+            id,
+            name,
+            description: sanitizeNonEmptyString(value.description) || undefined,
+            command,
+            args,
+            env: sanitizeEnvRecord(value.env),
+            status,
+            errorMessage: options?.forceErrorMessage !== undefined
+                ? options.forceErrorMessage
+                : (sanitizeNonEmptyString(value.errorMessage) || undefined),
+        };
+    }
+
     private parseStoredServers(raw: string): MCPServer[] {
         const parsed = parseJson(raw);
         if (!Array.isArray(parsed)) {
             return [];
         }
-
+        const seenIds = new Set<string>();
         const servers: MCPServer[] = [];
         parsed.forEach((entry) => {
-            if (!isRecord(entry)) {
+            const sanitized = this.sanitizeServer(entry, { fallbackStatus: 'disconnected' });
+            if (!sanitized || seenIds.has(sanitized.id)) {
                 return;
             }
-            if (
-                typeof entry.id !== 'string'
-                || typeof entry.name !== 'string'
-                || typeof entry.command !== 'string'
-                || !Array.isArray(entry.args)
-            ) {
-                return;
-            }
-            const args = entry.args.filter((arg): arg is string => typeof arg === 'string');
-            const env = isRecord(entry.env)
-                ? Object.fromEntries(
-                    Object.entries(entry.env).filter(([, value]) => typeof value === 'string')
-                )
-                : undefined;
-
-            servers.push({
-                id: entry.id,
-                name: entry.name,
-                description: typeof entry.description === 'string' ? entry.description : undefined,
-                command: entry.command,
-                args,
-                env,
-                status: 'disconnected',
-                errorMessage: typeof entry.errorMessage === 'string' ? entry.errorMessage : undefined,
-            });
+            seenIds.add(sanitized.id);
+            servers.push(sanitized);
         });
-
         return servers;
     }
 
@@ -238,9 +305,7 @@ class MCPClient {
             if (saved) {
                 const servers = this.parseStoredServers(saved);
                 servers.forEach(s => {
-                    // Reset status on load
-                    s.status = 'disconnected';
-                    this.servers.set(s.id, s);
+                    this.servers.set(s.id, { ...s, status: 'disconnected' });
                 });
             }
         } catch (e) {
@@ -293,11 +358,15 @@ class MCPClient {
      * Add a new MCP server configuration
      */
     addServer(server: Omit<MCPServer, 'id' | 'status'>): MCPServer {
-        const newServer: MCPServer = {
+        const candidate: MCPServer = {
             id: crypto.randomUUID(),
             status: 'disconnected',
             ...server
         };
+        const newServer = this.sanitizeServer(candidate, { forceStatus: 'disconnected' });
+        if (!newServer) {
+            throw new Error('Invalid MCP server configuration');
+        }
         this.servers.set(newServer.id, newServer);
         this.saveServers();
         this.notifyListeners();
@@ -320,7 +389,18 @@ class MCPClient {
     updateServer(id: string, updates: Partial<MCPServer>): void {
         const server = this.servers.get(id);
         if (server) {
-            Object.assign(server, updates);
+            const sanitized = this.sanitizeServer(
+                { ...server, ...updates },
+                {
+                    forceId: server.id,
+                    forceStatus: server.status,
+                    forceErrorMessage: server.errorMessage,
+                }
+            );
+            if (!sanitized) {
+                return;
+            }
+            this.servers.set(id, sanitized);
             this.saveServers();
             this.notifyListeners();
         }

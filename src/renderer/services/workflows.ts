@@ -237,10 +237,14 @@ export class WorkflowsService {
      * Create a new workflow
      */
     createWorkflow(workflow: Omit<WorkflowRule, 'id'>): WorkflowRule {
-        const newWorkflow: WorkflowRule = {
+        const candidate: WorkflowRule = {
             ...workflow,
             id: crypto.randomUUID(),
         };
+        const newWorkflow = sanitizeWorkflow(candidate);
+        if (!newWorkflow) {
+            throw new Error('Invalid workflow configuration');
+        }
         this.workflows.set(newWorkflow.id, newWorkflow);
         this.saveWorkflows();
         return newWorkflow;
@@ -268,7 +272,14 @@ export class WorkflowsService {
         const workflow = this.workflows.get(id);
         if (!workflow) return false;
 
-        const updated = { ...workflow, ...updates };
+        const updated = sanitizeWorkflow({
+            ...workflow,
+            ...updates,
+            id: workflow.id,
+        });
+        if (!updated) {
+            return false;
+        }
         this.workflows.set(id, updated);
         this.saveWorkflows();
         return true;

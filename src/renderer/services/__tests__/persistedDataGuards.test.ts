@@ -57,6 +57,37 @@ describe('persisted data parse guards', () => {
         });
     });
 
+    it('sanitizes workflow create/update payloads at mutation time', () => {
+        jest.isolateModules(() => {
+            const { workflowsService } = require('../workflows') as typeof import('../workflows');
+            const created = workflowsService.createWorkflow({
+                name: '  Runtime Workflow  ',
+                description: '  Runtime description  ',
+                enabled: true,
+                priority: 2,
+                conditions: [{ type: 'keyword', operator: 'contains', value: ' ping ' }],
+                actions: [{ type: 'send-notification', value: ' notify ' }],
+            });
+
+            expect(created.name).toBe('Runtime Workflow');
+            expect(created.description).toBe('Runtime description');
+            expect(created.conditions[0]?.value).toBe('ping');
+            expect(created.actions[0]?.value).toBe('notify');
+
+            expect(workflowsService.updateWorkflow(created.id, {
+                id: 'different-id',
+                name: '  Updated Workflow  ',
+            } as any)).toBe(true);
+            expect(workflowsService.getWorkflow(created.id)?.id).toBe(created.id);
+            expect(workflowsService.getWorkflow(created.id)?.name).toBe('Updated Workflow');
+            expect(workflowsService.getWorkflow('different-id')).toBeUndefined();
+
+            expect(workflowsService.updateWorkflow(created.id, {
+                actions: [{ type: 'send-notification', value: '' }],
+            } as any)).toBe(false);
+        });
+    });
+
     it('drops malformed A/B test records from storage', () => {
         localStorage.setItem('ab_tests', JSON.stringify([
             {
@@ -84,6 +115,39 @@ describe('persisted data parse guards', () => {
             const tests = abTestingService.getAllTests();
             expect(tests).toHaveLength(1);
             expect(tests[0]?.id).toBe('test-valid');
+        });
+    });
+
+    it('sanitizes A/B create/update payloads at mutation time', () => {
+        jest.isolateModules(() => {
+            const { abTestingService } = require('../abTesting') as typeof import('../abTesting');
+            const created = abTestingService.createTest(
+                '  Runtime Test  ',
+                [{ id: ' variant-a ', name: ' A ', prompt: '  Reply clearly  ' }],
+                '  What is 2+2?  ',
+                [{ role: 'user', content: '  hi  ' }]
+            );
+
+            expect(created.name).toBe('Runtime Test');
+            expect(created.input).toBe('What is 2+2?');
+            expect(created.variants[0]?.id).toBe('variant-a');
+            expect(created.variants[0]?.prompt).toBe('Reply clearly');
+            expect(created.context?.[0]?.content).toBe('hi');
+
+            expect(abTestingService.updateTest(created.id, {
+                id: 'other-id',
+                name: '  Updated Test  ',
+            } as any)).toBe(true);
+            expect(abTestingService.getTest(created.id)?.id).toBe(created.id);
+            expect(abTestingService.getTest(created.id)?.name).toBe('Updated Test');
+            expect(abTestingService.getTest('other-id')).toBeUndefined();
+
+            expect(abTestingService.updateTest(created.id, {
+                status: 'invalid-status',
+            } as any)).toBe(false);
+            expect(abTestingService.updateTest(created.id, {
+                variants: [{ id: 'x', name: 'X', prompt: '' }],
+            } as any)).toBe(false);
         });
     });
 

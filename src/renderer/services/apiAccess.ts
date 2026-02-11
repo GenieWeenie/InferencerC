@@ -41,6 +41,31 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+    value.forEach((entry) => {
+        const stringValue = sanitizeNonEmptyString(entry);
+        if (!stringValue || seen.has(stringValue)) {
+            return;
+        }
+        seen.add(stringValue);
+        normalized.push(stringValue);
+    });
+    return normalized;
+};
+
 class APIAccessService {
     private config: APIConfig | null = null;
     private readonly STORAGE_KEY = 'api_access_config';
@@ -71,17 +96,20 @@ class APIAccessService {
             ? Math.max(1, Math.min(65535, Math.round(portCandidate)))
             : defaultConfig.port;
 
-        const allowedOrigins = Array.isArray(value.allowedOrigins)
-            ? value.allowedOrigins.filter((origin): origin is string => typeof origin === 'string' && origin.trim().length > 0)
-            : undefined;
-        const rateLimit = isRecord(value.rateLimit) && typeof value.rateLimit.requestsPerMinute === 'number' && Number.isFinite(value.rateLimit.requestsPerMinute)
-            ? { requestsPerMinute: Math.max(1, Math.round(value.rateLimit.requestsPerMinute)) }
+        const allowedOrigins = sanitizeStringArray(value.allowedOrigins);
+        const rateLimitValue = isRecord(value.rateLimit)
+            ? (typeof value.rateLimit.requestsPerMinute === 'number'
+                ? value.rateLimit.requestsPerMinute
+                : Number(value.rateLimit.requestsPerMinute))
+            : null;
+        const rateLimit = rateLimitValue !== null && Number.isFinite(rateLimitValue)
+            ? { requestsPerMinute: Math.max(1, Math.round(rateLimitValue)) }
             : defaultConfig.rateLimit;
 
         return {
             enabled: typeof value.enabled === 'boolean' ? value.enabled : defaultConfig.enabled,
             port: normalizedPort,
-            apiKey: typeof value.apiKey === 'string' && value.apiKey.trim().length > 0 ? value.apiKey : undefined,
+            apiKey: sanitizeNonEmptyString(value.apiKey) || undefined,
             allowedOrigins: allowedOrigins && allowedOrigins.length > 0 ? allowedOrigins : undefined,
             rateLimit,
         };

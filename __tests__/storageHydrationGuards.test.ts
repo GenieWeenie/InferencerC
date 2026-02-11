@@ -193,6 +193,96 @@ describe('storage hydration guards', () => {
     });
   });
 
+  test('sanitizes integration config mutation payloads before persistence', () => {
+    jest.isolateModules(() => {
+      const { apiAccessService } = require('../src/renderer/services/apiAccess') as typeof import('../src/renderer/services/apiAccess');
+      const { slackService } = require('../src/renderer/services/slack') as typeof import('../src/renderer/services/slack');
+      const { discordService } = require('../src/renderer/services/discord') as typeof import('../src/renderer/services/discord');
+      const { emailService } = require('../src/renderer/services/email') as typeof import('../src/renderer/services/email');
+      const { calendarService } = require('../src/renderer/services/calendar') as typeof import('../src/renderer/services/calendar');
+      const { readIntegrationAvailability } = require('../src/renderer/lib/chatIntegrations') as typeof import('../src/renderer/lib/chatIntegrations');
+
+      apiAccessService.setConfig({
+        enabled: true,
+        port: 70000,
+        apiKey: '  key-123  ',
+        allowedOrigins: [' https://a.example ', 'https://a.example', '   '] as any,
+        rateLimit: { requestsPerMinute: 0 },
+      });
+      slackService.setConfig({
+        webhookUrl: '  https://hooks.slack.test  ',
+        apiToken: '  slack-token  ',
+        defaultChannel: '  #general  ',
+      });
+      discordService.setConfig({
+        webhookUrl: '  https://discord.test  ',
+        username: '  Bot  ',
+        avatarUrl: '  https://img.test/avatar.png  ',
+      });
+      emailService.setConfig({
+        defaultRecipient: '  test@example.com  ',
+        defaultSubject: '  Subject  ',
+        smtpConfig: {
+          host: '  smtp.test  ',
+          port: 587.4,
+          secure: true,
+          auth: {
+            user: '  smtp-user  ',
+            password: '  smtp-pass  ',
+          },
+        },
+      });
+      calendarService.setConfig({
+        provider: ' google ' as any,
+        apiKey: '  g-key  ',
+      });
+
+      expect(apiAccessService.getConfig()).toMatchObject({
+        enabled: true,
+        port: 65535,
+        apiKey: 'key-123',
+        allowedOrigins: ['https://a.example'],
+      });
+      expect(apiAccessService.getConfig().rateLimit?.requestsPerMinute).toBe(1);
+
+      expect(slackService.getConfig()).toEqual({
+        webhookUrl: 'https://hooks.slack.test',
+        apiToken: 'slack-token',
+        defaultChannel: '#general',
+      });
+      expect(discordService.getConfig()).toEqual({
+        webhookUrl: 'https://discord.test',
+        username: 'Bot',
+        avatarUrl: 'https://img.test/avatar.png',
+      });
+      expect(emailService.getConfig()).toEqual({
+        defaultRecipient: 'test@example.com',
+        defaultSubject: 'Subject',
+        smtpConfig: {
+          host: 'smtp.test',
+          port: 587,
+          secure: true,
+          auth: {
+            user: 'smtp-user',
+            password: 'smtp-pass',
+          },
+        },
+      });
+      expect(calendarService.getConfig()).toEqual({
+        provider: 'google',
+        apiKey: 'g-key',
+      });
+
+      expect(readIntegrationAvailability()).toEqual({
+        notion: false,
+        slack: true,
+        discord: true,
+        email: true,
+        calendar: true,
+      });
+    });
+  });
+
   test('filters malformed mock server endpoint payloads', () => {
     localStorage.setItem('mock_endpoints', JSON.stringify([
       {
@@ -438,6 +528,117 @@ describe('storage hydration guards', () => {
       expect(accessibilityConfig.fontSize).toBe('large');
       expect(accessibilityConfig.colorBlindMode).toBe('deuteranopia');
       expect(accessibilityService.getKeyboardShortcuts()).toHaveLength(1);
+    });
+  });
+
+  test('sanitizes mcp/webhook/schedule/accessibility/workspace mutation paths', () => {
+    jest.isolateModules(() => {
+      const { mcpClient } = require('../src/renderer/services/mcp') as typeof import('../src/renderer/services/mcp');
+      const { webhookService } = require('../src/renderer/services/webhooks') as typeof import('../src/renderer/services/webhooks');
+      const { scheduledConversationsService } = require('../src/renderer/services/scheduledConversations') as typeof import('../src/renderer/services/scheduledConversations');
+      const { accessibilityService } = require('../src/renderer/services/accessibility') as typeof import('../src/renderer/services/accessibility');
+      const { workspaceViewsService } = require('../src/renderer/services/workspaceViews') as typeof import('../src/renderer/services/workspaceViews');
+
+      const addedServer = mcpClient.addServer({
+        name: '  MCP Server  ',
+        description: '  Local tools  ',
+        command: '  npx  ',
+        args: [' -y ', '', '-y'] as any,
+        env: { PATH_HINT: '  /tmp  ', EMPTY: '   ', BAD: 2 as any },
+        status: 'disconnected',
+      });
+      expect(addedServer.name).toBe('MCP Server');
+      expect(addedServer.description).toBe('Local tools');
+      expect(addedServer.command).toBe('npx');
+      expect(addedServer.args).toEqual(['-y']);
+      expect(addedServer.env).toEqual({ PATH_HINT: '/tmp' });
+
+      mcpClient.updateServer(addedServer.id, {
+        id: 'other-server',
+        name: '  Updated MCP  ',
+        args: [' tool ', 'tool', '   '] as any,
+      } as any);
+      const updatedServer = mcpClient.getServers().find((server) => server.id === addedServer.id);
+      expect(updatedServer?.name).toBe('Updated MCP');
+      expect(updatedServer?.id).toBe(addedServer.id);
+      expect(mcpClient.getServers().find((server) => server.id === 'other-server')).toBeUndefined();
+      expect(updatedServer?.args).toEqual(['tool']);
+
+      const webhookId = webhookService.addWebhook({
+        name: '  Hook  ',
+        url: '  https://example.com/webhook  ',
+        enabled: true,
+        events: [' conversation_complete ', 'conversation_complete', ''],
+      });
+      expect(webhookService.getWebhooks()[0]).toMatchObject({
+        id: webhookId,
+        name: 'Hook',
+        url: 'https://example.com/webhook',
+        events: ['conversation_complete'],
+      });
+      expect(webhookService.updateWebhook(webhookId, {
+        id: 'other-webhook',
+        name: '  Hook Updated  ',
+        events: [' message_sent ', ''],
+      } as any)).toBe(true);
+      expect(webhookService.getWebhooks()[0]?.id).toBe(webhookId);
+      expect(webhookService.getWebhooks()[0]?.name).toBe('Hook Updated');
+      expect(webhookService.getWebhooks()[0]?.events).toEqual(['message_sent']);
+      expect(webhookService.updateWebhook(webhookId, { events: [] })).toBe(false);
+
+      const scheduled = scheduledConversationsService.createSchedule({
+        name: '  Daily Sync  ',
+        prompt: '  Check status  ',
+        modelId: '  model-1  ',
+        scheduledTime: Date.now() + 10_000,
+        recurrence: {
+          type: 'custom',
+          interval: 0,
+          daysOfWeek: [1, 1, 9],
+          dayOfMonth: 40,
+        },
+        enabled: true,
+      });
+      expect(scheduled.name).toBe('Daily Sync');
+      expect(scheduled.prompt).toBe('Check status');
+      expect(scheduled.modelId).toBe('model-1');
+      expect(scheduled.recurrence?.interval).toBeUndefined();
+      expect(scheduled.recurrence?.daysOfWeek).toEqual([1]);
+      expect(scheduled.recurrence?.dayOfMonth).toBeUndefined();
+
+      expect(scheduledConversationsService.updateSchedule(scheduled.id, {
+        id: 'other-schedule',
+        prompt: '',
+      } as any)).toBe(false);
+
+      accessibilityService.updateConfig({
+        highContrast: true,
+        fontSize: 'invalid' as any,
+      });
+      expect(accessibilityService.getConfig().highContrast).toBe(true);
+      expect(accessibilityService.getConfig().fontSize).toBe('medium');
+
+      accessibilityService.updateKeyboardShortcuts([
+        { key: ' k ', action: ' focus-input ', description: ' Focus input ', ctrl: true },
+        { key: 'k', action: 'focus-input', description: 'Focus input', ctrl: true },
+        { key: '', action: 'bad', description: 'bad' } as any,
+      ]);
+      const storedShortcuts = accessibilityService.getKeyboardShortcuts();
+      expect(storedShortcuts).toHaveLength(1);
+      expect(storedShortcuts[0]).toEqual({
+        key: 'k',
+        action: 'focus-input',
+        description: 'Focus input',
+        ctrl: true,
+      });
+
+      workspaceViewsService.updateConfig({ mode: 'grid', itemsPerPage: 1000 });
+      expect(workspaceViewsService.getConfig().mode).toBe('grid');
+      expect(workspaceViewsService.getConfig().itemsPerPage).toBe(200);
+      workspaceViewsService.updateConfig({ itemsPerPage: 0 });
+      expect(workspaceViewsService.getConfig().itemsPerPage).toBe(1);
+
+      scheduledConversationsService.stopScheduler();
     });
   });
 

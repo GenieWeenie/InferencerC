@@ -42,7 +42,7 @@ export interface ScheduledRun {
 const RECURRENCE_TYPES = new Set<RecurrencePattern['type']>(['once', 'daily', 'weekly', 'monthly', 'custom']);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
-    typeof value === 'object' && value !== null
+    typeof value === 'object' && value !== null && !Array.isArray(value)
 );
 
 const parseJson = (raw: string): unknown => {
@@ -53,53 +53,95 @@ const parseJson = (raw: string): unknown => {
     }
 };
 
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+const sanitizeFiniteNonNegativeNumber = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return null;
+    }
+    return value;
+};
+
+const sanitizePositiveInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return null;
+    }
+    const rounded = Math.round(value);
+    return rounded > 0 ? rounded : null;
+};
+
+const sanitizeNonNegativeInteger = (value: unknown): number | null => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return null;
+    }
+    const rounded = Math.round(value);
+    return rounded >= 0 ? rounded : null;
+};
+
 const sanitizeRecurrence = (value: unknown): RecurrencePattern | undefined => {
     if (!isRecord(value) || !RECURRENCE_TYPES.has(value.type as RecurrencePattern['type'])) {
         return undefined;
     }
 
     const daysOfWeek = Array.isArray(value.daysOfWeek)
-        ? value.daysOfWeek.filter((entry): entry is number => (
-            typeof entry === 'number' && Number.isInteger(entry) && entry >= 0 && entry <= 6
+        ? Array.from(new Set(
+            value.daysOfWeek
+                .filter((entry): entry is number => (
+                    typeof entry === 'number' && Number.isInteger(entry) && entry >= 0 && entry <= 6
+                ))
         ))
         : undefined;
+    const dayOfMonth = sanitizePositiveInteger(value.dayOfMonth);
+    const endDate = sanitizeFiniteNonNegativeNumber(value.endDate);
 
     return {
         type: value.type as RecurrencePattern['type'],
-        interval: typeof value.interval === 'number' ? value.interval : undefined,
-        daysOfWeek,
-        dayOfMonth: typeof value.dayOfMonth === 'number' ? value.dayOfMonth : undefined,
-        endDate: typeof value.endDate === 'number' ? value.endDate : undefined,
+        interval: sanitizePositiveInteger(value.interval) || undefined,
+        daysOfWeek: daysOfWeek && daysOfWeek.length > 0 ? daysOfWeek : undefined,
+        dayOfMonth: dayOfMonth && dayOfMonth <= 31 ? dayOfMonth : undefined,
+        endDate: endDate === null ? undefined : endDate,
     };
 };
 
 const sanitizeSchedule = (value: unknown): ScheduledConversation | null => {
-    if (!isRecord(value)
-        || typeof value.id !== 'string'
-        || typeof value.name !== 'string'
-        || typeof value.prompt !== 'string'
-        || typeof value.modelId !== 'string'
-        || typeof value.scheduledTime !== 'number'
-        || typeof value.enabled !== 'boolean'
-        || typeof value.nextRun !== 'number'
-        || typeof value.runCount !== 'number'
-        || typeof value.createdAt !== 'number') {
+    if (!isRecord(value)) {
         return null;
     }
+    const id = sanitizeNonEmptyString(value.id);
+    const name = sanitizeNonEmptyString(value.name);
+    const prompt = sanitizeNonEmptyString(value.prompt);
+    const modelId = sanitizeNonEmptyString(value.modelId);
+    const scheduledTime = sanitizeFiniteNonNegativeNumber(value.scheduledTime);
+    const nextRun = sanitizeFiniteNonNegativeNumber(value.nextRun);
+    const createdAt = sanitizeFiniteNonNegativeNumber(value.createdAt);
+    if (!id || !name || !prompt || !modelId || scheduledTime === null || nextRun === null || createdAt === null) {
+        return null;
+    }
+    if (typeof value.enabled !== 'boolean') {
+        return null;
+    }
+    const runCount = sanitizeNonNegativeInteger(value.runCount);
+    const lastRun = sanitizeFiniteNonNegativeNumber(value.lastRun);
 
     return {
-        id: value.id,
-        name: value.name,
-        prompt: value.prompt,
-        systemPrompt: typeof value.systemPrompt === 'string' ? value.systemPrompt : undefined,
-        modelId: value.modelId,
-        scheduledTime: value.scheduledTime,
+        id,
+        name,
+        prompt,
+        systemPrompt: sanitizeNonEmptyString(value.systemPrompt) || undefined,
+        modelId,
+        scheduledTime,
         recurrence: sanitizeRecurrence(value.recurrence),
         enabled: value.enabled,
-        lastRun: typeof value.lastRun === 'number' ? value.lastRun : undefined,
-        nextRun: value.nextRun,
-        runCount: value.runCount,
-        createdAt: value.createdAt,
+        lastRun: lastRun === null ? undefined : lastRun,
+        nextRun,
+        runCount: runCount === null ? 0 : runCount,
+        createdAt,
     };
 };
 
@@ -109,15 +151,26 @@ const parseStoredSchedules = (raw: string): ScheduledConversation[] => {
         return [];
     }
 
-    return parsed
+    const schedules = parsed
         .map((entry) => sanitizeSchedule(entry))
         .filter((entry): entry is ScheduledConversation => entry !== null);
+    const seenIds = new Set<string>();
+    return schedules.filter((entry) => {
+        if (seenIds.has(entry.id)) {
+            return false;
+        }
+        seenIds.add(entry.id);
+        return true;
+    });
 };
 
 const sanitizeRun = (value: unknown): ScheduledRun | null => {
-    if (!isRecord(value)
-        || typeof value.scheduleId !== 'string'
-        || typeof value.executedAt !== 'number') {
+    if (!isRecord(value)) {
+        return null;
+    }
+    const scheduleId = sanitizeNonEmptyString(value.scheduleId);
+    const executedAt = sanitizeFiniteNonNegativeNumber(value.executedAt);
+    if (!scheduleId || executedAt === null) {
         return null;
     }
 
@@ -125,14 +178,14 @@ const sanitizeRun = (value: unknown): ScheduledRun | null => {
     if (isRecord(value.result) && typeof value.result.success === 'boolean') {
         result = {
             success: value.result.success,
-            messageId: typeof value.result.messageId === 'string' ? value.result.messageId : undefined,
-            error: typeof value.result.error === 'string' ? value.result.error : undefined,
+            messageId: sanitizeNonEmptyString(value.result.messageId) || undefined,
+            error: sanitizeNonEmptyString(value.result.error) || undefined,
         };
     }
 
     return {
-        scheduleId: value.scheduleId,
-        executedAt: value.executedAt,
+        scheduleId,
+        executedAt,
         result,
     };
 };
@@ -189,13 +242,17 @@ export class ScheduledConversationsService {
      * Create a scheduled conversation
      */
     createSchedule(schedule: Omit<ScheduledConversation, 'id' | 'createdAt' | 'nextRun' | 'runCount'>): ScheduledConversation {
-        const newSchedule: ScheduledConversation = {
+        const candidate: ScheduledConversation = {
             ...schedule,
             id: crypto.randomUUID(),
             createdAt: Date.now(),
             nextRun: this.calculateNextRun(schedule.scheduledTime, schedule.recurrence),
             runCount: 0,
         };
+        const newSchedule = sanitizeSchedule(candidate);
+        if (!newSchedule) {
+            throw new Error('Invalid schedule configuration');
+        }
 
         this.saveSchedule(newSchedule);
         return newSchedule;
@@ -318,9 +375,18 @@ export class ScheduledConversationsService {
         const schedule = this.getSchedule(id);
         if (!schedule) return false;
 
-        const updated = { ...schedule, ...updates };
-        if (updates.scheduledTime || updates.recurrence) {
-            updated.nextRun = this.calculateNextRun(updated.scheduledTime, updated.recurrence);
+        const candidate = {
+            ...schedule,
+            ...updates,
+            id: schedule.id,
+            createdAt: schedule.createdAt,
+        };
+        if (updates.scheduledTime !== undefined || updates.recurrence !== undefined) {
+            candidate.nextRun = this.calculateNextRun(candidate.scheduledTime, candidate.recurrence);
+        }
+        const updated = sanitizeSchedule(candidate);
+        if (!updated) {
+            return false;
         }
         this.saveSchedule(updated);
         return true;
@@ -342,12 +408,16 @@ export class ScheduledConversationsService {
      * Save a schedule
      */
     private saveSchedule(schedule: ScheduledConversation): void {
+        const sanitized = sanitizeSchedule(schedule);
+        if (!sanitized) {
+            return;
+        }
         const schedules = this.getAllSchedules();
-        const index = schedules.findIndex(s => s.id === schedule.id);
+        const index = schedules.findIndex(s => s.id === sanitized.id);
         if (index >= 0) {
-            schedules[index] = schedule;
+            schedules[index] = sanitized;
         } else {
-            schedules.push(schedule);
+            schedules.push(sanitized);
         }
         localStorage.setItem(this.STORAGE_KEY, JSON.stringify(schedules));
     }
@@ -377,11 +447,12 @@ export class ScheduledConversationsService {
         try {
             const stored = localStorage.getItem(this.RUNS_KEY);
             if (!stored) return [];
+            const sanitizedLimit = sanitizePositiveInteger(limit) || 20;
             const runs = parseStoredRuns(stored);
             return runs
                 .filter(r => r.scheduleId === scheduleId)
                 .sort((a, b) => b.executedAt - a.executedAt)
-                .slice(0, limit);
+                .slice(0, sanitizedLimit);
         } catch (error) {
             console.error('Failed to load run history:', error);
             return [];
