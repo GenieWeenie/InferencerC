@@ -33,6 +33,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
     typeof value === 'object' && value !== null
 );
 
+const isFiniteNumber = (value: unknown): value is number => (
+    typeof value === 'number' && Number.isFinite(value)
+);
+
 const parseJson = (raw: string): unknown => {
     try {
         return JSON.parse(raw);
@@ -62,13 +66,13 @@ const sanitizeConfig = (value: unknown): BCIConfig => {
         deviceType: DEVICE_TYPES.has(value.deviceType as BCIConfig['deviceType'])
             ? value.deviceType as BCIConfig['deviceType']
             : defaults.deviceType,
-        samplingRate: typeof value.samplingRate === 'number'
+        samplingRate: isFiniteNumber(value.samplingRate)
             ? clamp(value.samplingRate, 1, 2000)
             : defaults.samplingRate,
-        sensitivity: typeof value.sensitivity === 'number'
+        sensitivity: isFiniteNumber(value.sensitivity)
             ? clamp(value.sensitivity, 0, 1)
             : defaults.sensitivity,
-        thoughtThreshold: typeof value.thoughtThreshold === 'number'
+        thoughtThreshold: isFiniteNumber(value.thoughtThreshold)
             ? clamp(value.thoughtThreshold, 0, 1)
             : defaults.thoughtThreshold,
     };
@@ -80,13 +84,19 @@ const sanitizeLearnedPattern = (
     if (!isRecord(value)
         || typeof value.pattern !== 'string'
         || typeof value.meaning !== 'string'
-        || typeof value.confidence !== 'number') {
+        || !isFiniteNumber(value.confidence)) {
+        return null;
+    }
+
+    const pattern = value.pattern.trim();
+    const meaning = value.meaning.trim();
+    if (!pattern || !meaning) {
         return null;
     }
 
     return {
-        pattern: value.pattern,
-        meaning: value.meaning,
+        pattern,
+        meaning,
         confidence: clamp(value.confidence, 0, 1),
     };
 };
@@ -144,7 +154,11 @@ export class BrainComputerInterfaceService {
      */
     saveConfig(config: Partial<BCIConfig>): void {
         this.config = sanitizeConfig({ ...this.config, ...config });
-        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.config));
+        try {
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.config));
+        } catch (error) {
+            console.error('Failed to save BCI config:', error);
+        }
     }
 
     /**
@@ -267,12 +281,20 @@ export class BrainComputerInterfaceService {
      */
     learnPattern(pattern: string, meaning: string, confidence: number = 0.5): void {
         const patterns = this.getLearnedPatterns();
-        patterns.push({
+        const sanitized = sanitizeLearnedPattern({
             pattern,
             meaning,
-            confidence: clamp(confidence, 0, 1),
+            confidence,
         });
-        localStorage.setItem(this.PATTERNS_KEY, JSON.stringify(patterns));
+        if (!sanitized) {
+            return;
+        }
+        patterns.push(sanitized);
+        try {
+            localStorage.setItem(this.PATTERNS_KEY, JSON.stringify(patterns));
+        } catch (error) {
+            console.error('Failed to save BCI pattern:', error);
+        }
     }
 
     /**

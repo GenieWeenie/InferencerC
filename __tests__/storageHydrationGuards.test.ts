@@ -976,4 +976,113 @@ describe('storage hydration guards', () => {
       expect(macroRecordingService.getPlaybackHistory()).toHaveLength(1);
     });
   });
+
+  test('guards crash recovery, api docs, and rag embedding cache hydration', async () => {
+    const validEmbedding = Array.from({ length: 128 }, () => 0.125);
+    localStorage.setItem('app_recovery_state', JSON.stringify({
+      sessionId: '   ',
+      timestamp: 1,
+      draftMessage: 'draft',
+    }));
+    localStorage.setItem('api_documentations', JSON.stringify([
+      {
+        id: 'doc-1',
+        sessionId: 'session-1',
+        title: 'Stored API',
+        description: 'Stored description',
+        endpoints: [
+          {
+            method: 'GET',
+            path: '/status',
+            description: 'Status endpoint',
+            responses: [{ statusCode: 200, description: 'OK' }],
+          },
+        ],
+        models: [],
+        examples: [],
+        generatedAt: 10,
+      },
+      { id: 'bad-doc' },
+    ]));
+    localStorage.setItem('rag_embedding_cache_v1', JSON.stringify({
+      valid: validEmbedding,
+      invalidShort: [0.2, 0.3],
+      invalidType: ['x'],
+    }));
+
+    let crashRecoveryService: typeof import('../src/renderer/services/crashRecovery').crashRecoveryService;
+    let apiDocsGeneratorService: typeof import('../src/renderer/services/apiDocsGenerator').apiDocsGeneratorService;
+    let ragDocumentChatService: typeof import('../src/renderer/services/ragDocumentChat').ragDocumentChatService;
+    let HistoryService: typeof import('../src/renderer/services/history').HistoryService;
+
+    jest.isolateModules(() => {
+      ({ crashRecoveryService } = require('../src/renderer/services/crashRecovery') as typeof import('../src/renderer/services/crashRecovery'));
+      ({ apiDocsGeneratorService } = require('../src/renderer/services/apiDocsGenerator') as typeof import('../src/renderer/services/apiDocsGenerator'));
+      ({ ragDocumentChatService } = require('../src/renderer/services/ragDocumentChat') as typeof import('../src/renderer/services/ragDocumentChat'));
+      ({ HistoryService } = require('../src/renderer/services/history') as typeof import('../src/renderer/services/history'));
+    });
+
+    expect(crashRecoveryService.getRecoveryState()).toBeNull();
+    crashRecoveryService.saveRecoveryState({
+      sessionId: 'session-1',
+      timestamp: Date.now(),
+      draftMessage: '',
+      pendingResponse: true,
+    });
+    expect(crashRecoveryService.getRecoveryState()?.pendingResponse).toBe(true);
+
+    expect(apiDocsGeneratorService.getAllDocumentations()).toHaveLength(1);
+    expect(apiDocsGeneratorService.getAllDocumentations()[0]?.title).toBe('Stored API');
+
+    HistoryService.saveSession({
+      id: 'session-api',
+      title: 'API Session',
+      lastModified: Date.now(),
+      modelId: 'model-1',
+      messages: [
+        { role: 'user', content: 'Create API docs for service health endpoint' },
+      ],
+    });
+
+    const generated = await apiDocsGeneratorService.generateDocs('session-api', async () => ({
+      content: JSON.stringify({
+        title: 'Generated API',
+        description: 'Generated docs',
+        endpoints: [
+          {
+            method: 'GET',
+            path: '/health',
+            description: 'Health check',
+            responses: [{ statusCode: 200, description: 'OK' }],
+          },
+          {
+            method: 'INVALID',
+            path: 'health',
+            description: 'Bad endpoint',
+            responses: [{ statusCode: 200, description: 'OK' }],
+          },
+        ],
+        examples: [
+          {
+            title: 'Health Request',
+            request: { method: 'GET', url: '/health' },
+            response: { status: 200, body: { ok: true } },
+          },
+          {
+            title: 'Bad Example',
+            request: { method: 1, url: '/health' },
+            response: { status: 200, body: {} },
+          },
+        ],
+      }),
+    }));
+
+    expect(generated).not.toBeNull();
+    expect(generated?.endpoints).toHaveLength(1);
+    expect(generated?.endpoints[0]?.path).toBe('/health');
+    expect(generated?.examples).toHaveLength(1);
+
+    const cacheStats = ragDocumentChatService.getEmbeddingCacheStats();
+    expect(cacheStats.entries).toBe(1);
+  });
 });

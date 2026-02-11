@@ -43,6 +43,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
     typeof value === 'object' && value !== null
 );
 
+const isFiniteNumber = (value: unknown): value is number => (
+    typeof value === 'number' && Number.isFinite(value)
+);
+
 const parseJson = (raw: string): unknown => {
     try {
         return JSON.parse(raw);
@@ -54,38 +58,51 @@ const parseJson = (raw: string): unknown => {
 const sanitizeAction = (value: unknown): MacroAction | null => {
     if (!isRecord(value)
         || !ACTION_TYPES.has(value.type as MacroAction['type'])
-        || typeof value.timestamp !== 'number'
+        || !isFiniteNumber(value.timestamp)
         || !isRecord(value.data)) {
         return null;
     }
 
     return {
         type: value.type as MacroAction['type'],
-        timestamp: value.timestamp,
-        data: value.data,
+        timestamp: Math.max(0, Math.floor(value.timestamp)),
+        data: { ...value.data },
     };
 };
 
 const sanitizeMacro = (value: unknown): Macro | null => {
+    const createdAt = isRecord(value) && isFiniteNumber(value.createdAt)
+        ? Math.max(0, Math.floor(value.createdAt))
+        : null;
+    const playCount = isRecord(value) && isFiniteNumber(value.playCount)
+        ? Math.max(0, Math.floor(value.playCount))
+        : null;
+
     if (!isRecord(value)
         || typeof value.id !== 'string'
         || typeof value.name !== 'string'
         || !Array.isArray(value.actions)
-        || typeof value.createdAt !== 'number'
-        || typeof value.playCount !== 'number') {
+        || createdAt === null
+        || playCount === null) {
+        return null;
+    }
+
+    const id = value.id.trim();
+    const name = value.name.trim();
+    if (!id || !name) {
         return null;
     }
 
     return {
-        id: value.id,
-        name: value.name,
+        id,
+        name,
         description: typeof value.description === 'string' ? value.description : undefined,
         actions: value.actions
             .map((entry) => sanitizeAction(entry))
             .filter((entry): entry is MacroAction => entry !== null),
-        createdAt: value.createdAt,
-        lastPlayed: typeof value.lastPlayed === 'number' ? value.lastPlayed : undefined,
-        playCount: value.playCount,
+        createdAt,
+        lastPlayed: isFiniteNumber(value.lastPlayed) ? Math.max(0, Math.floor(value.lastPlayed)) : undefined,
+        playCount,
     };
 };
 
@@ -101,21 +118,37 @@ const parseStoredMacros = (raw: string): Macro[] => {
 };
 
 const sanitizePlayback = (value: unknown): MacroPlayback | null => {
+    const startedAt = isRecord(value) && isFiniteNumber(value.startedAt)
+        ? Math.max(0, Math.floor(value.startedAt))
+        : null;
+    const actionsExecuted = isRecord(value) && isFiniteNumber(value.actionsExecuted)
+        ? Math.max(0, Math.floor(value.actionsExecuted))
+        : null;
+
     if (!isRecord(value)
         || typeof value.macroId !== 'string'
-        || typeof value.startedAt !== 'number'
+        || startedAt === null
         || typeof value.success !== 'boolean'
-        || typeof value.actionsExecuted !== 'number') {
+        || actionsExecuted === null) {
         return null;
     }
 
+    const macroId = value.macroId.trim();
+    if (!macroId) {
+        return null;
+    }
+
+    const completedAt = isFiniteNumber(value.completedAt)
+        ? Math.max(startedAt, Math.floor(value.completedAt))
+        : undefined;
+
     return {
-        macroId: value.macroId,
-        startedAt: value.startedAt,
-        completedAt: typeof value.completedAt === 'number' ? value.completedAt : undefined,
+        macroId,
+        startedAt,
+        completedAt,
         success: value.success,
         error: typeof value.error === 'string' ? value.error : undefined,
-        actionsExecuted: value.actionsExecuted,
+        actionsExecuted,
     };
 };
 
@@ -446,9 +479,12 @@ export class MacroRecordingService {
             const stored = localStorage.getItem(this.PLAYBACKS_KEY);
             if (!stored) return [];
             const playbacks = parseStoredPlaybacks(stored);
+            const sanitizedLimit = Number.isFinite(limit)
+                ? Math.max(0, Math.floor(limit))
+                : 20;
             return playbacks
                 .sort((a, b) => (b.startedAt) - a.startedAt)
-                .slice(0, limit);
+                .slice(0, sanitizedLimit);
         } catch (error) {
             console.error('Failed to load playback history:', error);
             return [];

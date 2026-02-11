@@ -3,6 +3,44 @@ import { RecoveryState } from '../../shared/types';
 const RECOVERY_STATE_KEY = 'app_recovery_state';
 const AUTO_SAVE_INTERVAL = 30000; // 30 seconds
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const isFiniteNumber = (value: unknown): value is number => (
+    typeof value === 'number' && Number.isFinite(value)
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeRecoveryState = (value: unknown): RecoveryState | null => {
+    if (!isRecord(value) || typeof value.sessionId !== 'string' || !isFiniteNumber(value.timestamp)) {
+        return null;
+    }
+
+    const sessionId = value.sessionId.trim();
+    if (!sessionId) {
+        return null;
+    }
+
+    return {
+        sessionId,
+        timestamp: Math.max(0, Math.floor(value.timestamp)),
+        draftMessage: typeof value.draftMessage === 'string' && value.draftMessage.length > 0
+            ? value.draftMessage
+            : undefined,
+        pendingResponse: typeof value.pendingResponse === 'boolean'
+            ? value.pendingResponse
+            : undefined,
+    };
+};
+
 export class CrashRecoveryService {
     private static instance: CrashRecoveryService;
     private autoSaveTimer: NodeJS.Timeout | null = null;
@@ -21,7 +59,11 @@ export class CrashRecoveryService {
      */
     saveRecoveryState(state: RecoveryState): void {
         try {
-            localStorage.setItem(RECOVERY_STATE_KEY, JSON.stringify(state));
+            const sanitized = sanitizeRecoveryState(state);
+            if (!sanitized) {
+                return;
+            }
+            localStorage.setItem(RECOVERY_STATE_KEY, JSON.stringify(sanitized));
         } catch (error) {
             console.error('Failed to save recovery state:', error);
         }
@@ -34,7 +76,7 @@ export class CrashRecoveryService {
         try {
             const data = localStorage.getItem(RECOVERY_STATE_KEY);
             if (!data) return null;
-            return JSON.parse(data);
+            return sanitizeRecoveryState(parseJson(data));
         } catch (error) {
             console.error('Failed to load recovery state:', error);
             return null;

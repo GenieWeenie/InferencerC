@@ -36,6 +36,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
     typeof value === 'object' && value !== null
 );
 
+const isFiniteNumber = (value: unknown): value is number => (
+    typeof value === 'number' && Number.isFinite(value)
+);
+
+const clamp = (value: number, min: number, max: number): number => (
+    Math.min(max, Math.max(min, value))
+);
+
 const parseJson = (raw: string): unknown => {
     try {
         return JSON.parse(raw);
@@ -48,27 +56,67 @@ const sanitizeNumberArray = (value: unknown): number[] => {
     if (!Array.isArray(value)) {
         return [];
     }
-    return value.filter((entry): entry is number => typeof entry === 'number');
+    const sanitized: number[] = [];
+    for (let i = 0; i < value.length; i++) {
+        const entry = value[i];
+        if (!Number.isInteger(entry) || entry < 0 || sanitized.includes(entry)) {
+            continue;
+        }
+        sanitized.push(entry);
+    }
+    return sanitized;
+};
+
+const sanitizeKeywords = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const keywords: string[] = [];
+    for (let i = 0; i < value.length; i++) {
+        const entry = value[i];
+        if (typeof entry !== 'string') {
+            continue;
+        }
+        const keyword = entry.trim();
+        if (!keyword || keywords.includes(keyword)) {
+            continue;
+        }
+        keywords.push(keyword);
+    }
+    return keywords;
 };
 
 const sanitizeTopic = (value: unknown): Topic | null => {
+    const weight = isFiniteNumber(isRecord(value) ? value.weight : null)
+        ? clamp(value.weight, 0, 1)
+        : null;
+    const frequency = isFiniteNumber(isRecord(value) ? value.frequency : null)
+        ? Math.max(0, Math.floor(value.frequency))
+        : null;
+
     if (!isRecord(value)
         || typeof value.id !== 'string'
         || typeof value.name !== 'string'
-        || !Array.isArray(value.keywords)
-        || typeof value.weight !== 'number'
+        || weight === null
         || !Array.isArray(value.messageIndices)
-        || typeof value.frequency !== 'number') {
+        || frequency === null) {
+        return null;
+    }
+
+    const id = value.id.trim();
+    const name = value.name.trim();
+    if (!id || !name) {
         return null;
     }
 
     return {
-        id: value.id,
-        name: value.name,
-        keywords: value.keywords.filter((entry): entry is string => typeof entry === 'string'),
-        weight: value.weight,
+        id,
+        name,
+        keywords: sanitizeKeywords(value.keywords),
+        weight,
         messageIndices: sanitizeNumberArray(value.messageIndices),
-        frequency: value.frequency,
+        frequency,
     };
 };
 
@@ -79,9 +127,11 @@ const sanitizeTopicDistribution = (value: unknown): Record<string, number> => {
 
     const distribution: Record<string, number> = {};
     Object.entries(value).forEach(([key, entry]) => {
-        if (typeof entry === 'number') {
-            distribution[key] = entry;
+        const trimmedKey = key.trim();
+        if (!trimmedKey || !isFiniteNumber(entry)) {
+            return;
         }
+        distribution[trimmedKey] = clamp(entry, 0, 1);
     });
     return distribution;
 };
@@ -90,7 +140,12 @@ const sanitizeTopicModel = (value: unknown): TopicModel | null => {
     if (!isRecord(value)
         || typeof value.sessionId !== 'string'
         || !Array.isArray(value.topics)
-        || typeof value.analyzedAt !== 'number') {
+        || !isFiniteNumber(value.analyzedAt)) {
+        return null;
+    }
+
+    const sessionId = value.sessionId.trim();
+    if (!sessionId) {
         return null;
     }
 
@@ -99,13 +154,17 @@ const sanitizeTopicModel = (value: unknown): TopicModel | null => {
         .filter((entry): entry is Topic => entry !== null);
 
     const primaryTopic = sanitizeTopic(value.primaryTopic);
+    const primaryTopicId = primaryTopic?.id;
+    const resolvedPrimaryTopic = primaryTopicId && topics.some((topic) => topic.id === primaryTopicId)
+        ? primaryTopic
+        : (topics[0] || null);
 
     return {
-        sessionId: value.sessionId,
+        sessionId,
         topics,
-        primaryTopic,
+        primaryTopic: resolvedPrimaryTopic,
         topicDistribution: sanitizeTopicDistribution(value.topicDistribution),
-        analyzedAt: value.analyzedAt,
+        analyzedAt: Math.max(0, Math.floor(value.analyzedAt)),
     };
 };
 

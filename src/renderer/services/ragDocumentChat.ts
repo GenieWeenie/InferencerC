@@ -62,6 +62,23 @@ const TEXT_EXTENSIONS = new Set([
     'html', 'css', 'c', 'cpp', 'h', 'hpp', 'java', 'go', 'rs', 'sql', 'xml',
     'sh', 'bash', 'zsh', 'ini', 'toml',
 ]);
+const MAX_EMBEDDING_CACHE_ENTRIES = 5000;
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const isFiniteNumber = (value: unknown): value is number => (
+    typeof value === 'number' && Number.isFinite(value)
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
 
 export class RagDocumentChatService {
     private static instance: RagDocumentChatService;
@@ -433,6 +450,7 @@ export class RagDocumentChatService {
 
         const normalizedVector = this.normalizeVector(vector);
         this.embeddingCache.set(cacheKey, normalizedVector);
+        this.trimEmbeddingCache();
         this.persistEmbeddingCache();
         return normalizedVector;
     }
@@ -504,14 +522,51 @@ export class RagDocumentChatService {
         try {
             const raw = this.storageGet(this.EMBEDDING_CACHE_KEY);
             if (!raw) return;
-            const parsed = JSON.parse(raw) as Record<string, number[]>;
+            const parsed = parseJson(raw);
+            if (!isRecord(parsed)) {
+                return;
+            }
+            let loaded = 0;
             Object.entries(parsed).forEach(([key, value]) => {
-                if (Array.isArray(value)) {
-                    this.embeddingCache.set(key, value);
+                if (loaded >= MAX_EMBEDDING_CACHE_ENTRIES) {
+                    return;
                 }
+                const vector = this.sanitizeEmbeddingVector(value);
+                if (!vector) {
+                    return;
+                }
+                this.embeddingCache.set(key, vector);
+                loaded += 1;
             });
+            this.trimEmbeddingCache();
         } catch {
             // Ignore malformed cache.
+        }
+    }
+
+    private sanitizeEmbeddingVector(value: unknown): number[] | null {
+        if (!Array.isArray(value) || value.length !== this.EMBEDDING_DIM) {
+            return null;
+        }
+
+        const sanitized = new Array<number>(this.EMBEDDING_DIM);
+        for (let i = 0; i < this.EMBEDDING_DIM; i++) {
+            const entry = value[i];
+            if (!isFiniteNumber(entry)) {
+                return null;
+            }
+            sanitized[i] = entry;
+        }
+        return sanitized;
+    }
+
+    private trimEmbeddingCache(): void {
+        while (this.embeddingCache.size > MAX_EMBEDDING_CACHE_ENTRIES) {
+            const oldestKey = this.embeddingCache.keys().next().value as string | undefined;
+            if (!oldestKey) {
+                return;
+            }
+            this.embeddingCache.delete(oldestKey);
         }
     }
 
