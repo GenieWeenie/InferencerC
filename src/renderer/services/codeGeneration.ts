@@ -24,6 +24,54 @@ export interface CodeGenerationResult {
     generatedAt: number;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.filter((entry): entry is string => typeof entry === 'string');
+};
+
+const sanitizeStoredGeneration = (value: unknown): CodeGenerationResult | null => {
+    if (!isRecord(value)
+        || typeof value.code !== 'string'
+        || typeof value.language !== 'string'
+        || typeof value.generatedAt !== 'number') {
+        return null;
+    }
+
+    return {
+        code: value.code,
+        language: value.language,
+        explanation: typeof value.explanation === 'string' ? value.explanation : undefined,
+        dependencies: sanitizeStringArray(value.dependencies),
+        usage: typeof value.usage === 'string' ? value.usage : undefined,
+        generatedAt: value.generatedAt,
+    };
+};
+
+const parseStoredGenerations = (raw: string): CodeGenerationResult[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeStoredGeneration(entry))
+        .filter((entry): entry is CodeGenerationResult => entry !== null);
+};
+
 export class CodeGenerationService {
     private static instance: CodeGenerationService;
     private readonly STORAGE_KEY = 'code_generations';
@@ -184,7 +232,7 @@ export class CodeGenerationService {
     private saveGeneration(generation: CodeGenerationResult): void {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
-            const generations: CodeGenerationResult[] = stored ? JSON.parse(stored) : [];
+            const generations = stored ? parseStoredGenerations(stored) : [];
             generations.push(generation);
             // Keep only last 50
             if (generations.length > 50) {
@@ -203,7 +251,7 @@ export class CodeGenerationService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
-            const generations: CodeGenerationResult[] = JSON.parse(stored);
+            const generations = parseStoredGenerations(stored);
             return generations.slice(-limit).reverse();
         } catch (error) {
             console.error('Failed to load generation history:', error);

@@ -78,6 +78,82 @@ export const DEFAULT_CATEGORIES: Category[] = [
     },
 ];
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.filter((entry): entry is string => typeof entry === 'string');
+};
+
+const sanitizeCategory = (value: unknown): Category | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.name !== 'string') {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        name: value.name,
+        description: typeof value.description === 'string' ? value.description : undefined,
+        keywords: sanitizeStringArray(value.keywords),
+        color: typeof value.color === 'string' ? value.color : undefined,
+    };
+};
+
+const parseStoredCategories = (raw: string): Category[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+    return parsed
+        .map((entry) => sanitizeCategory(entry))
+        .filter((entry): entry is Category => entry !== null);
+};
+
+const sanitizeConversationCategory = (value: unknown): ConversationCategory | null => {
+    if (!isRecord(value)
+        || typeof value.sessionId !== 'string'
+        || typeof value.primaryCategory !== 'string'
+        || typeof value.confidence !== 'number'
+        || typeof value.autoTagged !== 'boolean'
+        || typeof value.taggedAt !== 'number') {
+        return null;
+    }
+
+    return {
+        sessionId: value.sessionId,
+        primaryCategory: value.primaryCategory,
+        secondaryCategories: sanitizeStringArray(value.secondaryCategories),
+        confidence: value.confidence,
+        autoTagged: value.autoTagged,
+        taggedAt: value.taggedAt,
+    };
+};
+
+const parseStoredCategorizations = (raw: string): ConversationCategory[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeConversationCategory(entry))
+        .filter((entry): entry is ConversationCategory => entry !== null);
+};
+
 export class AutoCategorizationService {
     private static instance: AutoCategorizationService;
     private categories: Map<string, Category> = new Map();
@@ -108,7 +184,7 @@ export class AutoCategorizationService {
         try {
             const stored = localStorage.getItem(this.CATEGORIES_KEY);
             if (stored) {
-                const custom: Category[] = JSON.parse(stored);
+                const custom = parseStoredCategories(stored);
                 custom.forEach(cat => {
                     this.categories.set(cat.id, cat);
                 });
@@ -198,7 +274,7 @@ export class AutoCategorizationService {
     private saveCategorization(category: ConversationCategory): void {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
-            const categorizations: ConversationCategory[] = stored ? JSON.parse(stored) : [];
+            const categorizations = stored ? parseStoredCategorizations(stored) : [];
             const index = categorizations.findIndex(c => c.sessionId === category.sessionId);
             if (index >= 0) {
                 categorizations[index] = category;
@@ -218,7 +294,7 @@ export class AutoCategorizationService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return null;
-            const categorizations: ConversationCategory[] = JSON.parse(stored);
+            const categorizations = parseStoredCategorizations(stored);
             return categorizations.find(c => c.sessionId === sessionId) || null;
         } catch (error) {
             console.error('Failed to load categorization:', error);
@@ -279,7 +355,7 @@ export class AutoCategorizationService {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
-            const categorizations: ConversationCategory[] = JSON.parse(stored);
+            const categorizations = parseStoredCategorizations(stored);
             return categorizations
                 .filter(c => c.primaryCategory === categoryId || c.secondaryCategories.includes(categoryId))
                 .map(c => c.sessionId);

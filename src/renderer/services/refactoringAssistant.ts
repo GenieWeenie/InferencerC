@@ -34,6 +34,98 @@ export interface RefactoringResult {
     refactoredAt: number;
 }
 
+const REFACTORING_TYPES = new Set<RefactoringType>([
+    'extract-function',
+    'extract-variable',
+    'rename',
+    'simplify',
+    'optimize',
+    'remove-duplication',
+    'improve-readability',
+    'add-error-handling',
+]);
+
+const REFACTORING_IMPACTS = new Set<RefactoringSuggestion['impact']>(['low', 'medium', 'high']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null
+);
+
+const parseJson = (raw: string): unknown => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.filter((entry): entry is string => typeof entry === 'string');
+};
+
+const sanitizeStoredSuggestion = (value: unknown): RefactoringSuggestion | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.description !== 'string'
+        || typeof value.code !== 'string'
+        || typeof value.refactoredCode !== 'string'
+        || typeof value.confidence !== 'number'
+        || !REFACTORING_TYPES.has(value.type as RefactoringType)
+        || !REFACTORING_IMPACTS.has(value.impact as RefactoringSuggestion['impact'])
+        || typeof value.explanation !== 'string') {
+        return null;
+    }
+
+    return {
+        id: value.id,
+        type: value.type as RefactoringType,
+        description: value.description,
+        code: value.code,
+        refactoredCode: value.refactoredCode,
+        confidence: value.confidence,
+        impact: value.impact as RefactoringSuggestion['impact'],
+        explanation: value.explanation,
+    };
+};
+
+const sanitizeStoredResult = (value: unknown): RefactoringResult | null => {
+    if (!isRecord(value)
+        || typeof value.originalCode !== 'string'
+        || typeof value.refactoredCode !== 'string'
+        || !Array.isArray(value.suggestions)
+        || typeof value.language !== 'string'
+        || typeof value.refactoredAt !== 'number') {
+        return null;
+    }
+
+    const suggestions = value.suggestions
+        .map((entry) => sanitizeStoredSuggestion(entry))
+        .filter((entry): entry is RefactoringSuggestion => entry !== null);
+
+    return {
+        originalCode: value.originalCode,
+        refactoredCode: value.refactoredCode,
+        suggestions,
+        appliedSuggestions: sanitizeStringArray(value.appliedSuggestions),
+        language: value.language,
+        refactoredAt: value.refactoredAt,
+    };
+};
+
+const parseStoredResults = (raw: string): RefactoringResult[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+
+    return parsed
+        .map((entry) => sanitizeStoredResult(entry))
+        .filter((entry): entry is RefactoringResult => entry !== null);
+};
+
 export class RefactoringAssistantService {
     private static instance: RefactoringAssistantService;
     private readonly STORAGE_KEY = 'refactoring_results';
@@ -207,7 +299,7 @@ Return a JSON array of suggestions:
     private saveResult(result: RefactoringResult): void {
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
-            const results: RefactoringResult[] = stored ? JSON.parse(stored) : [];
+            const results = stored ? parseStoredResults(stored) : [];
             results.push(result);
             // Keep only last 50
             if (results.length > 50) {
@@ -226,7 +318,7 @@ Return a JSON array of suggestions:
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (!stored) return [];
-            const results: RefactoringResult[] = JSON.parse(stored);
+            const results = parseStoredResults(stored);
             return results.slice(-limit).reverse();
         } catch (error) {
             console.error('Failed to load refactoring history:', error);
