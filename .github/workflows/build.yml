@@ -1,4 +1,4 @@
-name: Release Matrix
+name: Release Pipeline
 
 on:
   push:
@@ -16,11 +16,13 @@ concurrency:
 jobs:
   release_gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -38,22 +40,30 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smoke-qa-artifacts
+          name: smoke-qa-artifacts-gate
           path: |
             output/playwright/smoke/**
           if-no-files-found: warn
 
-  release:
+  build_artifacts:
     needs: release_gate
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            label: windows
+            build_command: npm run build:win
+          - os: macos-latest
+            label: macos
+            build_command: npm run build:mac
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -64,33 +74,54 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Windows release
-        if: matrix.os == 'windows-latest'
-        run: npm run build:win
+      - name: Build ${{ matrix.label }} release
+        run: ${{ matrix.build_command }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Linux release
-        if: matrix.os == 'ubuntu-latest'
-        run: npm run build:linux
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload ${{ matrix.label }} release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.label }}-artifacts
+          path: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
+            dist/*.dmg
+            dist/*.dmg.blockmap
+            dist/latest-mac.yml
+            dist/*.zip
+            dist/*.zip.blockmap
+          if-no-files-found: warn
 
-      - name: Build macOS release (unsigned fallback)
-        if: matrix.os == 'macos-latest'
-        run: npm run build:mac
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  release_publish:
+    needs: build_artifacts
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*-artifacts
+          merge-multiple: true
+          path: release-artifacts
+
+      - name: Generate release notes
+        run: bash ./scripts/release/generate_release_notes.sh output/release/release-notes.md
 
       - name: Publish GitHub release assets
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          name: InferencerC ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          body_path: output/release/release-notes.md
           fail_on_unmatched_files: false
           files: |
-            dist/*.exe
-            dist/*.dmg
-            dist/*.AppImage
-            dist/*.snap
-            dist/*.deb
-            dist/*.rpm
+            release-artifacts/**
