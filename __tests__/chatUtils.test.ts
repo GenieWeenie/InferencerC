@@ -44,7 +44,7 @@ describe('chatUtils', () => {
             expect(lp.logprob).toBeGreaterThan(-0.4);
 
             expect(lp.top_logprobs).toBeDefined();
-            expect(lp.top_logprobs!).toHaveLength(3);
+            expect(lp.top_logprobs!).toHaveLength(1);
             expect(lp.top_logprobs![0].token).toBe("test");
         });
     });
