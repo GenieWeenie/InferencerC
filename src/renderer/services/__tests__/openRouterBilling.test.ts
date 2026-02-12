@@ -3,10 +3,17 @@
  */
 
 import {
+    clearOpenRouterBillingCache,
+    fetchOpenRouterAuthoritativeBillingWithCache,
+    isCachedBillingFresh,
+    loadOpenRouterBillingCache,
     OpenRouterBillingError,
     fetchOpenRouterAuthoritativeBilling,
+    paginateOpenRouterBillingHistory,
     parseOpenRouterCreditsPayload,
+    parseOpenRouterBillingCache,
     parseOpenRouterKeyPayload,
+    persistOpenRouterBillingCache,
     resolveOpenRouterAuthoritativeBilling,
 } from '../openRouterBilling';
 
@@ -18,6 +25,10 @@ const createJsonResponse = (payload: unknown, status = 200): Response => ({
 
 describe('openRouterBilling', () => {
     const originalFetch = global.fetch;
+
+    beforeEach(() => {
+        localStorage.clear();
+    });
 
     afterEach(() => {
         global.fetch = originalFetch;
@@ -80,5 +91,106 @@ describe('openRouterBilling', () => {
         await expect(fetchOpenRouterAuthoritativeBilling('bad-key'))
             .rejects
             .toBeInstanceOf(OpenRouterBillingError);
+    });
+
+    it('parses and persists cache snapshots safely', () => {
+        const parsed = parseOpenRouterBillingCache(JSON.stringify({
+            latest: {
+                usedUsd: 1.2,
+                limitUsd: 5,
+                remainingUsd: 3.8,
+                source: 'credits',
+                fetchedAt: '2026-02-12T00:00:00.000Z',
+            },
+            history: [
+                {
+                    usedUsd: 0.8,
+                    limitUsd: 5,
+                    remainingUsd: 4.2,
+                    source: 'credits',
+                    fetchedAt: '2026-02-11T23:00:00.000Z',
+                },
+            ],
+        }));
+
+        expect(parsed.latest?.usedUsd).toBe(1.2);
+        expect(parsed.history).toHaveLength(1);
+
+        persistOpenRouterBillingCache(parsed);
+        const loaded = loadOpenRouterBillingCache();
+        expect(loaded.latest?.usedUsd).toBe(1.2);
+        expect(loaded.history).toHaveLength(1);
+    });
+
+    it('reuses fresh cached billing when within max age', async () => {
+        persistOpenRouterBillingCache({
+            latest: {
+                usedUsd: 2.5,
+                limitUsd: 10,
+                remainingUsd: 7.5,
+                source: 'key',
+                fetchedAt: new Date().toISOString(),
+            },
+            history: [
+                {
+                    usedUsd: 2.5,
+                    limitUsd: 10,
+                    remainingUsd: 7.5,
+                    source: 'key',
+                    fetchedAt: new Date().toISOString(),
+                },
+            ],
+        });
+
+        const fetchSpy = jest.fn();
+        global.fetch = fetchSpy as unknown as typeof fetch;
+        const result = await fetchOpenRouterAuthoritativeBillingWithCache('test-key');
+
+        expect(result.fromCache).toBe(true);
+        expect(result.billing.usedUsd).toBe(2.5);
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('paginates history with latest page first', () => {
+        const history = [
+            { usedUsd: 1, limitUsd: 10, remainingUsd: 9, source: 'key', fetchedAt: '2026-02-11T00:00:00.000Z' },
+            { usedUsd: 2, limitUsd: 10, remainingUsd: 8, source: 'key', fetchedAt: '2026-02-12T00:00:00.000Z' },
+            { usedUsd: 3, limitUsd: 10, remainingUsd: 7, source: 'key', fetchedAt: '2026-02-13T00:00:00.000Z' },
+        ] as const;
+
+        const latestPage = paginateOpenRouterBillingHistory([...history], 0, 2);
+        expect(latestPage.items.map((item) => item.usedUsd)).toEqual([2, 3]);
+        expect(latestPage.hasOlder).toBe(true);
+
+        const olderPage = paginateOpenRouterBillingHistory([...history], 1, 2);
+        expect(olderPage.items.map((item) => item.usedUsd)).toEqual([1]);
+        expect(olderPage.hasNewer).toBe(true);
+    });
+
+    it('clears cache entries explicitly', () => {
+        persistOpenRouterBillingCache({
+            latest: {
+                usedUsd: 1,
+                limitUsd: 2,
+                remainingUsd: 1,
+                source: 'credits',
+                fetchedAt: '2026-02-12T00:00:00.000Z',
+            },
+            history: [],
+        });
+        expect(loadOpenRouterBillingCache().latest).not.toBeNull();
+        clearOpenRouterBillingCache();
+        expect(loadOpenRouterBillingCache().latest).toBeNull();
+    });
+
+    it('validates cached freshness windows', () => {
+        expect(isCachedBillingFresh(null)).toBe(false);
+        expect(isCachedBillingFresh({
+            usedUsd: 1,
+            limitUsd: 5,
+            remainingUsd: 4,
+            source: 'credits',
+            fetchedAt: new Date().toISOString(),
+        }, 10_000)).toBe(true);
     });
 });

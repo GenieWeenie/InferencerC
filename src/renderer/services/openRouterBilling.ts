@@ -19,9 +19,34 @@ export type OpenRouterAuthoritativeBilling = {
     fetchedAt: string;
 };
 
+export type OpenRouterBillingCacheState = {
+    latest: OpenRouterAuthoritativeBilling | null;
+    history: OpenRouterAuthoritativeBilling[];
+};
+
+export type OpenRouterBillingHistoryPage = {
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    totalItems: number;
+    hasNewer: boolean;
+    hasOlder: boolean;
+    items: OpenRouterAuthoritativeBilling[];
+};
+
+export type OpenRouterAuthoritativeBillingFetchResult = {
+    billing: OpenRouterAuthoritativeBilling;
+    fromCache: boolean;
+    history: OpenRouterAuthoritativeBilling[];
+};
+
 const OPENROUTER_CREDITS_URL = 'https://openrouter.ai/api/v1/credits';
 const OPENROUTER_KEY_URL = 'https://openrouter.ai/api/v1/key';
+const OPENROUTER_BILLING_CACHE_KEY = 'openrouter_authoritative_billing_cache_v1';
 const CURRENCY_PRECISION = 1_000_000;
+const DEFAULT_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
+const MAX_HISTORY_SNAPSHOTS = 1_008; // ~7 days at 10-minute fetch cadence.
+const DEFAULT_HISTORY_PAGE_SIZE = 12;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -106,6 +131,104 @@ const parseResponsePayload = async (response: Response): Promise<unknown> => {
     }
 };
 
+const parseJson = (raw: string): unknown | null => {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const sanitizeSource = (value: unknown): OpenRouterSource | null => {
+    if (value === 'credits' || value === 'key' || value === 'credits+key') {
+        return value;
+    }
+    return null;
+};
+
+const sanitizeBillingSnapshot = (value: unknown): OpenRouterAuthoritativeBilling | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+
+    const source = sanitizeSource(value.source);
+    if (!source) {
+        return null;
+    }
+
+    const fetchedAt = typeof value.fetchedAt === 'string' ? value.fetchedAt.trim() : '';
+    if (!fetchedAt) {
+        return null;
+    }
+    const timestamp = new Date(fetchedAt).getTime();
+    if (!Number.isFinite(timestamp)) {
+        return null;
+    }
+
+    const usedUsd = value.usedUsd === null ? null : sanitizeFiniteNumber(value.usedUsd);
+    const limitUsd = value.limitUsd === null ? null : sanitizeFiniteNumber(value.limitUsd);
+    const remainingUsd = value.remainingUsd === null ? null : sanitizeFiniteNumber(value.remainingUsd);
+    if (usedUsd === null && limitUsd === null && remainingUsd === null) {
+        return null;
+    }
+
+    return {
+        usedUsd: roundCurrency(usedUsd),
+        limitUsd: roundCurrency(limitUsd),
+        remainingUsd: roundCurrency(remainingUsd),
+        source,
+        fetchedAt: new Date(timestamp).toISOString(),
+    };
+};
+
+const trimHistory = (history: OpenRouterAuthoritativeBilling[]): OpenRouterAuthoritativeBilling[] => {
+    if (history.length <= MAX_HISTORY_SNAPSHOTS) {
+        return history;
+    }
+    return history.slice(history.length - MAX_HISTORY_SNAPSHOTS);
+};
+
+const normalizeHistory = (value: unknown): OpenRouterAuthoritativeBilling[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const seen = new Set<string>();
+    const snapshots: OpenRouterAuthoritativeBilling[] = [];
+    for (let index = 0; index < value.length; index++) {
+        const snapshot = sanitizeBillingSnapshot(value[index]);
+        if (!snapshot || seen.has(snapshot.fetchedAt)) {
+            continue;
+        }
+        seen.add(snapshot.fetchedAt);
+        snapshots.push(snapshot);
+    }
+
+    snapshots.sort((a, b) => new Date(a.fetchedAt).getTime() - new Date(b.fetchedAt).getTime());
+    return trimHistory(snapshots);
+};
+
+const readLocalStorageItem = (key: string): string | null => {
+    if (typeof localStorage === 'undefined') {
+        return null;
+    }
+    return localStorage.getItem(key);
+};
+
+const writeLocalStorageItem = (key: string, value: string): void => {
+    if (typeof localStorage === 'undefined') {
+        return;
+    }
+    localStorage.setItem(key, value);
+};
+
+const removeLocalStorageItem = (key: string): void => {
+    if (typeof localStorage === 'undefined') {
+        return;
+    }
+    localStorage.removeItem(key);
+};
+
 const computeFromLimit = (limit: number | null, remaining: number | null): number | null => {
     if (limit === null || remaining === null) {
         return null;
@@ -122,6 +245,118 @@ export class OpenRouterBillingError extends Error {
         this.status = status;
     }
 }
+
+export const parseOpenRouterBillingCache = (raw: string): OpenRouterBillingCacheState => {
+    const parsed = parseJson(raw);
+    if (!isRecord(parsed)) {
+        return {
+            latest: null,
+            history: [],
+        };
+    }
+
+    const history = normalizeHistory(parsed.history);
+    const latest = sanitizeBillingSnapshot(parsed.latest) ?? (history.length > 0 ? history[history.length - 1] : null);
+
+    return {
+        latest,
+        history,
+    };
+};
+
+export const loadOpenRouterBillingCache = (): OpenRouterBillingCacheState => {
+    try {
+        const raw = readLocalStorageItem(OPENROUTER_BILLING_CACHE_KEY);
+        if (!raw) {
+            return {
+                latest: null,
+                history: [],
+            };
+        }
+        return parseOpenRouterBillingCache(raw);
+    } catch {
+        return {
+            latest: null,
+            history: [],
+        };
+    }
+};
+
+export const persistOpenRouterBillingCache = (cache: OpenRouterBillingCacheState): void => {
+    const normalizedHistory = normalizeHistory(cache.history);
+    const latest = cache.latest ?? (normalizedHistory.length > 0 ? normalizedHistory[normalizedHistory.length - 1] : null);
+    writeLocalStorageItem(
+        OPENROUTER_BILLING_CACHE_KEY,
+        JSON.stringify({
+            latest,
+            history: normalizedHistory,
+        })
+    );
+};
+
+export const clearOpenRouterBillingCache = (): void => {
+    removeLocalStorageItem(OPENROUTER_BILLING_CACHE_KEY);
+};
+
+const appendBillingSnapshot = (
+    history: OpenRouterAuthoritativeBilling[],
+    snapshot: OpenRouterAuthoritativeBilling
+): OpenRouterAuthoritativeBilling[] => {
+    const normalizedHistory = normalizeHistory(history);
+    if (normalizedHistory.length > 0 && normalizedHistory[normalizedHistory.length - 1]?.fetchedAt === snapshot.fetchedAt) {
+        return normalizedHistory;
+    }
+
+    return trimHistory([...normalizedHistory, snapshot]);
+};
+
+const getSnapshotAgeMs = (snapshot: OpenRouterAuthoritativeBilling): number | null => {
+    const snapshotMs = new Date(snapshot.fetchedAt).getTime();
+    if (!Number.isFinite(snapshotMs)) {
+        return null;
+    }
+    return Date.now() - snapshotMs;
+};
+
+export const isCachedBillingFresh = (
+    snapshot: OpenRouterAuthoritativeBilling | null,
+    maxAgeMs: number = DEFAULT_CACHE_MAX_AGE_MS
+): boolean => {
+    if (!snapshot) {
+        return false;
+    }
+    const ageMs = getSnapshotAgeMs(snapshot);
+    if (ageMs === null) {
+        return false;
+    }
+    return ageMs >= 0 && ageMs <= maxAgeMs;
+};
+
+export const paginateOpenRouterBillingHistory = (
+    history: OpenRouterAuthoritativeBilling[],
+    page: number,
+    pageSize: number = DEFAULT_HISTORY_PAGE_SIZE
+): OpenRouterBillingHistoryPage => {
+    const safePageSize = Number.isFinite(pageSize) && pageSize > 0 ? Math.floor(pageSize) : DEFAULT_HISTORY_PAGE_SIZE;
+    const normalizedHistory = normalizeHistory(history);
+    const totalItems = normalizedHistory.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / safePageSize));
+    const safePage = Math.min(Math.max(0, Math.floor(page)), totalPages - 1);
+
+    const sliceStart = Math.max(0, totalItems - (safePage + 1) * safePageSize);
+    const sliceEnd = Math.max(sliceStart, totalItems - safePage * safePageSize);
+    const items = normalizedHistory.slice(sliceStart, sliceEnd);
+
+    return {
+        page: safePage,
+        pageSize: safePageSize,
+        totalPages,
+        totalItems,
+        hasNewer: safePage > 0,
+        hasOlder: safePage < totalPages - 1,
+        items,
+    };
+};
 
 export const parseOpenRouterCreditsPayload = (payload: unknown): OpenRouterCreditsData | null => {
     const data = getPayloadData(payload);
@@ -284,4 +519,41 @@ export const fetchOpenRouterAuthoritativeBilling = async (apiKey: string): Promi
     }
 
     throw new OpenRouterBillingError('OpenRouter billing response did not include usable usage fields.');
+};
+
+export const fetchOpenRouterAuthoritativeBillingWithCache = async (
+    apiKey: string,
+    options?: { forceRefresh?: boolean; maxAgeMs?: number }
+): Promise<OpenRouterAuthoritativeBillingFetchResult> => {
+    const normalizedApiKey = apiKey.trim();
+    if (!normalizedApiKey) {
+        throw new OpenRouterBillingError('OpenRouter API key is required to fetch authoritative billing.');
+    }
+
+    const forceRefresh = options?.forceRefresh === true;
+    const maxAgeMs = Number.isFinite(options?.maxAgeMs) && (options?.maxAgeMs ?? 0) > 0
+        ? Math.floor(options?.maxAgeMs as number)
+        : DEFAULT_CACHE_MAX_AGE_MS;
+
+    const cache = loadOpenRouterBillingCache();
+    if (!forceRefresh && isCachedBillingFresh(cache.latest, maxAgeMs) && cache.latest) {
+        return {
+            billing: cache.latest,
+            fromCache: true,
+            history: cache.history,
+        };
+    }
+
+    const billing = await fetchOpenRouterAuthoritativeBilling(normalizedApiKey);
+    const history = appendBillingSnapshot(cache.history, billing);
+    persistOpenRouterBillingCache({
+        latest: billing,
+        history,
+    });
+
+    return {
+        billing,
+        fromCache: false,
+        history,
+    };
 };

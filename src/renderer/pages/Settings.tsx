@@ -32,7 +32,10 @@ import { onboardingService } from '../services/onboarding';
 import { credentialService } from '../services/credentials';
 import { readAnalyticsUsageStats } from '../services/analyticsStore';
 import {
-    fetchOpenRouterAuthoritativeBilling,
+    clearOpenRouterBillingCache,
+    fetchOpenRouterAuthoritativeBillingWithCache,
+    loadOpenRouterBillingCache,
+    paginateOpenRouterBillingHistory,
     type OpenRouterAuthoritativeBilling,
 } from '../services/openRouterBilling';
 import {
@@ -47,6 +50,8 @@ import {
 } from './settingsStorage';
 
 const AUTHORITATIVE_BILLING_TOGGLE_KEY = 'settings_usage_authoritative_billing_enabled';
+const AUTHORITATIVE_BILLING_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
+const AUTHORITATIVE_HISTORY_PAGE_SIZE = 12;
 
 const formatUsd = (value: number | null): string => {
     if (value === null) {
@@ -73,6 +78,14 @@ const getSourceLabel = (source: OpenRouterAuthoritativeBilling['source']): strin
     return '/key';
 };
 
+const formatTrendLabel = (isoDate: string): string => {
+    const parsedDate = new Date(isoDate);
+    if (Number.isNaN(parsedDate.getTime())) {
+        return 'Unknown';
+    }
+    return parsedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
 const Settings: React.FC = () => {
     // API Keys
     const [openRouterKey, setOpenRouterKey] = useState('');
@@ -97,6 +110,8 @@ const Settings: React.FC = () => {
         readStoredBooleanWithFallback(AUTHORITATIVE_BILLING_TOGGLE_KEY, true)
     );
     const [authoritativeBilling, setAuthoritativeBilling] = useState<OpenRouterAuthoritativeBilling | null>(null);
+    const [authoritativeBillingHistory, setAuthoritativeBillingHistory] = useState<OpenRouterAuthoritativeBilling[]>([]);
+    const [authoritativeBillingHistoryPageIndex, setAuthoritativeBillingHistoryPageIndex] = useState(0);
     const [authoritativeBillingLoading, setAuthoritativeBillingLoading] = useState(false);
     const [authoritativeBillingError, setAuthoritativeBillingError] = useState<string | null>(null);
 
@@ -141,7 +156,60 @@ const Settings: React.FC = () => {
         setUsageStats(buildOpenRouterUsageStats(usageHistory));
     }, []);
 
-    const refreshAuthoritativeBilling = React.useCallback(async () => {
+    const pagedAuthoritativeHistory = React.useMemo(() => (
+        paginateOpenRouterBillingHistory(
+            authoritativeBillingHistory,
+            authoritativeBillingHistoryPageIndex,
+            AUTHORITATIVE_HISTORY_PAGE_SIZE
+        )
+    ), [authoritativeBillingHistory, authoritativeBillingHistoryPageIndex]);
+
+    const authoritativeHistoryBars = React.useMemo(() => {
+        const points = pagedAuthoritativeHistory.items.map((snapshot) => snapshot.usedUsd);
+        const values = points.filter((value): value is number => value !== null);
+        const min = values.length > 0 ? Math.min(...values) : 0;
+        const max = values.length > 0 ? Math.max(...values) : 0;
+        const range = max - min;
+
+        return pagedAuthoritativeHistory.items.map((snapshot) => {
+            if (snapshot.usedUsd === null) {
+                return {
+                    snapshot,
+                    heightPercent: 8,
+                    hasValue: false,
+                };
+            }
+
+            if (range <= 0) {
+                return {
+                    snapshot,
+                    heightPercent: 70,
+                    hasValue: true,
+                };
+            }
+
+            const normalized = (snapshot.usedUsd - min) / range;
+            return {
+                snapshot,
+                heightPercent: Math.max(12, Math.round(normalized * 100)),
+                hasValue: true,
+            };
+        });
+    }, [pagedAuthoritativeHistory.items]);
+
+    useEffect(() => {
+        if (authoritativeBillingHistoryPageIndex !== pagedAuthoritativeHistory.page) {
+            setAuthoritativeBillingHistoryPageIndex(pagedAuthoritativeHistory.page);
+        }
+    }, [authoritativeBillingHistoryPageIndex, pagedAuthoritativeHistory.page]);
+
+    const hydrateAuthoritativeBillingFromCache = React.useCallback(() => {
+        const cached = loadOpenRouterBillingCache();
+        setAuthoritativeBilling(cached.latest);
+        setAuthoritativeBillingHistory(cached.history);
+    }, []);
+
+    const refreshAuthoritativeBilling = React.useCallback(async (options?: { forceRefresh?: boolean }) => {
         if (!authoritativeBillingEnabled) {
             setAuthoritativeBillingError(null);
             return;
@@ -158,11 +226,14 @@ const Settings: React.FC = () => {
         setAuthoritativeBillingError(null);
 
         try {
-            const billing = await fetchOpenRouterAuthoritativeBilling(apiKey);
-            setAuthoritativeBilling(billing);
+            const result = await fetchOpenRouterAuthoritativeBillingWithCache(apiKey, {
+                forceRefresh: options?.forceRefresh === true,
+                maxAgeMs: AUTHORITATIVE_BILLING_CACHE_MAX_AGE_MS,
+            });
+            setAuthoritativeBilling(result.billing);
+            setAuthoritativeBillingHistory(result.history);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to fetch OpenRouter authoritative billing.';
-            setAuthoritativeBilling(null);
             setAuthoritativeBillingError(message);
         } finally {
             setAuthoritativeBillingLoading(false);
@@ -250,6 +321,8 @@ const Settings: React.FC = () => {
             return;
         }
         refreshUsageStats();
+        hydrateAuthoritativeBillingFromCache();
+        setAuthoritativeBillingHistoryPageIndex(0);
         void refreshAuthoritativeBilling();
 
         const usageInterval = setInterval(refreshUsageStats, 3000);
@@ -261,14 +334,17 @@ const Settings: React.FC = () => {
             clearInterval(usageInterval);
             clearInterval(authoritativeInterval);
         };
-    }, [activeTab, refreshUsageStats, refreshAuthoritativeBilling]);
+    }, [activeTab, refreshUsageStats, refreshAuthoritativeBilling, hydrateAuthoritativeBillingFromCache]);
 
     const saveOpenRouterKey = async () => {
         if (!openRouterKey.trim()) {
             await credentialService.clearOpenRouterApiKey();
+            clearOpenRouterBillingCache();
             toast.success('OpenRouter API key cleared');
             if (authoritativeBillingEnabled) {
                 setAuthoritativeBilling(null);
+                setAuthoritativeBillingHistory([]);
+                setAuthoritativeBillingHistoryPageIndex(0);
                 setAuthoritativeBillingError('Add an OpenRouter API key in API Keys to fetch authoritative billing.');
             }
             return;
@@ -277,7 +353,8 @@ const Settings: React.FC = () => {
         await credentialService.setOpenRouterApiKey(openRouterKey);
         toast.success('OpenRouter API key saved securely');
         if (activeTab === 'usage' && authoritativeBillingEnabled) {
-            void refreshAuthoritativeBilling();
+            setAuthoritativeBillingHistoryPageIndex(0);
+            void refreshAuthoritativeBilling({ forceRefresh: true });
         }
     };
 
@@ -288,6 +365,15 @@ const Settings: React.FC = () => {
             setAuthoritativeBillingLoading(false);
             setAuthoritativeBillingError(null);
             setAuthoritativeBilling(null);
+            setAuthoritativeBillingHistory([]);
+            setAuthoritativeBillingHistoryPageIndex(0);
+            return;
+        }
+
+        hydrateAuthoritativeBillingFromCache();
+        setAuthoritativeBillingHistoryPageIndex(0);
+        if (activeTab === 'usage') {
+            void refreshAuthoritativeBilling();
         }
     };
 
@@ -570,7 +656,7 @@ const Settings: React.FC = () => {
                                 </label>
                                 <button
                                     type="button"
-                                    onClick={() => void refreshAuthoritativeBilling()}
+                                    onClick={() => void refreshAuthoritativeBilling({ forceRefresh: true })}
                                     disabled={!authoritativeBillingEnabled || authoritativeBillingLoading}
                                     className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
@@ -636,9 +722,70 @@ const Settings: React.FC = () => {
                                     </div>
                                 </div>
 
+                                <div className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p className="text-xs uppercase tracking-wider text-slate-500">Authoritative Usage Trend</p>
+                                        <p className="text-xs text-slate-400">
+                                            Cached snapshots ({pagedAuthoritativeHistory.totalItems})
+                                        </p>
+                                    </div>
+
+                                    {pagedAuthoritativeHistory.items.length === 0 ? (
+                                        <p className="mt-3 text-xs text-slate-500">
+                                            No snapshots yet. Click Refresh to fetch and start trend history.
+                                        </p>
+                                    ) : (
+                                        <>
+                                            <div className="mt-4 flex h-24 items-end gap-1 rounded-md border border-slate-800/80 bg-slate-950/60 px-2 py-2">
+                                                {authoritativeHistoryBars.map((entry, index) => (
+                                                    <div
+                                                        key={`${entry.snapshot.fetchedAt}-${index}`}
+                                                        className={`flex-1 rounded-sm transition-all ${
+                                                            entry.hasValue
+                                                                ? 'bg-gradient-to-t from-primary/50 to-primary'
+                                                                : 'bg-slate-700/50'
+                                                        }`}
+                                                        style={{ height: `${entry.heightPercent}%` }}
+                                                        title={`${formatTrendLabel(entry.snapshot.fetchedAt)} • Used ${formatUsd(entry.snapshot.usedUsd)}`}
+                                                    />
+                                                ))}
+                                            </div>
+
+                                            <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+                                                <span>{formatTrendLabel(pagedAuthoritativeHistory.items[0].fetchedAt)}</span>
+                                                <span>{formatTrendLabel(pagedAuthoritativeHistory.items[pagedAuthoritativeHistory.items.length - 1].fetchedAt)}</span>
+                                            </div>
+
+                                            <div className="mt-3 flex items-center justify-between gap-2">
+                                                <p className="text-xs text-slate-400">
+                                                    Page {pagedAuthoritativeHistory.page + 1} / {pagedAuthoritativeHistory.totalPages}
+                                                </p>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setAuthoritativeBillingHistoryPageIndex((current) => Math.max(0, current - 1))}
+                                                        disabled={!pagedAuthoritativeHistory.hasNewer}
+                                                        className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        Newer
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setAuthoritativeBillingHistoryPageIndex((current) => current + 1)}
+                                                        disabled={!pagedAuthoritativeHistory.hasOlder}
+                                                        className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        Older
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+
                                 <p className="text-xs text-slate-400">
                                     Source: {authoritativeBilling ? getSourceLabel(authoritativeBilling.source) : '—'}.
-                                    Data is fetched live from your OpenRouter account for billing truth.
+                                    Data is cached locally and reused for up to {Math.round(AUTHORITATIVE_BILLING_CACHE_MAX_AGE_MS / 60000)} minutes before refreshing.
                                 </p>
                             </div>
                         )}
