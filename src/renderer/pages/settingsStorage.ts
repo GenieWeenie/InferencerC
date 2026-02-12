@@ -1,5 +1,6 @@
 import type { SettingsModelEndpoint } from '../components/settings/SettingsEndpointsTab';
 import type { SettingsSystemPreset } from '../components/settings/SettingsPresetsTab';
+import type { UsageStatsRecord } from '../services/analyticsStore';
 
 const ENDPOINT_TYPES = new Set<SettingsModelEndpoint['type']>([
     'lm-studio',
@@ -24,6 +25,8 @@ export const DEFAULT_USAGE_STATS: UsageStats = {
     estimatedCost: 0,
     sessionCount: 0,
 };
+
+const OPENROUTER_ESTIMATED_COST_PER_1K_TOKENS = 0.002;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -117,6 +120,19 @@ export const parseStoredUsageStats = (raw: string): UsageStats | null => {
         totalTokens: typeof parsed.totalTokens === 'number' && Number.isFinite(parsed.totalTokens) ? parsed.totalTokens : 0,
         estimatedCost: typeof parsed.estimatedCost === 'number' && Number.isFinite(parsed.estimatedCost) ? parsed.estimatedCost : 0,
         sessionCount: typeof parsed.sessionCount === 'number' && Number.isFinite(parsed.sessionCount) ? parsed.sessionCount : 0,
+    };
+};
+
+export const buildOpenRouterUsageStats = (usageHistory: UsageStatsRecord[]): UsageStats => {
+    const openRouterUsage = usageHistory.filter((entry) => entry.modelId.startsWith('openrouter/'));
+    const totalTokens = openRouterUsage.reduce((sum, entry) => sum + entry.tokenCount, 0);
+    const sessionCount = new Set(openRouterUsage.map((entry) => entry.sessionId)).size;
+    const estimatedCost = (totalTokens / 1000) * OPENROUTER_ESTIMATED_COST_PER_1K_TOKENS;
+
+    return {
+        totalTokens,
+        estimatedCost,
+        sessionCount,
     };
 };
 

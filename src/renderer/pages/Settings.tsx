@@ -30,12 +30,13 @@ import { InteractiveTutorial } from '../components/InteractiveTutorial';
 import { PluginManager } from '../components/PluginManager';
 import { onboardingService } from '../services/onboarding';
 import { credentialService } from '../services/credentials';
+import { readAnalyticsUsageStats } from '../services/analyticsStore';
 import {
     DEFAULT_SYSTEM_PRESETS,
     DEFAULT_USAGE_STATS,
+    buildOpenRouterUsageStats,
     parseStoredModelEndpoints,
     parseStoredSystemPresets,
-    parseStoredUsageStats,
     readStoredIntegerWithFallback,
     readStoredStringWithFallback,
 } from './settingsStorage';
@@ -101,6 +102,11 @@ const Settings: React.FC = () => {
         notifications: readStoredStringWithFallback('app_notifications', 'true') !== 'false', // default true
     });
 
+    const refreshUsageStats = React.useCallback(() => {
+        const usageHistory = readAnalyticsUsageStats();
+        setUsageStats(buildOpenRouterUsageStats(usageHistory));
+    }, []);
+
     useEffect(() => {
         let removeUpdateDownloadedListener: (() => void) | undefined;
         // Load saved data
@@ -162,13 +168,7 @@ const Settings: React.FC = () => {
         } else {
             setPresets(DEFAULT_SYSTEM_PRESETS);
         }
-
-        // Load usage stats
-        const savedUsage = localStorage.getItem('usageStats');
-        if (savedUsage) {
-            const parsedUsage = parseStoredUsageStats(savedUsage);
-            setUsageStats(parsedUsage || DEFAULT_USAGE_STATS);
-        }
+        refreshUsageStats();
         
         // Subscribe to theme changes
         const handleThemeChange = (theme: ThemeConfig) => {
@@ -181,7 +181,16 @@ const Settings: React.FC = () => {
             themeService.unsubscribe(handleThemeChange);
             removeUpdateDownloadedListener?.();
         };
-    }, []);
+    }, [refreshUsageStats]);
+
+    useEffect(() => {
+        if (activeTab !== 'usage') {
+            return;
+        }
+        refreshUsageStats();
+        const interval = setInterval(refreshUsageStats, 3000);
+        return () => clearInterval(interval);
+    }, [activeTab, refreshUsageStats]);
 
     const saveOpenRouterKey = async () => {
         if (!openRouterKey.trim()) {
@@ -479,7 +488,7 @@ const Settings: React.FC = () => {
 
                         <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-6">
                             <p className="text-slate-400 text-sm">
-                                💡 <strong>Tip:</strong> Usage tracking is currently based on estimates. For accurate billing, check your OpenRouter dashboard.
+                                💡 <strong>Tip:</strong> Usage is estimated from tracked OpenRouter requests in this app. For billing truth, check your OpenRouter dashboard.
                             </p>
                         </div>
                     </div>

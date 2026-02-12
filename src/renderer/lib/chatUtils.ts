@@ -10,9 +10,7 @@ export const simulateLogprobs = (text: string): TokenLogprob[] => {
             token: word,
             logprob: logprob,
             top_logprobs: [
-                { token: word, logprob: logprob },
-                { token: "alt1", logprob: Math.log(0.1) },
-                { token: "alt2", logprob: Math.log(0.05) }
+                { token: word, logprob: logprob }
             ]
         };
     });

@@ -332,8 +332,12 @@ export const buildInspectorAlternativeRows = (
   if (!topLogprobs || topLogprobs.length === 0) {
     return [];
   }
-  return topLogprobs.flatMap((entry, index) => {
+  const rows = topLogprobs.flatMap((entry, index) => {
     if (!entry) {
+      return [];
+    }
+    const normalizedToken = entry.token.trim().toLowerCase();
+    if (/^alt\d+$/.test(normalizedToken)) {
       return [];
     }
     const probability = Math.exp(entry.logprob);
@@ -345,5 +349,15 @@ export const buildInspectorAlternativeRows = (
       probabilityPercent,
       widthPercent,
     }];
+  });
+
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = row.token.trim();
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
   });
 };

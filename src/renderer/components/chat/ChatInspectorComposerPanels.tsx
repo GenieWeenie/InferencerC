@@ -113,7 +113,7 @@ const InspectorAlternativeList: React.FC<InspectorAlternativeListProps> = React.
                 <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
                 <div>
                     <p className="font-bold">No alternatives found.</p>
-                    <p className="opacity-80 text-xs mt-1">If you just updated the server, please restart the application.</p>
+                    <p className="opacity-80 text-xs mt-1">This provider did not return top alternatives for the selected token.</p>
                 </div>
             </div>
         );
