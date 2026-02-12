@@ -71,6 +71,12 @@ export const useChatBootstrap = ({
             setCurrentModel(preferredModelId);
             persistLastModelId(preferredModelId);
         } else if (currentModel && !currentModelExists && availableModels.length > 0) {
+            const shouldHoldRemoteSelection = currentModel.startsWith('openrouter/');
+
+            if (shouldHoldRemoteSelection) {
+                return;
+            }
+
             if (!preferredModelId) {
                 return;
             }

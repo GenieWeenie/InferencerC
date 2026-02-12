@@ -90,17 +90,14 @@ export const useChatModelDiscovery = ({
                 ? filterModelsByWorkspacePolicy(models)
                 : models;
             setAvailableModels(filteredModels);
-            if (filteredModels.length === 0) {
-                setCurrentModel('');
-            }
             setConnectionStatus({ local: localStatus, remote: remoteStatus });
 
-            if (!didApplyInitialModelSelectionRef.current && models.length > 0) {
+            if (!didApplyInitialModelSelectionRef.current && filteredModels.length > 0) {
                 didApplyInitialModelSelectionRef.current = true;
                 setCurrentModel((prevModel) => {
                     const nextModel = resolveInitialModelSelection(
                         prevModel,
-                        models,
+                        filteredModels,
                         readPersistedLastModelId()
                     );
                     if (nextModel && nextModel !== prevModel) {

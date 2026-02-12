@@ -22,56 +22,74 @@ const InspectorTokenSummaryCard: React.FC<InspectorTokenSummaryCardProps> = Reac
     selectedToken,
     entropyValue,
     onUpdateToken,
-}) => (
-    <div className="animate-in fade-in zoom-in-95 duration-200">
-        <div className="bg-white text-slate-900 rounded-xl p-6 text-center shadow-lg mb-6 border-4 border-slate-800 relative">
-            <div className="text-3xl font-heading font-bold mb-1">"{selectedToken.logprob.token}"</div>
-            <div className="text-xs text-slate-500 uppercase tracking-widest font-bold">Selected Token</div>
+}) => {
+    const [tokenInputValue, setTokenInputValue] = React.useState(selectedToken.logprob.token);
 
-            <div className="mt-4 pt-4 border-t border-slate-200">
-                <div className="flex gap-2">
-                    <input
-                        type="text"
-                        className="flex-1 bg-slate-100 border border-slate-300 rounded px-2 py-1 text-sm font-mono"
-                        defaultValue={selectedToken.logprob.token}
-                        onKeyDown={(event) => {
-                            if (event.key === 'Enter') {
-                                onUpdateToken(event.currentTarget.value);
-                            }
-                        }}
-                    />
-                    <button className="text-xs bg-slate-900 text-white px-2 py-1 rounded hover:bg-slate-700">Update</button>
-                </div>
-                <div className="text-[10px] text-slate-400 mt-1">Press Enter to apply changes</div>
-            </div>
-        </div>
+    React.useEffect(() => {
+        setTokenInputValue(selectedToken.logprob.token);
+    }, [selectedToken]);
 
-        <div className="space-y-4 mb-6">
-            <div className="bg-slate-900 rounded-lg p-4 border border-slate-800">
-                <div className="flex justify-between items-center mb-2">
-                    <span className="text-slate-400 text-sm">Logprob</span>
-                    <span className="font-mono text-emerald-400">{selectedToken.logprob.logprob?.toFixed(4) ?? 'N/A'}</span>
-                </div>
-                <div className="flex justify-between items-center mb-2">
-                    <span className="text-slate-400 text-sm">Probability</span>
-                    <span className="font-mono text-emerald-400">{(Math.exp(selectedToken.logprob.logprob || 0) * 100).toFixed(2)}%</span>
-                </div>
-                <div className="flex justify-between items-center">
-                    <span className="text-slate-400 text-sm">Entropy</span>
-                    <span className="font-mono text-amber-400">{entropyValue.toFixed(3)}</span>
+    const submitTokenUpdate = React.useCallback(() => {
+        onUpdateToken(tokenInputValue);
+    }, [onUpdateToken, tokenInputValue]);
+
+    return (
+        <div className="animate-in fade-in zoom-in-95 duration-200">
+            <div className="bg-white text-slate-900 rounded-xl p-6 text-center shadow-lg mb-6 border-4 border-slate-800 relative">
+                <div className="text-3xl font-heading font-bold mb-1">"{selectedToken.logprob.token}"</div>
+                <div className="text-xs text-slate-500 uppercase tracking-widest font-bold">Selected Token</div>
+
+                <div className="mt-4 pt-4 border-t border-slate-200">
+                    <div className="flex gap-2">
+                        <input
+                            type="text"
+                            className="flex-1 bg-slate-100 border border-slate-300 rounded px-2 py-1 text-sm font-mono"
+                            value={tokenInputValue}
+                            onChange={(event) => setTokenInputValue(event.target.value)}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                    submitTokenUpdate();
+                                }
+                            }}
+                        />
+                        <button
+                            onClick={submitTokenUpdate}
+                            className="text-xs bg-slate-900 text-white px-2 py-1 rounded hover:bg-slate-700"
+                        >
+                            Update
+                        </button>
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-1">Press Enter to apply changes</div>
                 </div>
             </div>
+
+            <div className="space-y-4 mb-6">
+                <div className="bg-slate-900 rounded-lg p-4 border border-slate-800">
+                    <div className="flex justify-between items-center mb-2">
+                        <span className="text-slate-400 text-sm">Logprob</span>
+                        <span className="font-mono text-emerald-400">{selectedToken.logprob.logprob?.toFixed(4) ?? 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between items-center mb-2">
+                        <span className="text-slate-400 text-sm">Probability</span>
+                        <span className="font-mono text-emerald-400">{(Math.exp(selectedToken.logprob.logprob || 0) * 100).toFixed(2)}%</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                        <span className="text-slate-400 text-sm">Entropy</span>
+                        <span className="font-mono text-amber-400">{entropyValue.toFixed(3)}</span>
+                    </div>
+                </div>
+            </div>
+            <details className="mb-6 group">
+                <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-300 transition-colors list-none flex items-center gap-1">
+                    <ChevronRight size={12} className="group-open:rotate-90 transition-transform" /> Debug Data
+                </summary>
+                <pre className="mt-2 text-[10px] bg-slate-950 p-2 rounded text-slate-400 overflow-x-auto border border-slate-800 font-mono">
+                    {JSON.stringify(selectedToken.logprob, null, 2)}
+                </pre>
+            </details>
         </div>
-        <details className="mb-6 group">
-            <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-300 transition-colors list-none flex items-center gap-1">
-                <ChevronRight size={12} className="group-open:rotate-90 transition-transform" /> Debug Data
-            </summary>
-            <pre className="mt-2 text-[10px] bg-slate-950 p-2 rounded text-slate-400 overflow-x-auto border border-slate-800 font-mono">
-                {JSON.stringify(selectedToken.logprob, null, 2)}
-            </pre>
-        </details>
-    </div>
-), (prev, next) => (
+    );
+}, (prev, next) => (
     prev.selectedToken === next.selectedToken &&
     prev.entropyValue === next.entropyValue &&
     prev.onUpdateToken === next.onUpdateToken

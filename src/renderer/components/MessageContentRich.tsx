@@ -2,7 +2,7 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { PluggableList } from 'unified';
-import { Copy, Check, Play, X, FileText, Save, PlayCircle, Github } from 'lucide-react';
+import { Copy, Check, Play, X, FileText, Save, PlayCircle, Github, Minimize2, Maximize2 } from 'lucide-react';
 import ArtifactPreview from './ArtifactPreview';
 import { toast } from 'sonner';
 import { githubService } from '../services/github';
@@ -157,6 +157,8 @@ interface MarkdownCodeRendererProps {
     onFilePathChange: (value: string) => void;
     onInsertToFile: (code: string, language: string) => void;
     onCancelInsertToFile: () => void;
+    collapsedCodeBlocks: Record<string, boolean>;
+    onToggleCodeCollapse: (codeHash: string) => void;
 }
 
 const MarkdownCodeRenderer: React.FC<MarkdownCodeRendererProps> = React.memo(({
@@ -186,6 +188,8 @@ const MarkdownCodeRenderer: React.FC<MarkdownCodeRendererProps> = React.memo(({
     onFilePathChange,
     onInsertToFile,
     onCancelInsertToFile,
+    collapsedCodeBlocks,
+    onToggleCodeCollapse,
 }) => {
     const { node: _node, ...safeCodeProps } = codeProps;
 
@@ -203,6 +207,9 @@ const MarkdownCodeRenderer: React.FC<MarkdownCodeRendererProps> = React.memo(({
     const codeHash = codeString.substring(0, 50);
     const detectedLanguage = match ? match[1] : 'text';
     const selectedLanguage = codeBlockLanguages[codeHash] || detectedLanguage;
+    const codeLineCount = codeString.split('\n').length;
+    const isLongCodeBlock = codeLineCount > 20 || codeString.length > 1200;
+    const isCollapsed = isLongCodeBlock && collapsedCodeBlocks[codeHash] === true;
     const normalizedSyntaxLanguage = normalizeSyntaxLanguage(selectedLanguage);
     const SyntaxHighlighterComponent = syntaxHighlighterBundle?.component as React.ComponentType<Record<string, unknown>> | undefined;
     const canSyntaxHighlight = Boolean(
@@ -235,6 +242,16 @@ const MarkdownCodeRenderer: React.FC<MarkdownCodeRendererProps> = React.memo(({
                     </select>
                 </div>
                 <div className="flex items-center gap-1">
+                    {isLongCodeBlock && (
+                        <button
+                            onClick={() => onToggleCodeCollapse(codeHash)}
+                            className="flex items-center gap-1.5 text-[10px] font-bold text-cyan-300 hover:text-cyan-200 transition-colors py-1 px-2 rounded hover:bg-slate-700 border border-cyan-500/30 hover:border-cyan-500/50"
+                            title={isCollapsed ? 'Expand code block' : 'Minimize code block'}
+                        >
+                            {isCollapsed ? <Maximize2 size={12} /> : <Minimize2 size={12} />}
+                            {isCollapsed ? 'EXPAND' : 'MINIMIZE'}
+                        </button>
+                    )}
                     {isPreviewable && (
                         <button
                             onClick={() => onPreviewCode(codeString, selectedLanguage)}
@@ -296,7 +313,7 @@ const MarkdownCodeRenderer: React.FC<MarkdownCodeRendererProps> = React.memo(({
                     </button>
                 </div>
             </div>
-            <div className="relative">
+            <div className={`relative ${isCollapsed ? 'max-h-72 overflow-hidden' : ''}`}>
                 {canSyntaxHighlight && SyntaxHighlighterComponent ? (
                     <SyntaxHighlighterComponent
                         {...safeCodeProps}
@@ -315,6 +332,14 @@ const MarkdownCodeRenderer: React.FC<MarkdownCodeRendererProps> = React.memo(({
                     <pre className="m-0 p-5 overflow-x-auto bg-transparent text-slate-100 text-[13px] leading-relaxed whitespace-pre-wrap break-words custom-scrollbar">
                         <code className="font-mono">{codeString}</code>
                     </pre>
+                )}
+                {isCollapsed && (
+                    <>
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[#1e1e1e] via-[#1e1e1e]/90 to-transparent" />
+                        <div className="pointer-events-none absolute bottom-2 right-3 text-[10px] font-semibold text-cyan-200/90 bg-slate-900/70 border border-cyan-500/30 rounded px-2 py-0.5">
+                            Minimized {codeLineCount} lines
+                        </div>
+                    </>
                 )}
             </div>
             {executionResult && (
@@ -380,6 +405,7 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
     const [codeBlockLanguages, setCodeBlockLanguages] = React.useState<Record<string, string>>({});
     const [executingCode, setExecutingCode] = React.useState<string | null>(null);
     const [executionResults, setExecutionResults] = React.useState<Record<string, CodeExecutionResult>>({});
+    const [collapsedCodeBlocks, setCollapsedCodeBlocks] = React.useState<Record<string, boolean>>({});
     const [mathPlugins, setMathPlugins] = React.useState<MathPluginBundle | null>(null);
     const [syntaxHighlighterBundle, setSyntaxHighlighterBundle] = React.useState<SyntaxHighlighterBundle | null>(null);
     const [loadedSyntaxLanguages, setLoadedSyntaxLanguages] = React.useState<Set<string>>(new Set());
@@ -677,6 +703,13 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
         void ensureSyntaxLanguageLoaded(newLanguage);
     }, [ensureSyntaxLanguageLoaded]);
 
+    const handleToggleCodeCollapse = React.useCallback((codeHash: string) => {
+        setCollapsedCodeBlocks((prev) => ({
+            ...prev,
+            [codeHash]: !prev[codeHash],
+        }));
+    }, []);
+
     const markdownStaticComponents = React.useMemo(() => ({
         p: ({ children }: { children?: React.ReactNode }) => <p className="mb-4 last:mb-0 leading-7 text-slate-300 font-sens">{children}</p>,
         ul: ({ children }: { children?: React.ReactNode }) => <ul className="list-disc ml-4 mb-4 space-y-2 text-slate-300 marker:text-primary/70">{children}</ul>,
@@ -741,8 +774,11 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
                 setShowFilePathInput(null);
                 setFilePath('');
             }}
+            collapsedCodeBlocks={collapsedCodeBlocks}
+            onToggleCodeCollapse={handleToggleCodeCollapse}
         />
     ), [
+        collapsedCodeBlocks,
         codeBlockLanguages,
         copiedCode,
         executingCode,
@@ -754,6 +790,7 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
         handleExecuteCode,
         handleInsertToFile,
         handleLanguageChange,
+        handleToggleCodeCollapse,
         handleSaveFile,
         isUser,
         loadedSyntaxLanguages,

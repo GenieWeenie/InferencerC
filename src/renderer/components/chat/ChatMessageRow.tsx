@@ -85,7 +85,7 @@ const MessageHoverActions: React.FC<MessageHoverActionsProps> = React.memo(({
     onRegenerate,
     onBranch,
 }) => (
-    <div className="absolute top-2 right-2 flex items-center gap-1.5 rounded-xl border border-slate-700/70 bg-slate-900/85 px-1 py-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto transition-opacity z-20 backdrop-blur-sm">
+    <div className="absolute top-2 right-2 flex flex-col items-center gap-1.5 rounded-xl border border-slate-700/70 bg-slate-900/85 px-1 py-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto transition-opacity z-20 backdrop-blur-sm">
         <button
             onClick={onToggleBookmark}
             className={`h-8 w-8 rounded-lg text-white flex items-center justify-center shadow-sm cursor-pointer transition-colors ${isBookmarked

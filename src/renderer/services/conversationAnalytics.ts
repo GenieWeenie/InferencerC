@@ -12,7 +12,8 @@
 
 import { ChatSession, ChatMessage } from '../../shared/types';
 import { HistoryService } from './history';
-import { keyPointExtractionService, ExtractionResult } from './keyPointExtraction';
+import { keyPointExtractionService } from './keyPointExtraction';
+import { readAnalyticsUsageStats } from './analyticsStore';
 
 // Analytics data structures
 export interface ConversationMetrics {
@@ -89,6 +90,18 @@ type ConversationBranchTree = {
     branches?: unknown[];
 };
 
+const buildLatestTrackedModelBySession = (): Map<string, string> => {
+    const latestModelBySession = new Map<string, string>();
+    const usageStats = readAnalyticsUsageStats();
+    for (let i = 0; i < usageStats.length; i++) {
+        const stat = usageStats[i];
+        if (stat.sessionId && stat.modelId) {
+            latestModelBySession.set(stat.sessionId, stat.modelId);
+        }
+    }
+    return latestModelBySession;
+};
+
 export class ConversationAnalyticsService {
     private static instance: ConversationAnalyticsService;
     private cache: Map<string, ConversationMetrics> = new Map();
@@ -134,8 +147,6 @@ export class ConversationAnalyticsService {
         }, 0);
 
         // Calculate duration
-        const firstMessage = messages[0];
-        const lastMessage = messages[messages.length - 1];
         const totalDuration = session.lastModified - (session.lastModified - 86400000); // Approximate
 
         // Count regenerations and edits (simplified: count messages with same parent)
@@ -161,10 +172,13 @@ export class ConversationAnalyticsService {
             ? this.countBranches(session.conversationTree)
             : 0;
 
+        const latestModelBySession = buildLatestTrackedModelBySession();
+        const effectiveModelId = latestModelBySession.get(session.id) || session.modelId;
+
         const metrics: ConversationMetrics = {
             sessionId: session.id,
             title: session.title,
-            modelId: session.modelId,
+            modelId: effectiveModelId,
             messageCount: messages.length,
             totalTokens,
             avgResponseTime: responseTimes.length > 0
@@ -315,6 +329,7 @@ export class ConversationAnalyticsService {
     async getTrends(days: number = 30): Promise<TrendData[]> {
         const metrics = await this.analyzeAllConversations();
         const sessions = HistoryService.getAllSessions();
+        const latestModelBySession = buildLatestTrackedModelBySession();
 
         const trends: Map<string, TrendData> = new Map();
         const cutoffDate = new Date();
@@ -365,7 +380,8 @@ export class ConversationAnalyticsService {
             }
 
             const modelCounts = modelCountsByDate.get(dateStr)!;
-            modelCounts.set(session.modelId, (modelCounts.get(session.modelId) || 0) + 1);
+            const effectiveModelId = latestModelBySession.get(session.id) || session.modelId;
+            modelCounts.set(effectiveModelId, (modelCounts.get(effectiveModelId) || 0) + 1);
         });
 
         trends.forEach((trend, dateStr) => {
