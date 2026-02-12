@@ -60,6 +60,35 @@ describe('runtime parse guards', () => {
         expect(suggestions.length).toBeGreaterThan(0);
     });
 
+    it('normalizes AI smart suggestion payloads and dedupes invalid entries', async () => {
+        const { smartSuggestionsService } = require('../smartSuggestions') as typeof import('../smartSuggestions');
+        const suggestions = await smartSuggestionsService.generateAISuggestions(
+            [{ role: 'user', content: 'Can you help me debug this script?' }],
+            async () => ({
+                content: `[
+                    {"text":"  Show me a minimal repro  ","type":"example"},
+                    {"text":"show me a minimal repro","type":"example"},
+                    {"text":"   ","type":"follow-up"},
+                    {"text":"What should I test next?","type":"unknown"}
+                ]`,
+            })
+        );
+
+        expect(suggestions).toEqual([
+            { id: 'ai-0', text: 'Show me a minimal repro', type: 'example', confidence: 0.8 },
+            { id: 'ai-1', text: 'What should I test next?', type: 'follow-up', confidence: 0.8 },
+        ]);
+    });
+
+    it('returns empty normalized AI suggestions for malformed payloads', () => {
+        const { normalizeAISuggestions } = require('../smartSuggestions') as typeof import('../smartSuggestions');
+        const normalized = normalizeAISuggestions(
+            [{ text: 123 }, null, { text: '' }],
+            () => 'follow-up'
+        );
+        expect(normalized).toEqual([]);
+    });
+
     it('returns empty refactoring suggestions when AI payload does not contain an array', async () => {
         const { refactoringAssistantService } = require('../refactoringAssistant') as typeof import('../refactoringAssistant');
         const suggestions = await refactoringAssistantService.suggestRefactorings(

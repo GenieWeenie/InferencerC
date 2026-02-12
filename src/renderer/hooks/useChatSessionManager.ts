@@ -2,6 +2,8 @@ import { Dispatch, MutableRefObject, SetStateAction, useCallback } from 'react';
 import { ChatMessage, ChatSession } from '../../shared/types';
 import { HistoryService } from '../services/history';
 import { crashRecoveryService } from '../services/crashRecovery';
+import { persistLastModelId } from '../lib/modelSelectionStorage';
+import { mapSessionSettingsForLoad } from '../lib/chatSessionLoadSettings';
 import {
     buildHistoryResetPatch,
     buildLazySessionLoadPatch,
@@ -159,17 +161,18 @@ export const useChatSessionManager = ({
         });
         applyHistoryStatePatch(lazySessionPatch);
 
-        if (session.modelId) {
-            setCurrentModel(session.modelId);
-            localStorage.setItem('app_last_model', session.modelId);
+        const settings = mapSessionSettingsForLoad(session);
+        if (settings.modelId) {
+            setCurrentModel(settings.modelId);
+            persistLastModelId(settings.modelId);
         }
-        if (session.expertMode !== undefined) setExpertMode(session.expertMode);
-        if (session.thinkingEnabled !== undefined) setThinkingEnabled(session.thinkingEnabled);
-        if (session.systemPrompt !== undefined) setSystemPrompt(session.systemPrompt);
-        if (session.temperature !== undefined) setTemperature(session.temperature);
-        if (session.topP !== undefined) setTopP(session.topP);
-        if (session.maxTokens !== undefined) setMaxTokens(session.maxTokens);
-        if (session.batchSize !== undefined) setBatchSize(session.batchSize);
+        if (settings.expertMode !== undefined) setExpertMode(settings.expertMode);
+        if (settings.thinkingEnabled !== undefined) setThinkingEnabled(settings.thinkingEnabled);
+        if (settings.systemPrompt !== undefined) setSystemPrompt(settings.systemPrompt);
+        if (settings.temperature !== undefined) setTemperature(settings.temperature);
+        if (settings.topP !== undefined) setTopP(settings.topP);
+        if (settings.maxTokens !== undefined) setMaxTokens(settings.maxTokens);
+        if (settings.batchSize !== undefined) setBatchSize(settings.batchSize);
         HistoryService.setLastActiveSessionId(session.id);
         selectedTokenRef.current = null;
         setSelectedToken(null);

@@ -42,6 +42,49 @@ const parseJson = (raw: string): unknown | null => {
     }
 };
 
+const sanitizeSuggestionText = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+};
+
+export const normalizeAISuggestions = (
+    value: unknown,
+    normalizeSuggestionType: (rawType: unknown) => SuggestionType
+): Suggestion[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const suggestions: Suggestion[] = [];
+    const seenText = new Set<string>();
+    for (let i = 0; i < value.length; i++) {
+        const entry = value[i];
+        const suggestion = isRecord(entry) ? entry : {};
+        const text = sanitizeSuggestionText(suggestion.text);
+        if (!text) {
+            continue;
+        }
+
+        const dedupeKey = text.toLowerCase();
+        if (seenText.has(dedupeKey)) {
+            continue;
+        }
+        seenText.add(dedupeKey);
+
+        suggestions.push({
+            id: `ai-${suggestions.length}`,
+            text,
+            type: normalizeSuggestionType(suggestion.type),
+            confidence: 0.8,
+        });
+    }
+
+    return suggestions;
+};
+
 export class SmartSuggestionsService {
     private static instance: SmartSuggestionsService;
 
@@ -285,17 +328,14 @@ Types: follow-up, clarification, example, deep-dive, alternative, related`;
             const jsonMatch = content.match(/\[[\s\S]*\]/);
             if (jsonMatch) {
                 const parsedUnknown = parseJson(jsonMatch[0]);
-                if (Array.isArray(parsedUnknown)) {
-                    return parsedUnknown.map((entry, i: number) => {
-                        const suggestion = isRecord(entry) ? entry : {};
-                        const normalizedType = this.normalizeSuggestionType(suggestion.type);
-                        return {
-                            id: `ai-${i}`,
-                            text: typeof suggestion.text === 'string' ? suggestion.text : '',
-                            type: normalizedType,
-                            confidence: 0.8,
-                        } satisfies Suggestion;
-                    }).filter((suggestion) => suggestion.text.trim().length > 0);
+                if (parsedUnknown) {
+                    const normalizedSuggestions = normalizeAISuggestions(
+                        parsedUnknown,
+                        (rawType) => this.normalizeSuggestionType(rawType)
+                    );
+                    if (normalizedSuggestions.length > 0) {
+                        return normalizedSuggestions;
+                    }
                 }
             }
         } catch (error) {

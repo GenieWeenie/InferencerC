@@ -28,13 +28,26 @@ export const parseToolCallPayload = (value: unknown): { name: string; args: Reco
     if (!name) {
         return null;
     }
-    const args = isRecord(value.arguments)
-        ? value.arguments
-        : (isRecord(value.parameters) ? value.parameters : {});
+    const resolveArguments = (candidate: unknown): Record<string, unknown> | null => {
+        if (isRecord(candidate)) {
+            return candidate;
+        }
+        if (typeof candidate === 'string') {
+            const parsed = parseJson(candidate);
+            if (isRecord(parsed)) {
+                return parsed;
+            }
+        }
+        return null;
+    };
+
+    const args = resolveArguments(value.arguments)
+        || resolveArguments(value.parameters)
+        || {};
     return { name, args };
 };
 
-const parseToolCallPayloadFromRaw = (raw: string): { name: string; args: Record<string, unknown> } | null => {
+export const parseToolCallPayloadFromRaw = (raw: string): { name: string; args: Record<string, unknown> } | null => {
     const parsed = parseJson(raw);
     if (!parsed) {
         return null;

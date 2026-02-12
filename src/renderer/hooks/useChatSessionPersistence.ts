@@ -2,6 +2,7 @@ import { type Dispatch, type MutableRefObject, type SetStateAction, useEffect } 
 import { ChatMessage, ChatSession } from '../../shared/types';
 import { HistoryService } from '../services/history';
 import { buildSavedSessionsPatch } from '../lib/chatStateGuards';
+import { buildRecoveryStateSnapshot } from '../lib/chatRecoveryState';
 
 interface UseChatSessionPersistenceParams {
     history: ChatMessage[];
@@ -146,7 +147,7 @@ export const useChatSessionPersistence = ({
 
         const saveRecoveryState = () => {
             try {
-                const recoveryState = {
+                const recoveryState = buildRecoveryStateSnapshot({
                     timestamp: Date.now(),
                     sessionId,
                     history,
@@ -164,8 +165,11 @@ export const useChatSessionPersistence = ({
                     responseFormat,
                     input,
                     prefill,
-                    enabledTools: Array.from(enabledTools),
-                };
+                    enabledTools,
+                });
+                if (!recoveryState) {
+                    return;
+                }
                 localStorage.setItem('app_recovery_state', JSON.stringify(recoveryState));
             } catch (error) {
                 console.error('Failed to save recovery state', error);

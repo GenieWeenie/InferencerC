@@ -6,6 +6,36 @@
 const PRIVACY_KEY = 'app_privacy_mode';
 const ANALYTICS_ENABLED_KEY = 'app_analytics_enabled';
 
+const readStorageValue = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const writeStorageValue = (key: string, value: string): void => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage write failures for non-critical privacy preference values.
+  }
+};
+
+export const parseBooleanPreference = (value: string | null): boolean | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true') {
+    return true;
+  }
+  if (normalized === 'false') {
+    return false;
+  }
+  return null;
+};
+
 export class PrivacyService {
   private static instance: PrivacyService;
 
@@ -22,23 +52,23 @@ export class PrivacyService {
    * Check if privacy mode is enabled
    */
   isPrivacyModeEnabled(): boolean {
-    return localStorage.getItem(PRIVACY_KEY) === 'true';
+    return parseBooleanPreference(readStorageValue(PRIVACY_KEY)) === true;
   }
 
   /**
    * Enable privacy mode (disables all analytics/telemetry)
    */
   enablePrivacyMode(): void {
-    localStorage.setItem(PRIVACY_KEY, 'true');
-    localStorage.setItem(ANALYTICS_ENABLED_KEY, 'false');
+    writeStorageValue(PRIVACY_KEY, 'true');
+    writeStorageValue(ANALYTICS_ENABLED_KEY, 'false');
   }
 
   /**
    * Disable privacy mode
    */
   disablePrivacyMode(): void {
-    localStorage.setItem(PRIVACY_KEY, 'false');
-    localStorage.setItem(ANALYTICS_ENABLED_KEY, 'true');
+    writeStorageValue(PRIVACY_KEY, 'false');
+    writeStorageValue(ANALYTICS_ENABLED_KEY, 'true');
   }
 
   /**
@@ -48,7 +78,7 @@ export class PrivacyService {
     if (this.isPrivacyModeEnabled()) {
       return false; // Privacy mode overrides
     }
-    return localStorage.getItem(ANALYTICS_ENABLED_KEY) !== 'false';
+    return parseBooleanPreference(readStorageValue(ANALYTICS_ENABLED_KEY)) !== false;
   }
 
   /**
@@ -56,7 +86,7 @@ export class PrivacyService {
    */
   enableAnalytics(): void {
     if (!this.isPrivacyModeEnabled()) {
-      localStorage.setItem(ANALYTICS_ENABLED_KEY, 'true');
+      writeStorageValue(ANALYTICS_ENABLED_KEY, 'true');
     }
   }
 
@@ -64,7 +94,7 @@ export class PrivacyService {
    * Disable analytics
    */
   disableAnalytics(): void {
-    localStorage.setItem(ANALYTICS_ENABLED_KEY, 'false');
+    writeStorageValue(ANALYTICS_ENABLED_KEY, 'false');
   }
 
   /**

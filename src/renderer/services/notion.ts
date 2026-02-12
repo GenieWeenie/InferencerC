@@ -61,6 +61,24 @@ interface NotionErrorResponse {
   message?: string;
 }
 
+const NOTION_DATABASE_ID_KEY = 'notion_database_id';
+
+const sanitizeNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+};
+
+export const readPersistedNotionDatabaseId = (): string | null => {
+  try {
+    return sanitizeNonEmptyString(localStorage.getItem(NOTION_DATABASE_ID_KEY));
+  } catch {
+    return null;
+  }
+};
+
 const getErrorMessage = (error: unknown, fallback: string): string => {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -77,15 +95,20 @@ class NotionService {
    * Initialize with API key and database ID
    */
   async setConfig(apiKey: string, databaseId: string): Promise<void> {
-    const trimmedApiKey = apiKey.trim();
-    this.apiKey = trimmedApiKey || null;
-    this.databaseId = databaseId;
+    const trimmedApiKey = sanitizeNonEmptyString(apiKey);
+    const normalizedDatabaseId = sanitizeNonEmptyString(databaseId);
+    this.apiKey = trimmedApiKey;
+    this.databaseId = normalizedDatabaseId;
     if (trimmedApiKey) {
       await credentialService.setNotionApiKey(trimmedApiKey);
     } else {
       await credentialService.clearNotionApiKey();
     }
-    localStorage.setItem('notion_database_id', databaseId);
+    if (normalizedDatabaseId) {
+      localStorage.setItem(NOTION_DATABASE_ID_KEY, normalizedDatabaseId);
+    } else {
+      localStorage.removeItem(NOTION_DATABASE_ID_KEY);
+    }
   }
 
   /**
@@ -102,10 +125,21 @@ class NotionService {
    * Get stored database ID
    */
   getDatabaseId(): string | null {
-    if (!this.databaseId) {
-      this.databaseId = localStorage.getItem('notion_database_id');
+    if (this.databaseId) {
+      return sanitizeNonEmptyString(this.databaseId);
     }
-    return this.databaseId;
+    const persisted = readPersistedNotionDatabaseId();
+    if (!persisted) {
+      try {
+        localStorage.removeItem(NOTION_DATABASE_ID_KEY);
+      } catch {
+        // Ignore storage cleanup errors.
+      }
+      this.databaseId = null;
+      return null;
+    }
+    this.databaseId = persisted;
+    return persisted;
   }
 
   /**
@@ -115,7 +149,7 @@ class NotionService {
     this.apiKey = null;
     this.databaseId = null;
     await credentialService.clearNotionApiKey();
-    localStorage.removeItem('notion_database_id');
+    localStorage.removeItem(NOTION_DATABASE_ID_KEY);
   }
 
   /**

@@ -66,9 +66,25 @@ export const readAnalyticsUsageStats = (): UsageStatsRecord[] => {
     }
 };
 
+export const sanitizeAnalyticsUsageStats = (stats: unknown): UsageStatsRecord[] => {
+    if (!Array.isArray(stats)) {
+        return [];
+    }
+
+    const sanitized: UsageStatsRecord[] = [];
+    for (let i = 0; i < stats.length; i++) {
+        const record = sanitizeUsageStatsRecord(stats[i]);
+        if (!record) {
+            continue;
+        }
+        sanitized.push(record);
+    }
+    return sanitized;
+};
+
 export const writeAnalyticsUsageStats = (stats: UsageStatsRecord[]): void => {
     try {
-        localStorage.setItem(ANALYTICS_KEY, JSON.stringify(stats));
+        localStorage.setItem(ANALYTICS_KEY, JSON.stringify(sanitizeAnalyticsUsageStats(stats)));
     } catch (error) {
         console.error('Failed to save analytics:', error);
     }
