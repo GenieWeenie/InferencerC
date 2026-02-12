@@ -88,9 +88,9 @@ const sanitizeChatMessage = (value: unknown): ChatMessage | null => {
     return null;
   }
   const contentValue = value.content;
-  const content = typeof contentValue === 'string' || Array.isArray(contentValue) ? contentValue : '';
+  const content = typeof contentValue === 'string' ? contentValue : '';
   return {
-    ...(value as ChatMessage),
+    ...(value as unknown as ChatMessage),
     role,
     content,
   };
@@ -114,7 +114,7 @@ const sanitizeChatSession = (value: unknown): ChatSession | null => {
     }
   }
   return {
-    ...(value as ChatSession),
+    ...(value as unknown as ChatSession),
     id: value.id,
     title: value.title,
     modelId: value.modelId,

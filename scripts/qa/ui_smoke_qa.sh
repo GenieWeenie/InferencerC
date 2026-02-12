@@ -148,6 +148,18 @@ assert_snapshot_contains_any "How can I help you today?" "Type your prompt here"
 assert_snapshot_contains "Model:"
 assert_no_runtime_import_errors
 
+ANALYTICS_ENABLE_CODE="$(cat <<'EOF'
+async (page) => {
+  return await page.evaluate(() => {
+    localStorage.setItem('app_privacy_mode', 'false');
+    localStorage.setItem('app_analytics_enabled', 'true');
+    return { analyticsEnabled: true };
+  });
+}
+EOF
+)"
+run_with_retry 3 run_pw run-code "$ANALYTICS_ENABLE_CODE"
+
 # 1) Model switch flow
 MODEL_SWITCH_CODE="$(cat <<'EOF'
 async (page) => {
@@ -172,6 +184,10 @@ async (page) => {
     const currentValue = select.value;
     const target = options.find((option) => option.value !== currentValue) || options[0];
     if (!target || target.value === currentValue) {
+      window.__smokeModelSwitch = {
+        switched: false,
+        expectedModel: currentValue,
+      };
       return {
         switched: false,
         reason: 'single-option',
@@ -182,6 +198,11 @@ async (page) => {
     select.value = target.value;
     select.dispatchEvent(new Event('input', { bubbles: true }));
     select.dispatchEvent(new Event('change', { bubbles: true }));
+    window.__smokeModelSwitch = {
+      switched: target.value !== currentValue,
+      expectedModel: target.value,
+      previousModel: currentValue,
+    };
     return {
       currentValue,
       nextValue: target.value,
@@ -200,10 +221,18 @@ assert_snapshot_contains "Model:"
 SEND_PROMPT_CODE="$(cat <<'EOF'
 async (page) => {
   const text = 'Smoke QA prompt from CI';
-  const editor = page.locator('textarea').last();
+  const editor = page.getByPlaceholder("Type your prompt here... (Try '/')").first();
   await editor.fill(text);
   await editor.press('Enter');
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(300);
+  const remaining = await editor.inputValue();
+  if (remaining.trim() === text) {
+    const sendButton = editor.locator('xpath=ancestor::div[1]/following-sibling::div//button').last();
+    if (await sendButton.count()) {
+      await sendButton.click();
+    }
+  }
+  await page.waitForTimeout(2500);
   return text;
 }
 EOF
@@ -212,12 +241,92 @@ run_with_retry 3 run_pw run-code "$SEND_PROMPT_CODE"
 run_with_retry 3 run_pw snapshot
 assert_snapshot_contains "Smoke QA prompt from CI"
 
+ANALYTICS_ATTRIBUTION_CODE="$(cat <<'EOF'
+async (page) => {
+  return await page.evaluate(() => {
+    const switchedModel = typeof window.__smokeModelSwitch?.expectedModel === 'string'
+      ? window.__smokeModelSwitch.expectedModel.trim()
+      : '';
+    const label = Array.from(document.querySelectorAll('span')).find((el) => (el.textContent || '').trim() === 'Model:');
+    const container = label ? label.parentElement : null;
+    const modelSelect = (container && container.querySelector('select')) || null;
+    const selectedModel = switchedModel
+      || (typeof modelSelect?.value === 'string' ? modelSelect.value.trim() : '');
+
+    const rawActivity = localStorage.getItem('api_activity_log_entries');
+    if (rawActivity) {
+      const activityRows = JSON.parse(rawActivity);
+      if (Array.isArray(activityRows)) {
+        const invalidActivityRows = activityRows.some((entry) =>
+          entry && entry.type === 'request' && (typeof entry.model !== 'string' || entry.model.trim().length === 0)
+        );
+        if (invalidActivityRows) {
+          throw new Error('API activity request rows include missing model attribution.');
+        }
+      }
+    }
+
+    const rawAnalytics = localStorage.getItem('inferencer-analytics');
+    if (rawAnalytics) {
+      const analyticsRows = JSON.parse(rawAnalytics);
+      if (Array.isArray(analyticsRows)) {
+        const invalidAnalyticsRows = analyticsRows.some((entry) =>
+          !entry || typeof entry.modelId !== 'string' || entry.modelId.trim().length === 0
+        );
+        if (invalidAnalyticsRows) {
+          throw new Error('inferencer-analytics contains rows without modelId attribution.');
+        }
+      }
+    }
+
+    return {
+      selectedModel: selectedModel || 'unresolved',
+      hasActivityRows: Boolean(rawActivity),
+      hasAnalyticsRows: Boolean(rawAnalytics),
+    };
+  });
+}
+EOF
+)"
+run_with_retry 3 run_pw run-code "$ANALYTICS_ATTRIBUTION_CODE"
+
 # 3) Inspector open flow
 inspector_ref="$(find_button_ref "Inspector")"
 [[ -n "$inspector_ref" ]] || { log "Could not find Inspector button ref."; exit 1; }
 run_with_retry 3 run_pw click "$inspector_ref"
 run_with_retry 3 run_pw snapshot
 assert_snapshot_contains "Inspector"
+
+INSPECTOR_ALTERNATIVE_LABELS_CODE="$(cat <<'EOF'
+async (page) => {
+  const tokenLocator = page.locator('[title^="Token:"]').first();
+  const hasToken = (await tokenLocator.count()) > 0;
+  if (hasToken) {
+    await tokenLocator.click();
+    await page.waitForTimeout(300);
+  }
+  const inspectorText = await page.evaluate(() => {
+    const panel = Array.from(document.querySelectorAll('div')).find((node) => {
+      const text = node.textContent || '';
+      return text.includes('Top Alternatives');
+    });
+    const inspectorRoot = Array.from(document.querySelectorAll('div')).find((node) => {
+      const text = node.textContent || '';
+      return text.includes('Inspect Token Details') || text.includes('Selected Token');
+    });
+    return {
+      alternativesText: panel?.textContent || '',
+      inspectorText: inspectorRoot?.textContent || '',
+    };
+  });
+  if (inspectorText.alternativesText.includes('"alt1"') || inspectorText.alternativesText.includes('"alt2"')) {
+    throw new Error('Inspector alternatives are showing placeholder labels (alt1/alt2).');
+  }
+  return { inspectorValidated: true, hasToken };
+}
+EOF
+)"
+run_with_retry 3 run_pw run-code "$INSPECTOR_ALTERNATIVE_LABELS_CODE"
 
 # 4) Settings usage flow
 settings_ref="$(find_button_ref "Settings")"
@@ -237,6 +346,33 @@ chat_ref="$(find_button_ref "Chat")"
 run_with_retry 3 run_pw click "$chat_ref"
 run_with_retry 3 run_pw snapshot
 assert_snapshot_contains_any "Smoke QA prompt from CI" "How can I help you today?"
+
+MODEL_PERSISTENCE_CHECK_CODE="$(cat <<'EOF'
+async (page) => {
+  return await page.evaluate(() => {
+    const expectedModel = window.__smokeModelSwitch?.expectedModel;
+    if (!expectedModel) {
+      return { checked: false, reason: 'no-switched-model' };
+    }
+    const label = Array.from(document.querySelectorAll('span')).find((el) => (el.textContent || '').trim() === 'Model:');
+    const container = label ? label.parentElement : null;
+    const select = (container && container.querySelector('select')) || document.querySelector('select');
+    if (!select) {
+      throw new Error('Model selector not found when validating persistence.');
+    }
+    if (select.value !== expectedModel) {
+      throw new Error(`Model did not persist after navigation. Expected "${expectedModel}", got "${select.value}".`);
+    }
+    return {
+      checked: true,
+      expectedModel,
+      currentModel: select.value,
+    };
+  });
+}
+EOF
+)"
+run_with_retry 3 run_pw run-code "$MODEL_PERSISTENCE_CHECK_CODE"
 
 assert_no_runtime_import_errors
 run_with_retry 3 run_pw screenshot

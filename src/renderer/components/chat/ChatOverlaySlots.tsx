@@ -13,7 +13,6 @@ export const ChatOverlaySlots: React.FC<ChatOverlaySlotsProps> = ({
 
     const coreSlots = buildChatCoreOverlaySlots({
         ...props,
-        savedSessions,
         sessionId,
         currentSessionTitle,
     });

@@ -27,6 +27,12 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
  */
 const ModelDownloader: React.FC = () => {
     type ModelDownloaderTabId = 'recommended' | 'search' | 'downloads';
+    type ModelDownloaderTab = {
+        id: ModelDownloaderTabId;
+        label: string;
+        icon: React.ComponentType<{ size?: number | string }>;
+        count?: number;
+    };
     type SelectableModel = HFModel | { id: string; name: string };
 
     const [searchQuery, setSearchQuery] = useState('');
@@ -37,6 +43,11 @@ const ModelDownloader: React.FC = () => {
     const [isLoadingFiles, setIsLoadingFiles] = useState(false);
     const [downloads, setDownloads] = useState<DownloadProgress[]>([]);
     const [activeTab, setActiveTab] = useState<ModelDownloaderTabId>('recommended');
+    const tabs: ModelDownloaderTab[] = [
+        { id: 'recommended', label: 'Recommended', icon: Star },
+        { id: 'search', label: 'Search Results', icon: Search, count: searchResults.length },
+        { id: 'downloads', label: 'Downloads', icon: Download, count: downloads.length },
+    ];
 
     // Subscribe to download updates
     useEffect(() => {
@@ -176,11 +187,7 @@ const ModelDownloader: React.FC = () => {
 
             {/* Tabs */}
             <div className="flex gap-1 p-1 bg-slate-800/50 rounded-xl">
-                {[
-                    { id: 'recommended', label: 'Recommended', icon: Star },
-                    { id: 'search', label: 'Search Results', icon: Search, count: searchResults.length },
-                    { id: 'downloads', label: 'Downloads', icon: Download, count: downloads.length }
-                ].map((tab: { id: ModelDownloaderTabId; label: string; icon: React.ComponentType<{ size?: number | string }>; count?: number }) => (
+                {tabs.map((tab) => (
                     <button
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id)}

@@ -1,6 +1,8 @@
 import React from 'react';
 import { Plus, Globe, Settings, Activity, AlertTriangle, ChevronRight, Check, AlertCircle, Brain, Users, Wrench, Eraser, Download, Search, ChevronUp, ChevronDown, FileText, ThumbsUp, ThumbsDown, Code2, BarChart3, FolderOpen, Eye, EyeOff, Github, Network, HelpCircle, Zap, LayoutGrid, FileJson, TestTube, Sparkles, MessageSquare, Mail, Calendar, Package, Video, Link, Bot, Shield, Menu, Cloud, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
+import type { ChatMessage } from '../../shared/types';
+import type { MediaAttachment } from '../services/multiModalAI';
 import { ChatComposerArea } from '../components/chat/ChatComposerArea';
 import { ChatContextWindowPanel, ChatSummaryPanel } from '../components/chat/ChatContextPanels';
 import { ChatHeaderBar } from '../components/chat/ChatHeaderBar';
@@ -66,6 +68,7 @@ import {
     getMessageActionCapabilities,
 } from '../lib/chatMessageActions';
 import { useMCP } from '../hooks/useMCP';
+import type { MCPToolCall } from '../services/mcp';
 
 const CHAT_PERF_HISTORY_KEY = 'chat_message_perf_benchmarks_v1';
 const ACTIVITY_LOG_COUNT_KEY = 'api_activity_log_count';
@@ -412,12 +415,21 @@ const Chat: React.FC = () => {
         temperature,
         topP,
         maxTokens,
-        appendMessage,
+        appendMessage: (message) => appendMessage(message as ChatMessage),
         githubUrl,
         setGithubUrl,
         mcpAvailable,
         mcpTools,
-        executeMcpTool,
+        executeMcpTool: async (payload) => {
+            const result = await executeMcpTool({
+                ...payload,
+                serverId: payload.serverId ?? '',
+            } as MCPToolCall);
+            return {
+                isError: Boolean(result.isError),
+                content: result.content,
+            };
+        },
     });
 
     const {
@@ -674,7 +686,7 @@ const Chat: React.FC = () => {
             setSystemPrompt(optimizedSystemPrompt);
         }
     }, [setInput, setSystemPrompt]);
-    const handleSendMultiModal = React.useCallback(async (media: unknown, text: string) => {
+    const handleSendMultiModal = React.useCallback(async (media: MediaAttachment[], text?: string) => {
         const multiModalAIService = await loadMultiModalAIService();
         const response = await multiModalAIService.sendMultiModalRequest(
             { text, media },
@@ -952,7 +964,7 @@ const Chat: React.FC = () => {
         setEditedMessageContent,
         setShowSearchResultsList,
         setSearchQuery,
-        setCurrentSearchIndex,
+        setCurrentSearchIndex: setCurrentSearchIndex as React.Dispatch<React.SetStateAction<number>>,
         setShowSearch,
         deleteMessage,
         handleEditMessage,
@@ -1462,8 +1474,18 @@ const Chat: React.FC = () => {
                     onDrop={handleComposerDrop}
                     attachments={attachments}
                     imageAttachments={imageAttachments}
-                    onRemoveAttachment={removeAttachment}
-                    onRemoveImageAttachment={removeImageAttachment}
+                    onRemoveAttachment={(index) => {
+                        const attachment = attachments[index];
+                        if (attachment?.id) {
+                            removeAttachment(attachment.id);
+                        }
+                    }}
+                    onRemoveImageAttachment={(index) => {
+                        const attachment = imageAttachments[index];
+                        if (attachment?.id) {
+                            removeImageAttachment(attachment.id);
+                        }
+                    }}
                     showSuggestions={showSuggestions}
                     history={history}
                     onSelectSuggestion={handleSelectSuggestion}

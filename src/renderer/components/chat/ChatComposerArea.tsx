@@ -69,7 +69,7 @@ interface ChatComposerAreaProps {
     mcpConnectedCount: number;
     mcpToolCount: number;
     showExpertMenu: boolean;
-    onSelectExpert: (expert: string) => void;
+    onSelectExpert: (expert: string | null) => void;
     showVariableMenu: boolean;
     onCloseVariableMenu: () => void;
     onInsertVariable: (variable: string) => void;
@@ -144,10 +144,27 @@ export const ChatComposerArea: React.FC<ChatComposerAreaProps> = React.memo(({
         onDrop={onDrop}
         attachmentsPanel={(
             <ComposerAttachmentsPanel
-                attachments={attachments}
-                imageAttachments={imageAttachments}
-                onRemoveAttachment={onRemoveAttachment}
-                onRemoveImageAttachment={onRemoveImageAttachment}
+                attachments={attachments.map((attachment, index) => ({
+                    id: String(index),
+                    ...attachment,
+                }))}
+                imageAttachments={imageAttachments.map((attachment, index) => ({
+                    id: String(index),
+                    name: attachment.name,
+                    thumbnailUrl: attachment.thumbnailUrl,
+                }))}
+                onRemoveAttachment={(id) => {
+                    const index = Number(id);
+                    if (Number.isInteger(index) && index >= 0) {
+                        onRemoveAttachment(index);
+                    }
+                }}
+                onRemoveImageAttachment={(id) => {
+                    const index = Number(id);
+                    if (Number.isInteger(index) && index >= 0) {
+                        onRemoveImageAttachment(index);
+                    }
+                }}
             />
         )}
         auxPanels={(

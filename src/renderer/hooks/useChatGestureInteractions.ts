@@ -12,7 +12,7 @@ interface SessionLike {
 }
 
 interface MessageLike {
-    role: string;
+    role: 'system' | 'user' | 'assistant' | 'tool';
     content?: string;
     isLoading?: boolean;
 }

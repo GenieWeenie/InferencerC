@@ -428,18 +428,18 @@ export class GestureService {
             }
         };
 
-        target.addEventListener('touchstart', handleTouchStart, { passive: true });
-        target.addEventListener('touchmove', handleTouchMove, { passive: true });
-        target.addEventListener('touchend', handleTouchEnd, { passive: true });
-        target.addEventListener('touchcancel', handleTouchCancel, { passive: true });
-        target.addEventListener('wheel', handleWheel, { passive: false });
+        target.addEventListener('touchstart', handleTouchStart as EventListener, { passive: true });
+        target.addEventListener('touchmove', handleTouchMove as EventListener, { passive: true });
+        target.addEventListener('touchend', handleTouchEnd as EventListener, { passive: true });
+        target.addEventListener('touchcancel', handleTouchCancel as EventListener, { passive: true });
+        target.addEventListener('wheel', handleWheel as EventListener, { passive: false });
 
         const cleanup = () => {
-            target.removeEventListener('touchstart', handleTouchStart);
-            target.removeEventListener('touchmove', handleTouchMove);
-            target.removeEventListener('touchend', handleTouchEnd);
-            target.removeEventListener('touchcancel', handleTouchCancel);
-            target.removeEventListener('wheel', handleWheel);
+            target.removeEventListener('touchstart', handleTouchStart as EventListener);
+            target.removeEventListener('touchmove', handleTouchMove as EventListener);
+            target.removeEventListener('touchend', handleTouchEnd as EventListener);
+            target.removeEventListener('touchcancel', handleTouchCancel as EventListener);
+            target.removeEventListener('wheel', handleWheel as EventListener);
             clearLongPressTimer();
         };
 
@@ -488,7 +488,8 @@ export class GestureService {
     }
 
     private emit<T extends GestureType>(type: T, event: GestureEventMap[T]): void {
-        this.listeners[type].forEach(listener => {
+        const listeners = this.listeners[type] as Set<(payload: GestureEventMap[T]) => void>;
+        listeners.forEach(listener => {
             this.safeListenerCall(listener, event);
         });
     }

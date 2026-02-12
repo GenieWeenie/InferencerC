@@ -31,6 +31,15 @@ import type { SelectedTokenContext } from '../lib/chatSelectionTypes';
 import { getBrowserPerformanceMemory } from '../lib/performanceMemory';
 
 export type ApiLogCallback = ChatApiLogCallback;
+type EnterpriseComplianceServiceType = typeof import('../services/enterpriseCompliance')['enterpriseComplianceService'];
+type ComplianceLogEvent = Parameters<EnterpriseComplianceServiceType['logEvent']>[0];
+const isComplianceLogEvent = (value: unknown): value is ComplianceLogEvent => {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+    const record = value as Record<string, unknown>;
+    return typeof record.category === 'string' && typeof record.action === 'string';
+};
 
 export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = true) => {
     const didBootstrapSessionsRef = useRef(false);
@@ -118,7 +127,10 @@ export const useChat = (onApiLog?: ApiLogCallback, streamingEnabled: boolean = t
         }
     }, []);
 
-    const logComplianceEvent = useCallback((event: Record<string, unknown>) => {
+    const logComplianceEvent = useCallback((event: unknown) => {
+        if (!isComplianceLogEvent(event)) {
+            return;
+        }
         void loadEnterpriseComplianceService()
             .then((service) => service.logEvent(event))
             .catch(() => {

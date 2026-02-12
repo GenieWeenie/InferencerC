@@ -120,6 +120,9 @@ jobs:
       - name: Generate release notes
         run: bash ./scripts/release/generate_release_notes.sh output/release/release-notes.md
 
+      - name: Generate artifact checksums
+        run: bash ./scripts/release/generate_checksums.sh release-artifacts output/release/checksums.sha256
+
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
         with:
@@ -129,3 +132,4 @@ jobs:
           fail_on_unmatched_files: false
           files: |
             release-artifacts/**
+            output/release/checksums.sha256

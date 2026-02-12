@@ -187,7 +187,7 @@ export const BlockchainPanel: React.FC<BlockchainPanelProps> = ({
                         </section>
 
                         {/* Store Conversation */}
-                        {sessionId && conversationData && (
+                        {sessionId && Boolean(conversationData) && (
                             <section>
                                 <h3 className="text-lg font-semibold text-white mb-4">Store Conversation</h3>
                                 <button

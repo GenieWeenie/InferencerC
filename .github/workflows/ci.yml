@@ -39,6 +39,12 @@ jobs:
       - name: Run tests
         run: npm test -- --runInBand
 
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run type checks (renderer + node)
+        run: npm run typecheck
+
       - name: Build app
         run: npm run build
 

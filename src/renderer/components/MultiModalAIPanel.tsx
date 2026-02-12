@@ -200,7 +200,7 @@ const MediaPreview: React.FC<{
                 {media.thumbnailUrl ? (
                     <img
                         src={media.thumbnailUrl}
-                        alt={media.name}
+                        alt={`media-${media.id}`}
                         className="w-20 h-20 object-cover rounded"
                     />
                 ) : (
@@ -210,7 +210,7 @@ const MediaPreview: React.FC<{
                 )}
                 <div className="flex-1">
                     <div className="flex items-center justify-between mb-1">
-                        <span className="font-medium text-white text-sm">{media.name}</span>
+                        <span className="font-medium text-white text-sm">{`${media.type.toUpperCase()} • ${media.id.slice(0, 8)}`}</span>
                         <button
                             onClick={onRemove}
                             className="text-slate-400 hover:text-red-400 transition-colors"

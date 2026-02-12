@@ -46,6 +46,20 @@ const loadGestureService = async (): Promise<GestureService> => {
     return gestureServicePromise;
 };
 
+const subscribeToGesture = <T extends GestureType>(
+    gestureService: GestureService,
+    type: T,
+    callback: (event: GestureEventMap[T]) => void
+): (() => void) => {
+    if (type === 'pinch') {
+        return gestureService.on('pinch', callback as (event: PinchGestureEvent) => void);
+    }
+    if (type === 'swipe') {
+        return gestureService.on('swipe', callback as (event: SwipeGestureEvent) => void);
+    }
+    return gestureService.on('longpress', callback as (event: LongPressGestureEvent) => void);
+};
+
 export const useGesture = <T extends GestureType>(
     type: T,
     callback: (event: GestureEventMap[T]) => void,
@@ -73,7 +87,7 @@ export const useGesture = <T extends GestureType>(
                     return;
                 }
 
-                off = gestureService.on(type, (event: GestureEventMap[T]) => {
+                off = subscribeToGesture(gestureService, type, (event: GestureEventMap[T]) => {
                     callbackRef.current(event);
                 });
                 detach = gestureService.attach(document);

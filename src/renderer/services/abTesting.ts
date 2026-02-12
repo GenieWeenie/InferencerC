@@ -198,9 +198,12 @@ const sanitizeMetrics = (value: unknown): ABTestMetrics | undefined => {
         totalTokens: value.totalTokens,
         successRate: value.successRate,
         qualityScores: isRecord(value.qualityScores)
-            ? Object.fromEntries(
-                Object.entries(value.qualityScores).filter(([, score]) => typeof score === 'number' && Number.isFinite(score))
-            )
+            ? Object.entries(value.qualityScores).reduce<Record<string, number>>((acc, [key, score]) => {
+                if (typeof score === 'number' && Number.isFinite(score)) {
+                    acc[key] = score;
+                }
+                return acc;
+            }, {})
             : undefined,
     };
 };

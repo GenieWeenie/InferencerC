@@ -603,8 +603,8 @@ const Settings: React.FC = () => {
         toast.success('Notion configuration saved securely');
     };
 
-    const handleSelectTheme = (themeId: ThemeType) => {
-        themeService.setTheme(themeId);
+    const handleSelectTheme = (themeId: string) => {
+        themeService.setTheme(themeId as ThemeType);
         setCurrentTheme(themeService.getCurrentTheme());
     };
 

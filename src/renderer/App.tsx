@@ -7,7 +7,7 @@ import { MessageSquare, FolderOpen, Settings as SettingsIcon, Hexagon, Zap, Layo
 import type { LucideIcon } from 'lucide-react';
 
 // Lazy load heavy pages
-function lazyWithRetry<T extends React.ComponentType<object>>(
+function lazyWithRetry<T extends React.ComponentType<any>>(
   importFn: () => Promise<{ default: T }>,
   key: string
 ) {

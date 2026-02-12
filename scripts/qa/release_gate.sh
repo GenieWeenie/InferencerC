@@ -15,6 +15,8 @@ run() {
 cd "$ROOT_DIR"
 
 run npm test -- --runInBand
+run npm run lint
+run npm run typecheck
 run npm run build
 run npm run qa:smoke:ui
 

@@ -93,7 +93,7 @@ const ChatDiagnosticsPopover = React.forwardRef<HTMLDivElement, ChatDiagnosticsP
                 <div className="flex items-center justify-between">
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Dev Perf (Last Send)</p>
                     <div className="flex items-center gap-2">
-                        {activePerfBenchmark && (
+                        {Boolean(activePerfBenchmark) && (
                             <span className="text-[10px] text-cyan-300 animate-pulse">Measuring...</span>
                         )}
                         {recentPerfBenchmarksCount > 0 && (

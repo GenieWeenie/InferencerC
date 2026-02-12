@@ -61,11 +61,11 @@ const sanitizeStoredBenchmark = (entry: unknown): ChatPerfSample | null => {
     }
 
     return {
-        timestamp: Math.max(0, candidate.timestamp),
-        modelId: candidate.modelId,
-        mode: candidate.mode,
-        inputChars: Math.max(0, candidate.inputChars),
-        inputToRenderMs: Math.max(0, candidate.inputToRenderMs),
+        timestamp: Math.max(0, candidate.timestamp as number),
+        modelId: candidate.modelId as string,
+        mode: candidate.mode as ChatPerfMode,
+        inputChars: Math.max(0, candidate.inputChars as number),
+        inputToRenderMs: Math.max(0, candidate.inputToRenderMs as number),
         inputToFirstTokenMs: (
             typeof candidate.inputToFirstTokenMs === 'number'
             && Number.isFinite(candidate.inputToFirstTokenMs)

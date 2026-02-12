@@ -355,7 +355,9 @@ export class AIAgentsService {
 
         // Auto-execute if agent is active
         if (agent.isActive) {
-            this.executeTask(agentId, newTask.id);
+            void this.executeTask(agentId, newTask.id).catch(() => {
+                // Task will remain in queue if no executor is provided.
+            });
         }
 
         return newTask;
@@ -367,8 +369,11 @@ export class AIAgentsService {
     async executeTask(
         agentId: string,
         taskId: string,
-        executePrompt: (prompt: string, systemPrompt?: string) => Promise<{ content: string }>
+        executePrompt?: (prompt: string, systemPrompt?: string) => Promise<{ content: string }>
     ): Promise<AgentExecution> {
+        if (!executePrompt) {
+            throw new Error('No task executor provided');
+        }
         const agent = this.agents.get(agentId);
         if (!agent) {
             throw new Error(`Agent ${agentId} not found`);

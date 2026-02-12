@@ -477,7 +477,7 @@ class EnterpriseComplianceService {
             category: 'enterprise.retention',
             action: 'policy.updated',
             result: 'success',
-            details: updated,
+            details: updated as unknown as Record<string, unknown>,
         });
         this.notify();
         return updated;

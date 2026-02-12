@@ -3,7 +3,7 @@ import type { ChatRequestMessage } from './chatRequestMessageTypes';
 export interface ToolDefinition {
     name: string;
     description: string;
-    parameters: Record<string, unknown>;
+    parameters: unknown;
 }
 
 interface BuildChatCompletionRequestParams {
@@ -60,10 +60,13 @@ export const buildChatCompletionRequest = ({
 
     if (responseFormat === 'json_object') {
         const systemMessage = requestMessages.find(
-            (message) => message.role === 'system' && typeof message.content === 'string'
+            (message) => message.role === 'system'
         );
-        if (systemMessage && !systemMessage.content.toLowerCase().includes('json')) {
-            systemMessage.content += ' You are a helpful assistant designed to output JSON.';
+        if (systemMessage && typeof systemMessage.content === 'string') {
+            const systemContent = systemMessage.content;
+            if (!systemContent.toLowerCase().includes('json')) {
+                systemMessage.content = `${systemContent} You are a helpful assistant designed to output JSON.`;
+            }
         }
     }
 

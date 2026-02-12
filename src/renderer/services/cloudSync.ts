@@ -66,7 +66,7 @@ const parseChatSession = (raw: string): ChatSession | null => {
         return null;
     }
     return {
-        ...(parsed as ChatSession),
+        ...(parsed as unknown as ChatSession),
         id: parsed.id.trim(),
         title: parsed.title.trim() || 'Recovered Conversation',
         modelId: parsed.modelId.trim(),
@@ -80,8 +80,10 @@ type EncryptedPayload = { v: number; iv: string; ct: string };
 const parseEncryptedPayload = (ciphertext: string): EncryptedPayload | null => {
     const parsed = parseJson(ciphertext);
     if (!isRecord(parsed)) return null;
-    if (!Number.isInteger(parsed.v)
-        || parsed.v <= 0
+    const version = typeof parsed.v === 'number' ? parsed.v : null;
+    if (version === null
+        || !Number.isInteger(version)
+        || version <= 0
         || typeof parsed.iv !== 'string'
         || typeof parsed.ct !== 'string') {
         return null;
@@ -91,7 +93,7 @@ const parseEncryptedPayload = (ciphertext: string): EncryptedPayload | null => {
     if (!iv || !ct) {
         return null;
     }
-    return { v: parsed.v, iv, ct };
+    return { v: version, iv, ct };
 };
 
 const sanitizeStringArray = (value: unknown): string[] => {
@@ -753,6 +755,10 @@ class CloudSyncService {
         return bytes;
     }
 
+    private toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+        return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    }
+
     private async sha256Base64(text: string): Promise<string> {
         const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
         return this.base64Encode(new Uint8Array(digest));
@@ -775,7 +781,7 @@ class CloudSyncService {
             {
                 name: 'PBKDF2',
                 hash: 'SHA-256',
-                salt: this.base64Decode(this.config.encryptionSalt),
+                salt: this.toArrayBuffer(this.base64Decode(this.config.encryptionSalt)),
                 iterations: 250000,
             },
             keyMaterial,
@@ -792,7 +798,7 @@ class CloudSyncService {
         const key = await this.deriveEncryptionKey(passphrase);
         const iv = crypto.getRandomValues(new Uint8Array(12));
         const encrypted = await crypto.subtle.encrypt(
-            { name: 'AES-GCM', iv },
+            { name: 'AES-GCM', iv: this.toArrayBuffer(iv) },
             key,
             new TextEncoder().encode(plaintext)
         );
@@ -814,10 +820,10 @@ class CloudSyncService {
         const decrypted = await crypto.subtle.decrypt(
             {
                 name: 'AES-GCM',
-                iv: this.base64Decode(parsed.iv),
+                iv: this.toArrayBuffer(this.base64Decode(parsed.iv)),
             },
             key,
-            this.base64Decode(parsed.ct)
+            this.toArrayBuffer(this.base64Decode(parsed.ct))
         );
 
         return new TextDecoder().decode(decrypted);

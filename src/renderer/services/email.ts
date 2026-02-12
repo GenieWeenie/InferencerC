@@ -81,7 +81,7 @@ class EmailService {
         let smtpConfig: SMTPConfig | undefined;
         if (isRecord(value.smtpConfig) && isRecord(value.smtpConfig.auth)) {
             const smtp = value.smtpConfig;
-            const auth = smtp.auth;
+            const auth = smtp.auth as Record<string, unknown>;
             const host = sanitizeNonEmptyString(smtp.host);
             const port = sanitizePort(smtp.port);
             const user = sanitizeNonEmptyString(auth.user);

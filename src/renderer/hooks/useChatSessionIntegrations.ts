@@ -5,7 +5,7 @@ import { HistoryService } from '../services/history';
 interface UseChatSessionIntegrationsParams {
     sessionId: string;
     history: Array<{ role: string; content?: string }>;
-    setSelectedCode: React.Dispatch<React.SetStateAction<{ code: string; language: string } | null>>;
+    setSelectedCode: React.Dispatch<React.SetStateAction<{ code: string; language?: string } | null>>;
     setShowCodeIntegration: React.Dispatch<React.SetStateAction<boolean>>;
     setShowExportDialog: React.Dispatch<React.SetStateAction<boolean>>;
     setShowCalendarSchedule: React.Dispatch<React.SetStateAction<boolean>>;

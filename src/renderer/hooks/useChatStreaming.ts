@@ -331,6 +331,8 @@ export const useChatStreaming = ({
 
             updateMessageContent(targetIndex, `Error: ${errorMessage}`, false);
             toast.error(errorMessage);
+            // Preserve model-attribution analytics even when generation fails upstream.
+            trackAnalyticsMessage(sessionId, modelId, 0);
             logComplianceEvent({
                 category: 'chat.message',
                 action: 'generation.failed',

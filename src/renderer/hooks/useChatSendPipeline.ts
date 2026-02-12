@@ -1,4 +1,5 @@
 import React from 'react';
+import type { ProjectContext } from '../services/projectContext';
 
 interface ModelLike {
     id: string;
@@ -8,10 +9,6 @@ interface ModelLike {
 interface SessionLike {
     id: string;
     title?: string;
-}
-
-interface ProjectContextLike {
-    [key: string]: unknown;
 }
 
 interface PromptVariableServiceLike {
@@ -34,18 +31,23 @@ interface ProjectContextServiceLike {
     getContextSummary: (maxFiles: number) => string;
 }
 
+interface SendMessageOptions {
+    excludedMessageIndices?: number[];
+    contextSummary?: string;
+}
+
 interface UseChatSendPipelineParams {
     input: string;
     setInput: React.Dispatch<React.SetStateAction<string>>;
-    projectContext: ProjectContextLike | null;
+    projectContext: ProjectContext | null;
     includeContextInMessages: boolean;
-    sendMessage: (options?: unknown) => void;
+    sendMessage: (options?: SendMessageOptions) => void | Promise<void>;
     currentModel: string;
     availableModels: ModelLike[];
     sessionId: string;
     savedSessions: SessionLike[];
     historyLength: number;
-    buildContextSendOptions: (pendingInput: string) => unknown;
+    buildContextSendOptions: (pendingInput: string) => SendMessageOptions;
     beginPerfBenchmark: (inputText: string) => void;
     loadPromptVariableService: () => Promise<PromptVariableServiceLike>;
     loadProjectContextService: () => Promise<ProjectContextServiceLike>;

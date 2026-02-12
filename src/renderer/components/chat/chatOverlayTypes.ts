@@ -9,6 +9,7 @@ import type { UsageStatsRecord } from '../../services/analyticsStore';
 import type { Tutorial } from '../../services/onboarding';
 import type { ConversationTemplate } from '../../services/templates';
 import type { ConversationTreeManager } from '../../lib/conversationTree';
+import type { MediaAttachment } from '../../services/multiModalAI';
 import type { LogEntry } from '../RequestResponseLog';
 
 export interface SelectedCodeState {
@@ -101,7 +102,7 @@ export interface ChatOverlaySlotsProps {
     setShowBCI: React.Dispatch<React.SetStateAction<boolean>>;
     showMultiModal: boolean;
     setShowMultiModal: React.Dispatch<React.SetStateAction<boolean>>;
-    onSendMultiModal: (media: unknown, text: string) => Promise<void>;
+    onSendMultiModal: (media: MediaAttachment[], text?: string) => Promise<void>;
     showCollaboration: boolean;
     setShowCollaboration: React.Dispatch<React.SetStateAction<boolean>>;
     showCloudSync: boolean;

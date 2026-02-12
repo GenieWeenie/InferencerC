@@ -1,6 +1,6 @@
 import React from 'react';
 import { Clock, X } from 'lucide-react';
-import type { ChatSession } from '../../services/history';
+import type { ChatSession } from '../../../shared/types';
 import { SidebarHistory } from './chatLazyPanels';
 
 interface ChatHistorySidebarProps {

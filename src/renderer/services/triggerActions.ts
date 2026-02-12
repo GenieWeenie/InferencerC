@@ -421,7 +421,7 @@ export class TriggerActionsService {
                             sessionId: session?.id,
                             title: session?.title,
                             messageCount: session?.messages?.length || 0,
-                            ...action.config.data,
+                            ...(isRecord(action.config.data) ? action.config.data : {}),
                         }),
                     });
                 }

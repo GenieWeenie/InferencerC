@@ -79,7 +79,6 @@ describe('search index benchmark report', () => {
       warmupRuns: 5,
     });
 
-    // eslint-disable-next-line no-console
     console.table(
       suite.samples.map((sample) => ({
         queryLength: sample.queryLength,
@@ -95,7 +94,6 @@ describe('search index benchmark report', () => {
         storageKey: 'search_index_benchmark_reports_bench',
         label: 'npm benchmark:search-index',
       });
-      // eslint-disable-next-line no-console
       console.log(`Saved benchmark snapshots: ${persisted.length}`);
     }
 

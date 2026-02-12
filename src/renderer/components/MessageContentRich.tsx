@@ -500,9 +500,16 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({
             ]);
 
             if (!cancelled) {
+                const themeSource = syntaxThemeModule as unknown as {
+                    vscDarkPlus?: Record<string, React.CSSProperties>;
+                    default?: {
+                        vscDarkPlus?: Record<string, React.CSSProperties>;
+                    };
+                };
+                const syntaxTheme = themeSource.vscDarkPlus ?? themeSource.default?.vscDarkPlus ?? {};
                 setSyntaxHighlighterBundle({
                     component: syntaxHighlighterModule.default,
-                    style: syntaxThemeModule.vscDarkPlus,
+                    style: syntaxTheme,
                 });
             }
         })().catch((error) => {

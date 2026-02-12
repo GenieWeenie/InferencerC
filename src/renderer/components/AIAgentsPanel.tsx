@@ -14,6 +14,16 @@ import {
 } from '../services/aiAgents';
 import { toast } from 'sonner';
 
+type CreateAgentInput = {
+    name: string;
+    description: string;
+    role: string;
+    capabilities: string[];
+    model: string;
+    systemPrompt: string;
+    isActive: boolean;
+};
+
 interface AIAgentsPanelProps {
     isOpen: boolean;
     onClose: () => void;
@@ -28,13 +38,14 @@ export const AIAgentsPanel: React.FC<AIAgentsPanelProps> = ({
     const [agents, setAgents] = useState<AIAgent[]>([]);
     const [selectedAgent, setSelectedAgent] = useState<AIAgent | null>(null);
     const [showCreateAgent, setShowCreateAgent] = useState(false);
-    const [newAgent, setNewAgent] = useState({
+    const [newAgent, setNewAgent] = useState<CreateAgentInput>({
         name: '',
         description: '',
         role: '',
-        capabilities: [] as string[],
+        capabilities: [],
         model: '',
         systemPrompt: '',
+        isActive: true,
     });
 
     useEffect(() => {
@@ -59,6 +70,7 @@ export const AIAgentsPanel: React.FC<AIAgentsPanelProps> = ({
             capabilities: [],
             model: '',
             systemPrompt: '',
+            isActive: true,
         });
         toast.success('Agent created!');
     };
@@ -178,15 +190,8 @@ export const AIAgentsPanel: React.FC<AIAgentsPanelProps> = ({
 
 // Create Agent Form Component
 const CreateAgentForm: React.FC<{
-    agent: {
-        name: string;
-        description: string;
-        role: string;
-        capabilities: string[];
-        model: string;
-        systemPrompt: string;
-    };
-    onChange: (agent: typeof agent) => void;
+    agent: CreateAgentInput;
+    onChange: (agent: CreateAgentInput) => void;
     onSave: () => void;
     onCancel: () => void;
 }> = ({ agent, onChange, onSave, onCancel }) => (

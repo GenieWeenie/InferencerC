@@ -433,7 +433,7 @@ export class RagDocumentChatService {
 
     private getEmbedding(text: string): number[] {
         const normalized = text.toLowerCase().trim();
-        const cacheKey = this.hashString(normalized);
+        const cacheKey = `h:${this.hashString(normalized)}`;
         const cached = this.embeddingCache.get(cacheKey);
         if (cached) {
             this.cacheHits += 1;

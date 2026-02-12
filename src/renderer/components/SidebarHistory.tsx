@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Clock, MessageSquare, Trash2, Calendar, Archive, Pin, Edit2, Search, X, Check, Filter } from 'lucide-react';
-import { ChatSession } from '../services/history';
+import type { ChatMessage, ChatSession } from '../../shared/types';
 import SkeletonLoader from './SkeletonLoader';
 import { useSwipeNavigation } from '../hooks/useGestures';
 
@@ -79,7 +79,7 @@ const SidebarHistory: React.FC<SidebarHistoryProps> = ({ sessions, currentSessio
 
                 // Match message content
                 if (session.messages && Array.isArray(session.messages)) {
-                    return session.messages.some(msg =>
+                    return session.messages.some((msg: ChatMessage) =>
                         msg.content && msg.content.toLowerCase().includes(query)
                     );
                 }

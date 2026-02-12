@@ -96,24 +96,25 @@ const sanitizeKeywords = (value: unknown): string[] => {
 };
 
 const sanitizeTopic = (value: unknown): Topic | null => {
-    const weight = isFiniteNumber(isRecord(value) ? value.weight : null)
-        ? clamp(value.weight, 0, 1)
+    const record = isRecord(value) ? value : null;
+    const weight = isFiniteNumber(record ? record.weight : null)
+        ? clamp(record!.weight as number, 0, 1)
         : null;
-    const frequency = isFiniteNumber(isRecord(value) ? value.frequency : null)
-        ? Math.max(0, Math.floor(value.frequency))
+    const frequency = isFiniteNumber(record ? record.frequency : null)
+        ? Math.max(0, Math.floor(record!.frequency as number))
         : null;
 
-    if (!isRecord(value)
-        || typeof value.id !== 'string'
-        || typeof value.name !== 'string'
+    if (!record
+        || typeof record.id !== 'string'
+        || typeof record.name !== 'string'
         || weight === null
-        || !Array.isArray(value.messageIndices)
+        || !Array.isArray(record.messageIndices)
         || frequency === null) {
         return null;
     }
 
-    const id = value.id.trim();
-    const name = value.name.trim();
+    const id = record.id.trim();
+    const name = record.name.trim();
     if (!id || !name) {
         return null;
     }
@@ -121,9 +122,9 @@ const sanitizeTopic = (value: unknown): Topic | null => {
     return {
         id,
         name,
-        keywords: sanitizeKeywords(value.keywords),
+        keywords: sanitizeKeywords(record.keywords),
         weight,
-        messageIndices: sanitizeNumberArray(value.messageIndices),
+        messageIndices: sanitizeNumberArray(record.messageIndices),
         frequency,
     };
 };

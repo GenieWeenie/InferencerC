@@ -273,8 +273,8 @@ export const buildChatFeatureOverlaySlots = ({
                 conversations={savedSessions.map((session) => ({
                     id: session.id,
                     title: session.title,
-                    messageCount: session.messageCount || 0,
-                    lastActivity: session.lastMessageTime || session.createdAt,
+                    messageCount: session.messages.length,
+                    lastActivity: session.lastModified,
                     pinned: session.pinned,
                     archived: false,
                     category: undefined,
@@ -310,7 +310,9 @@ export const buildChatFeatureOverlaySlots = ({
             <MultiModalAIPanel
                 isOpen={showMultiModal}
                 onClose={() => setShowMultiModal(false)}
-                onSend={onSendMultiModal}
+                onSend={(media, text) => {
+                    void onSendMultiModal(media, text);
+                }}
             />
         </React.Suspense>
     ) : null,

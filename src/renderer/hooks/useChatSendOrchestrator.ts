@@ -22,10 +22,26 @@ export interface TextAttachment {
 export interface ImageAttachment {
     id: string;
     name: string;
-    mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+    mimeType: string;
     base64: string;
     thumbnailUrl: string;
 }
+
+type SupportedImageMimeType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+
+const SUPPORTED_IMAGE_MIME_TYPES = new Set<SupportedImageMimeType>([
+    'image/png',
+    'image/jpeg',
+    'image/gif',
+    'image/webp',
+]);
+
+const toSupportedImageMimeType = (mimeType: string): SupportedImageMimeType => {
+    if (SUPPORTED_IMAGE_MIME_TYPES.has(mimeType as SupportedImageMimeType)) {
+        return mimeType as SupportedImageMimeType;
+    }
+    return 'image/png';
+};
 
 interface UseChatSendOrchestratorParams {
     input: string;
@@ -210,7 +226,7 @@ export const useChatSendOrchestrator = ({
             images: imageAttachments.map((image) => ({
                 id: image.id,
                 name: image.name,
-                mimeType: image.mimeType,
+                mimeType: toSupportedImageMimeType(image.mimeType),
                 base64: image.base64,
                 thumbnailUrl: image.thumbnailUrl,
             })),

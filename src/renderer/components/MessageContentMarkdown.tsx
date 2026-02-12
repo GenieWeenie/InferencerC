@@ -1,13 +1,16 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
-import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 interface MessageContentMarkdownProps {
     content: string;
 }
 
-type MarkdownCodeComponentProps = Parameters<NonNullable<Components['code']>>[0];
+type MarkdownCodeComponentProps = {
+    inline?: boolean;
+    className?: string;
+    children?: React.ReactNode;
+} & React.HTMLAttributes<HTMLElement>;
 
 const MessageContentMarkdown: React.FC<MessageContentMarkdownProps> = ({ content }) => (
     <ReactMarkdown

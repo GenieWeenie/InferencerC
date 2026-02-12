@@ -31,6 +31,7 @@ RELEASE_DATE="$(date -u +"%Y-%m-%d %H:%M UTC")"
   echo "- [x] QA release gate passed (tests + build + UI smoke)"
   echo "- [x] Windows artifact build completed"
   echo "- [x] macOS artifact build completed"
+  echo "- [x] SHA-256 checksum manifest generated for release artifacts"
   echo "- [x] GitHub release assets attached from CI artifacts"
   echo
   echo "## Changes"

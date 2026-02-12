@@ -237,7 +237,7 @@ export class GitIntegrationService {
                     content: code,
                     message: commitMessage,
                 });
-                commit.success = result.success;
+                commit.success = Boolean(result.success);
                 commit.error = result.error;
             } else {
                 // Mock commit for development

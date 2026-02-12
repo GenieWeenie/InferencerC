@@ -24,7 +24,7 @@ export const ContextualHelpTooltip: React.FC<ContextualHelpTooltipProps> = ({
     const [isVisible, setIsVisible] = useState(false);
     const [position, setPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
     const tooltipRef = useRef<HTMLDivElement>(null);
-    const timeoutRef = useRef<NodeJS.Timeout>();
+    const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         const updatePosition = () => {
