@@ -3,18 +3,27 @@
  */
 
 import {
+    buildOpenRouterDailySpend,
     buildOpenRouterBillingCsv,
     buildOpenRouterBillingReconciliation,
+    buildOpenRouterModelCostBreakdown,
+    clearOpenRouterActivityCache,
     clearOpenRouterBillingCache,
+    fetchOpenRouterActivityWithCache,
     fetchOpenRouterAuthoritativeBillingWithCache,
     isCachedBillingFresh,
+    isCachedActivityFresh,
+    loadOpenRouterActivityCache,
     loadOpenRouterBillingCache,
     OpenRouterBillingError,
     fetchOpenRouterAuthoritativeBilling,
+    parseOpenRouterActivityCache,
+    parseOpenRouterActivityPayload,
     paginateOpenRouterBillingHistory,
     parseOpenRouterCreditsPayload,
     parseOpenRouterBillingCache,
     parseOpenRouterKeyPayload,
+    persistOpenRouterActivityCache,
     persistOpenRouterBillingCache,
     resolveOpenRouterAuthoritativeBilling,
 } from '../openRouterBilling';
@@ -52,6 +61,73 @@ describe('openRouterBilling', () => {
             limit: 20,
             limitRemaining: 14.4,
         });
+    });
+
+    it('parses authoritative activity payload rows and aggregates duplicate model-day records', () => {
+        const rows = parseOpenRouterActivityPayload({
+            data: [
+                { date: '2026-02-12', model: 'openrouter/model-a', usage: 1.2, requests: 2, prompt_tokens: 100, completion_tokens: 120 },
+                { date: '2026-02-12T09:10:00.000Z', model: 'openrouter/model-a', usage: 0.3, requests: 1, prompt_tokens: 20, completion_tokens: 40 },
+                { date: '2026-02-13', model_permaslug: 'openrouter/model-b', usage: '2.5', requests: '3' },
+            ],
+        });
+
+        expect(rows).toEqual([
+            {
+                date: '2026-02-12',
+                model: 'openrouter/model-a',
+                usageUsd: 1.5,
+                requests: 3,
+                promptTokens: 120,
+                completionTokens: 160,
+                reasoningTokens: 0,
+                byokUsageInferenceUsd: 0,
+            },
+            {
+                date: '2026-02-13',
+                model: 'openrouter/model-b',
+                usageUsd: 2.5,
+                requests: 3,
+                promptTokens: null,
+                completionTokens: null,
+                reasoningTokens: null,
+                byokUsageInferenceUsd: null,
+            },
+        ]);
+    });
+
+    it('builds daily spend and per-model cost breakdown from activity rows', () => {
+        const rows = [
+            { date: '2026-02-12', model: 'a', usageUsd: 1, requests: 1, promptTokens: 10, completionTokens: 20, reasoningTokens: 0, byokUsageInferenceUsd: null },
+            { date: '2026-02-12', model: 'b', usageUsd: 3, requests: 4, promptTokens: 40, completionTokens: 50, reasoningTokens: 5, byokUsageInferenceUsd: null },
+            { date: '2026-02-13', model: 'a', usageUsd: 2, requests: 2, promptTokens: 20, completionTokens: 30, reasoningTokens: 1, byokUsageInferenceUsd: null },
+        ];
+
+        expect(buildOpenRouterDailySpend(rows)).toEqual([
+            { date: '2026-02-12', usageUsd: 4 },
+            { date: '2026-02-13', usageUsd: 2 },
+        ]);
+
+        expect(buildOpenRouterModelCostBreakdown(rows)).toEqual([
+            {
+                model: 'a',
+                usageUsd: 3,
+                sharePercent: 50,
+                requests: 3,
+                promptTokens: 30,
+                completionTokens: 50,
+                reasoningTokens: 1,
+            },
+            {
+                model: 'b',
+                usageUsd: 3,
+                sharePercent: 50,
+                requests: 4,
+                promptTokens: 40,
+                completionTokens: 50,
+                reasoningTokens: 5,
+            },
+        ]);
     });
 
     it('resolves authoritative billing with stable precedence', () => {
@@ -124,6 +200,31 @@ describe('openRouterBilling', () => {
         expect(loaded.history).toHaveLength(1);
     });
 
+    it('parses and persists activity cache snapshots safely', () => {
+        const parsed = parseOpenRouterActivityCache(JSON.stringify({
+            fetchedAt: '2026-02-12T00:00:00.000Z',
+            rows: [
+                {
+                    date: '2026-02-12',
+                    model: 'openrouter/model-a',
+                    usage: 1.75,
+                    requests: 2,
+                    prompt_tokens: 100,
+                    completion_tokens: 120,
+                },
+            ],
+        }));
+
+        expect(parsed.fetchedAt).toBe('2026-02-12T00:00:00.000Z');
+        expect(parsed.rows).toHaveLength(1);
+        expect(parsed.rows[0]?.usageUsd).toBe(1.75);
+
+        persistOpenRouterActivityCache(parsed);
+        const loaded = loadOpenRouterActivityCache();
+        expect(loaded.fetchedAt).toBe('2026-02-12T00:00:00.000Z');
+        expect(loaded.rows[0]?.usageUsd).toBe(1.75);
+    });
+
     it('reuses fresh cached billing when within max age', async () => {
         persistOpenRouterBillingCache({
             latest: {
@@ -151,6 +252,26 @@ describe('openRouterBilling', () => {
         expect(result.fromCache).toBe(true);
         expect(result.billing.usedUsd).toBe(2.5);
         expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('fetches activity and reuses fresh activity cache', async () => {
+        const fetchMock = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>()
+            .mockResolvedValueOnce(createJsonResponse({
+                data: [
+                    { date: '2026-02-12', model: 'openrouter/model-a', usage: 1.2, requests: 2 },
+                ],
+            }, 200));
+        global.fetch = fetchMock as unknown as typeof fetch;
+
+        const first = await fetchOpenRouterActivityWithCache('test-key', { forceRefresh: true });
+        expect(first.fromCache).toBe(false);
+        expect(first.rows[0]?.model).toBe('openrouter/model-a');
+        expect(first.rows[0]?.usageUsd).toBe(1.2);
+
+        fetchMock.mockClear();
+        const second = await fetchOpenRouterActivityWithCache('test-key');
+        expect(second.fromCache).toBe(true);
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('paginates history with latest page first', () => {
@@ -185,6 +306,27 @@ describe('openRouterBilling', () => {
         expect(loadOpenRouterBillingCache().latest).toBeNull();
     });
 
+    it('clears activity cache entries explicitly', () => {
+        persistOpenRouterActivityCache({
+            fetchedAt: '2026-02-12T00:00:00.000Z',
+            rows: [
+                {
+                    date: '2026-02-12',
+                    model: 'openrouter/model-a',
+                    usageUsd: 1,
+                    requests: 1,
+                    promptTokens: 10,
+                    completionTokens: 20,
+                    reasoningTokens: 0,
+                    byokUsageInferenceUsd: null,
+                },
+            ],
+        });
+        expect(loadOpenRouterActivityCache().rows).toHaveLength(1);
+        clearOpenRouterActivityCache();
+        expect(loadOpenRouterActivityCache().rows).toHaveLength(0);
+    });
+
     it('validates cached freshness windows', () => {
         expect(isCachedBillingFresh(null)).toBe(false);
         expect(isCachedBillingFresh({
@@ -194,6 +336,8 @@ describe('openRouterBilling', () => {
             source: 'credits',
             fetchedAt: new Date().toISOString(),
         }, 10_000)).toBe(true);
+        expect(isCachedActivityFresh(new Date().toISOString(), 10_000)).toBe(true);
+        expect(isCachedActivityFresh(null, 10_000)).toBe(false);
     });
 
     it('builds reconciliation metrics from local vs authoritative usage', () => {

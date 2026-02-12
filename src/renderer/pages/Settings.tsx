@@ -32,12 +32,18 @@ import { onboardingService } from '../services/onboarding';
 import { credentialService } from '../services/credentials';
 import { readAnalyticsUsageStats } from '../services/analyticsStore';
 import {
+    buildOpenRouterDailySpend,
     buildOpenRouterBillingCsv,
     buildOpenRouterBillingReconciliation,
+    buildOpenRouterModelCostBreakdown,
+    clearOpenRouterActivityCache,
     clearOpenRouterBillingCache,
+    fetchOpenRouterActivityWithCache,
     fetchOpenRouterAuthoritativeBillingWithCache,
+    loadOpenRouterActivityCache,
     loadOpenRouterBillingCache,
     paginateOpenRouterBillingHistory,
+    type OpenRouterActivityRow,
     type OpenRouterAuthoritativeBilling,
 } from '../services/openRouterBilling';
 import {
@@ -97,6 +103,14 @@ const formatTrendLabel = (isoDate: string): string => {
         return 'Unknown';
     }
     return parsedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+const formatDayLabel = (isoDate: string): string => {
+    const parsedDate = new Date(isoDate);
+    if (Number.isNaN(parsedDate.getTime())) {
+        return 'Unknown';
+    }
+    return parsedDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
 };
 
 const readStoredRefreshSeconds = (): number => {
@@ -164,9 +178,12 @@ const Settings: React.FC = () => {
     const [authoritativeRefreshSeconds, setAuthoritativeRefreshSeconds] = useState(readStoredRefreshSeconds);
     const [authoritativeBilling, setAuthoritativeBilling] = useState<OpenRouterAuthoritativeBilling | null>(null);
     const [authoritativeBillingHistory, setAuthoritativeBillingHistory] = useState<OpenRouterAuthoritativeBilling[]>([]);
+    const [authoritativeActivityRows, setAuthoritativeActivityRows] = useState<OpenRouterActivityRow[]>([]);
+    const [authoritativeActivityFetchedAt, setAuthoritativeActivityFetchedAt] = useState<string | null>(null);
     const [authoritativeBillingHistoryPageIndex, setAuthoritativeBillingHistoryPageIndex] = useState(0);
     const [authoritativeBillingLoading, setAuthoritativeBillingLoading] = useState(false);
     const [authoritativeBillingError, setAuthoritativeBillingError] = useState<string | null>(null);
+    const [authoritativeActivityError, setAuthoritativeActivityError] = useState<string | null>(null);
 
     // Active Tab
     const [activeTab, setActiveTab] = useState<SettingsTabId>('api');
@@ -250,6 +267,42 @@ const Settings: React.FC = () => {
         });
     }, [pagedAuthoritativeHistory.items]);
 
+    const authoritativeDailySpend = React.useMemo(
+        () => buildOpenRouterDailySpend(authoritativeActivityRows),
+        [authoritativeActivityRows]
+    );
+
+    const authoritativeDailySpendWindow = React.useMemo(
+        () => authoritativeDailySpend.slice(-30),
+        [authoritativeDailySpend]
+    );
+
+    const authoritativeDailySpendBars = React.useMemo(() => {
+        const values = authoritativeDailySpendWindow.map((point) => point.usageUsd);
+        const min = values.length > 0 ? Math.min(...values) : 0;
+        const max = values.length > 0 ? Math.max(...values) : 0;
+        const range = max - min;
+
+        return authoritativeDailySpendWindow.map((point) => {
+            if (range <= 0) {
+                return {
+                    point,
+                    heightPercent: point.usageUsd > 0 ? 72 : 8,
+                };
+            }
+            const normalized = (point.usageUsd - min) / range;
+            return {
+                point,
+                heightPercent: Math.max(10, Math.round(normalized * 100)),
+            };
+        });
+    }, [authoritativeDailySpendWindow]);
+
+    const authoritativeModelBreakdown = React.useMemo(
+        () => buildOpenRouterModelCostBreakdown(authoritativeActivityRows).slice(0, 12),
+        [authoritativeActivityRows]
+    );
+
     const authoritativeCacheAgeMs = React.useMemo(() => {
         if (!authoritativeBilling) {
             return null;
@@ -264,6 +317,21 @@ const Settings: React.FC = () => {
 
     const authoritativeBillingStale = authoritativeCacheAgeMs !== null
         && authoritativeCacheAgeMs > AUTHORITATIVE_BILLING_CACHE_MAX_AGE_MS;
+
+    const authoritativeActivityCacheAgeMs = React.useMemo(() => {
+        if (!authoritativeActivityFetchedAt) {
+            return null;
+        }
+        const parsed = new Date(authoritativeActivityFetchedAt).getTime();
+        if (!Number.isFinite(parsed)) {
+            return null;
+        }
+        const ageMs = Date.now() - parsed;
+        return ageMs >= 0 ? ageMs : null;
+    }, [authoritativeActivityFetchedAt]);
+
+    const authoritativeActivityStale = authoritativeActivityCacheAgeMs !== null
+        && authoritativeActivityCacheAgeMs > AUTHORITATIVE_BILLING_CACHE_MAX_AGE_MS;
 
     const authoritativeReconciliation = React.useMemo(() => (
         buildOpenRouterBillingReconciliation(usageStats.estimatedCost, authoritativeBilling)
@@ -287,39 +355,66 @@ const Settings: React.FC = () => {
 
     const hydrateAuthoritativeBillingFromCache = React.useCallback(() => {
         const cached = loadOpenRouterBillingCache();
+        const activityCached = loadOpenRouterActivityCache();
         setAuthoritativeBilling(cached.latest);
         setAuthoritativeBillingHistory(cached.history);
+        setAuthoritativeActivityRows(activityCached.rows);
+        setAuthoritativeActivityFetchedAt(activityCached.fetchedAt);
     }, []);
 
     const refreshAuthoritativeBilling = React.useCallback(async (options?: { forceRefresh?: boolean }) => {
         if (!authoritativeBillingEnabled) {
             setAuthoritativeBillingError(null);
+            setAuthoritativeActivityError(null);
             return;
         }
 
         const apiKey = await credentialService.getOpenRouterApiKey();
         if (!apiKey || apiKey.trim().length === 0) {
             setAuthoritativeBilling(null);
+            setAuthoritativeActivityRows([]);
+            setAuthoritativeActivityFetchedAt(null);
             setAuthoritativeBillingError('Add an OpenRouter API key in API Keys to fetch authoritative billing.');
+            setAuthoritativeActivityError('Add an OpenRouter API key in API Keys to fetch OpenRouter activity.');
             return;
         }
 
         setAuthoritativeBillingLoading(true);
         setAuthoritativeBillingError(null);
+        setAuthoritativeActivityError(null);
 
-        try {
-            const result = await fetchOpenRouterAuthoritativeBillingWithCache(apiKey, {
+        const [billingResult, activityResult] = await Promise.allSettled([
+            fetchOpenRouterAuthoritativeBillingWithCache(apiKey, {
                 forceRefresh: options?.forceRefresh === true,
                 maxAgeMs: AUTHORITATIVE_BILLING_CACHE_MAX_AGE_MS,
-            });
-            setAuthoritativeBilling(result.billing);
-            setAuthoritativeBillingHistory(result.history);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to fetch OpenRouter authoritative billing.';
+            }),
+            fetchOpenRouterActivityWithCache(apiKey, {
+                forceRefresh: options?.forceRefresh === true,
+                maxAgeMs: AUTHORITATIVE_BILLING_CACHE_MAX_AGE_MS,
+            }),
+        ]);
+
+        if (billingResult.status === 'fulfilled') {
+            setAuthoritativeBilling(billingResult.value.billing);
+            setAuthoritativeBillingHistory(billingResult.value.history);
+        } else {
+            const message = billingResult.reason instanceof Error
+                ? billingResult.reason.message
+                : 'Failed to fetch OpenRouter authoritative billing.';
             setAuthoritativeBillingError(message);
-        } finally {
-            setAuthoritativeBillingLoading(false);
         }
+
+        if (activityResult.status === 'fulfilled') {
+            setAuthoritativeActivityRows(activityResult.value.rows);
+            setAuthoritativeActivityFetchedAt(activityResult.value.fetchedAt);
+        } else {
+            const message = activityResult.reason instanceof Error
+                ? activityResult.reason.message
+                : 'Failed to fetch OpenRouter activity.';
+            setAuthoritativeActivityError(message);
+        }
+
+        setAuthoritativeBillingLoading(false);
     }, [authoritativeBillingEnabled]);
 
     useEffect(() => {
@@ -426,12 +521,16 @@ const Settings: React.FC = () => {
         if (!openRouterKey.trim()) {
             await credentialService.clearOpenRouterApiKey();
             clearOpenRouterBillingCache();
+            clearOpenRouterActivityCache();
             toast.success('OpenRouter API key cleared');
             if (authoritativeBillingEnabled) {
                 setAuthoritativeBilling(null);
                 setAuthoritativeBillingHistory([]);
+                setAuthoritativeActivityRows([]);
+                setAuthoritativeActivityFetchedAt(null);
                 setAuthoritativeBillingHistoryPageIndex(0);
                 setAuthoritativeBillingError('Add an OpenRouter API key in API Keys to fetch authoritative billing.');
+                setAuthoritativeActivityError('Add an OpenRouter API key in API Keys to fetch OpenRouter activity.');
             }
             return;
         }
@@ -450,8 +549,11 @@ const Settings: React.FC = () => {
         if (!enabled) {
             setAuthoritativeBillingLoading(false);
             setAuthoritativeBillingError(null);
+            setAuthoritativeActivityError(null);
             setAuthoritativeBilling(null);
             setAuthoritativeBillingHistory([]);
+            setAuthoritativeActivityRows([]);
+            setAuthoritativeActivityFetchedAt(null);
             setAuthoritativeBillingHistoryPageIndex(0);
             return;
         }
@@ -612,7 +714,7 @@ const Settings: React.FC = () => {
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
                 {activeTab === 'plugins' && (
-                    <div className="max-w-3xl space-y-6 animate-in fade-in slide-in-from-right-2">
+                    <div className="max-w-5xl space-y-6 animate-in fade-in slide-in-from-right-2">
                         <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-lg">
                             <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
                                 <Plug className="text-primary" size={22} />
@@ -829,6 +931,11 @@ const Settings: React.FC = () => {
                                                 Stale cache
                                             </span>
                                         )}
+                                        {authoritativeActivityStale && (
+                                            <span className="rounded-full border border-amber-600/70 bg-amber-500/20 px-2 py-0.5 text-[11px] font-medium text-amber-300">
+                                                Activity stale
+                                            </span>
+                                        )}
                                         {authoritativeDriftWarning && (
                                             <span className="rounded-full border border-rose-600/70 bg-rose-500/20 px-2 py-0.5 text-[11px] font-medium text-rose-300">
                                                 Drift warning
@@ -845,6 +952,11 @@ const Settings: React.FC = () => {
                                 {authoritativeBillingError && (
                                     <p className="rounded-lg border border-rose-700/50 bg-rose-950/30 px-3 py-2 text-sm text-rose-300">
                                         {authoritativeBillingError}
+                                    </p>
+                                )}
+                                {authoritativeActivityError && (
+                                    <p className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
+                                        {authoritativeActivityError}
                                     </p>
                                 )}
 
@@ -875,15 +987,15 @@ const Settings: React.FC = () => {
                                         : 'border-slate-800 bg-slate-900'
                                 }`}>
                                     <div>
-                                        <p className="text-xs uppercase tracking-wider text-slate-500">Reconciliation: Local Estimate</p>
+                                        <p className="text-xs uppercase tracking-wider text-slate-500">App estimate (local)</p>
                                         <p className="mt-1 text-base font-semibold text-white">{formatUsd(authoritativeReconciliation.localEstimatedCostUsd)}</p>
                                     </div>
                                     <div>
-                                        <p className="text-xs uppercase tracking-wider text-slate-500">Reconciliation: Authoritative Used</p>
+                                        <p className="text-xs uppercase tracking-wider text-slate-500">OpenRouter account total</p>
                                         <p className="mt-1 text-base font-semibold text-white">{formatUsd(authoritativeReconciliation.authoritativeUsedUsd)}</p>
                                     </div>
                                     <div>
-                                        <p className="text-xs uppercase tracking-wider text-slate-500">Drift</p>
+                                        <p className="text-xs uppercase tracking-wider text-slate-500">Difference (app - account)</p>
                                         <p className={`mt-1 text-base font-semibold ${
                                             authoritativeDriftWarning ? 'text-rose-300' : 'text-slate-200'
                                         }`}>
@@ -899,7 +1011,80 @@ const Settings: React.FC = () => {
 
                                 <div className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-3">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <p className="text-xs uppercase tracking-wider text-slate-500">Authoritative Usage Trend</p>
+                                        <p className="text-xs uppercase tracking-wider text-slate-500">Daily Spend (OpenRouter activity)</p>
+                                        <p className="text-xs text-slate-400">
+                                            {authoritativeDailySpendWindow.length > 0
+                                                ? `${authoritativeDailySpendWindow.length} days`
+                                                : 'No activity rows'}
+                                        </p>
+                                    </div>
+
+                                    {authoritativeDailySpendWindow.length === 0 ? (
+                                        <p className="mt-3 text-xs text-slate-500">
+                                            No authoritative activity rows available yet.
+                                        </p>
+                                    ) : (
+                                        <>
+                                            <div className="mt-4 flex h-28 items-end gap-1 rounded-md border border-slate-800/80 bg-slate-950/60 px-2 py-2">
+                                                {authoritativeDailySpendBars.map((entry, index) => (
+                                                    <div
+                                                        key={`${entry.point.date}-${index}`}
+                                                        className="flex-1 rounded-sm bg-gradient-to-t from-emerald-500/50 to-emerald-400"
+                                                        style={{ height: `${entry.heightPercent}%` }}
+                                                        title={`${formatDayLabel(entry.point.date)} • ${formatUsd(entry.point.usageUsd)}`}
+                                                    />
+                                                ))}
+                                            </div>
+                                            <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+                                                <span>{formatDayLabel(authoritativeDailySpendWindow[0].date)}</span>
+                                                <span>{formatDayLabel(authoritativeDailySpendWindow[authoritativeDailySpendWindow.length - 1].date)}</span>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+
+                                <div className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p className="text-xs uppercase tracking-wider text-slate-500">Per-model cost breakdown (OpenRouter activity)</p>
+                                        <p className="text-xs text-slate-400">
+                                            {authoritativeModelBreakdown.length} models
+                                        </p>
+                                    </div>
+                                    {authoritativeModelBreakdown.length === 0 ? (
+                                        <p className="mt-3 text-xs text-slate-500">
+                                            No model-level activity rows available.
+                                        </p>
+                                    ) : (
+                                        <div className="mt-3 overflow-x-auto rounded-md border border-slate-800">
+                                            <table className="min-w-full text-left text-xs">
+                                                <thead className="bg-slate-950/80 text-slate-400">
+                                                    <tr>
+                                                        <th className="px-3 py-2 font-medium">Model</th>
+                                                        <th className="px-3 py-2 font-medium">Cost</th>
+                                                        <th className="px-3 py-2 font-medium">Share</th>
+                                                        <th className="px-3 py-2 font-medium">Requests</th>
+                                                        <th className="px-3 py-2 font-medium">Tokens</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {authoritativeModelBreakdown.map((row) => (
+                                                        <tr key={row.model} className="border-t border-slate-800 text-slate-200">
+                                                            <td className="px-3 py-2 font-mono">{row.model}</td>
+                                                            <td className="px-3 py-2">{formatUsd(row.usageUsd)}</td>
+                                                            <td className="px-3 py-2">{row.sharePercent.toFixed(2)}%</td>
+                                                            <td className="px-3 py-2">{row.requests.toLocaleString()}</td>
+                                                            <td className="px-3 py-2">{(row.promptTokens + row.completionTokens + row.reasoningTokens).toLocaleString()}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p className="text-xs uppercase tracking-wider text-slate-500">Authoritative Snapshot Trend</p>
                                         <p className="text-xs text-slate-400">
                                             Cached snapshots ({pagedAuthoritativeHistory.totalItems})
                                         </p>
@@ -960,6 +1145,7 @@ const Settings: React.FC = () => {
 
                                 <p className="text-xs text-slate-400">
                                     Source: {authoritativeBilling ? getSourceLabel(authoritativeBilling.source) : '—'}.
+                                    Activity synced {authoritativeActivityFetchedAt ? `${formatSyncTime(authoritativeActivityFetchedAt)} (${formatDurationSince(authoritativeActivityCacheAgeMs)})` : 'not yet'}.
                                     Cache is reused for up to {Math.round(AUTHORITATIVE_BILLING_CACHE_MAX_AGE_MS / 60000)} minutes.
                                     Auto refresh is {authoritativeRefreshSeconds === 0 ? 'manual only' : `every ${authoritativeRefreshSeconds}s`}.
                                 </p>

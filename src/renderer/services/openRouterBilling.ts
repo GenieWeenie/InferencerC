@@ -47,9 +47,48 @@ export type OpenRouterBillingReconciliation = {
     driftPercent: number | null;
 };
 
+export type OpenRouterActivityRow = {
+    date: string; // YYYY-MM-DD
+    model: string;
+    usageUsd: number;
+    requests: number | null;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    reasoningTokens: number | null;
+    byokUsageInferenceUsd: number | null;
+};
+
+export type OpenRouterActivityCacheState = {
+    fetchedAt: string | null;
+    rows: OpenRouterActivityRow[];
+};
+
+export type OpenRouterActivityFetchResult = {
+    rows: OpenRouterActivityRow[];
+    fetchedAt: string;
+    fromCache: boolean;
+};
+
+export type OpenRouterDailySpendPoint = {
+    date: string;
+    usageUsd: number;
+};
+
+export type OpenRouterModelCostBreakdownRow = {
+    model: string;
+    usageUsd: number;
+    sharePercent: number;
+    requests: number;
+    promptTokens: number;
+    completionTokens: number;
+    reasoningTokens: number;
+};
+
 const OPENROUTER_CREDITS_URL = 'https://openrouter.ai/api/v1/credits';
 const OPENROUTER_KEY_URL = 'https://openrouter.ai/api/v1/key';
+const OPENROUTER_ACTIVITY_URL = 'https://openrouter.ai/api/v1/activity';
 const OPENROUTER_BILLING_CACHE_KEY = 'openrouter_authoritative_billing_cache_v1';
+const OPENROUTER_ACTIVITY_CACHE_KEY = 'openrouter_authoritative_activity_cache_v1';
 const CURRENCY_PRECISION = 1_000_000;
 const DEFAULT_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const MAX_HISTORY_SNAPSHOTS = 1_008; // ~7 days at 10-minute fetch cadence.
@@ -74,6 +113,14 @@ const sanitizeFiniteNumber = (value: unknown): number | null => {
     return null;
 };
 
+const sanitizeFiniteNonNegativeInteger = (value: unknown): number | null => {
+    const parsed = sanitizeFiniteNumber(value);
+    if (parsed === null || parsed < 0) {
+        return null;
+    }
+    return Math.floor(parsed);
+};
+
 const roundCurrency = (value: number | null): number | null => {
     if (value === null) {
         return null;
@@ -92,6 +139,22 @@ const getPayloadData = (payload: unknown): Record<string, unknown> | null => {
     }
 
     return data;
+};
+
+const getPayloadArray = (payload: unknown): unknown[] | null => {
+    if (Array.isArray(payload)) {
+        return payload;
+    }
+    if (!isRecord(payload)) {
+        return null;
+    }
+    if (Array.isArray(payload.data)) {
+        return payload.data;
+    }
+    if (isRecord(payload.data) && Array.isArray(payload.data.items)) {
+        return payload.data.items;
+    }
+    return null;
 };
 
 const firstNonNull = (...values: Array<number | null>): number | null => {
@@ -144,6 +207,17 @@ const parseJson = (raw: string): unknown | null => {
     } catch {
         return null;
     }
+};
+
+const normalizeDateKey = (value: unknown): string | null => {
+    if (typeof value !== 'string' || value.trim().length === 0) {
+        return null;
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return null;
+    }
+    return parsed.toISOString().slice(0, 10);
 };
 
 const sanitizeSource = (value: unknown): OpenRouterSource | null => {
@@ -303,6 +377,226 @@ export const persistOpenRouterBillingCache = (cache: OpenRouterBillingCacheState
 
 export const clearOpenRouterBillingCache = (): void => {
     removeLocalStorageItem(OPENROUTER_BILLING_CACHE_KEY);
+};
+
+const sanitizeActivityRow = (value: unknown): OpenRouterActivityRow | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+
+    const date = normalizeDateKey(value.date);
+    if (!date) {
+        return null;
+    }
+
+    const usageUsd = firstNonNull(
+        sanitizeFiniteNumber(value.usage),
+        sanitizeFiniteNumber(value.usageUsd)
+    );
+    if (usageUsd === null || usageUsd < 0) {
+        return null;
+    }
+
+    const model = (
+        typeof value.model === 'string' && value.model.trim().length > 0
+            ? value.model.trim()
+            : typeof value.model_permaslug === 'string' && value.model_permaslug.trim().length > 0
+                ? value.model_permaslug.trim()
+                : typeof value.endpoint_id === 'string' && value.endpoint_id.trim().length > 0
+                    ? value.endpoint_id.trim()
+                    : 'unknown'
+    );
+
+    return {
+        date,
+        model,
+        usageUsd: roundCurrency(usageUsd) ?? 0,
+        requests: firstNonNull(
+            sanitizeFiniteNonNegativeInteger(value.requests),
+            sanitizeFiniteNonNegativeInteger(value.requestCount)
+        ),
+        promptTokens: firstNonNull(
+            sanitizeFiniteNonNegativeInteger(value.prompt_tokens),
+            sanitizeFiniteNonNegativeInteger(value.promptTokens)
+        ),
+        completionTokens: firstNonNull(
+            sanitizeFiniteNonNegativeInteger(value.completion_tokens),
+            sanitizeFiniteNonNegativeInteger(value.completionTokens)
+        ),
+        reasoningTokens: firstNonNull(
+            sanitizeFiniteNonNegativeInteger(value.reasoning_tokens),
+            sanitizeFiniteNonNegativeInteger(value.reasoningTokens)
+        ),
+        byokUsageInferenceUsd: roundCurrency(firstNonNull(
+            sanitizeFiniteNumber(value.byok_usage_inference),
+            sanitizeFiniteNumber(value.byokUsageInferenceUsd)
+        )),
+    };
+};
+
+const normalizeActivityRows = (rows: unknown): OpenRouterActivityRow[] => {
+    if (!Array.isArray(rows)) {
+        return [];
+    }
+
+    const deduped = new Map<string, OpenRouterActivityRow>();
+    for (let index = 0; index < rows.length; index++) {
+        const row = sanitizeActivityRow(rows[index]);
+        if (!row) {
+            continue;
+        }
+        const dedupeKey = `${row.date}|${row.model}`;
+        const existing = deduped.get(dedupeKey);
+        if (!existing) {
+            deduped.set(dedupeKey, row);
+            continue;
+        }
+        deduped.set(dedupeKey, {
+            ...existing,
+            usageUsd: roundCurrency(existing.usageUsd + row.usageUsd) ?? existing.usageUsd + row.usageUsd,
+            requests: (existing.requests ?? 0) + (row.requests ?? 0),
+            promptTokens: (existing.promptTokens ?? 0) + (row.promptTokens ?? 0),
+            completionTokens: (existing.completionTokens ?? 0) + (row.completionTokens ?? 0),
+            reasoningTokens: (existing.reasoningTokens ?? 0) + (row.reasoningTokens ?? 0),
+            byokUsageInferenceUsd: roundCurrency((existing.byokUsageInferenceUsd ?? 0) + (row.byokUsageInferenceUsd ?? 0)),
+        });
+    }
+
+    return Array.from(deduped.values()).sort((a, b) => {
+        if (a.date !== b.date) {
+            return a.date.localeCompare(b.date);
+        }
+        return a.model.localeCompare(b.model);
+    });
+};
+
+export const parseOpenRouterActivityPayload = (payload: unknown): OpenRouterActivityRow[] => {
+    return normalizeActivityRows(getPayloadArray(payload));
+};
+
+export const parseOpenRouterActivityCache = (raw: string): OpenRouterActivityCacheState => {
+    const parsed = parseJson(raw);
+    if (!isRecord(parsed)) {
+        return {
+            fetchedAt: null,
+            rows: [],
+        };
+    }
+
+    const fetchedAt = typeof parsed.fetchedAt === 'string' && Number.isFinite(new Date(parsed.fetchedAt).getTime())
+        ? new Date(parsed.fetchedAt).toISOString()
+        : null;
+
+    return {
+        fetchedAt,
+        rows: normalizeActivityRows(parsed.rows),
+    };
+};
+
+export const loadOpenRouterActivityCache = (): OpenRouterActivityCacheState => {
+    try {
+        const raw = readLocalStorageItem(OPENROUTER_ACTIVITY_CACHE_KEY);
+        if (!raw) {
+            return {
+                fetchedAt: null,
+                rows: [],
+            };
+        }
+        return parseOpenRouterActivityCache(raw);
+    } catch {
+        return {
+            fetchedAt: null,
+            rows: [],
+        };
+    }
+};
+
+export const persistOpenRouterActivityCache = (cache: OpenRouterActivityCacheState): void => {
+    const fetchedAt = typeof cache.fetchedAt === 'string' && Number.isFinite(new Date(cache.fetchedAt).getTime())
+        ? new Date(cache.fetchedAt).toISOString()
+        : null;
+    writeLocalStorageItem(
+        OPENROUTER_ACTIVITY_CACHE_KEY,
+        JSON.stringify({
+            fetchedAt,
+            rows: normalizeActivityRows(cache.rows),
+        })
+    );
+};
+
+export const clearOpenRouterActivityCache = (): void => {
+    removeLocalStorageItem(OPENROUTER_ACTIVITY_CACHE_KEY);
+};
+
+export const isCachedActivityFresh = (
+    fetchedAt: string | null,
+    maxAgeMs: number = DEFAULT_CACHE_MAX_AGE_MS
+): boolean => {
+    if (!fetchedAt) {
+        return false;
+    }
+    const fetchedAtMs = new Date(fetchedAt).getTime();
+    if (!Number.isFinite(fetchedAtMs)) {
+        return false;
+    }
+    const ageMs = Date.now() - fetchedAtMs;
+    return ageMs >= 0 && ageMs <= maxAgeMs;
+};
+
+export const buildOpenRouterDailySpend = (rows: OpenRouterActivityRow[]): OpenRouterDailySpendPoint[] => {
+    const daily = new Map<string, number>();
+    for (let index = 0; index < rows.length; index++) {
+        const row = rows[index];
+        daily.set(row.date, (daily.get(row.date) ?? 0) + row.usageUsd);
+    }
+
+    return Array.from(daily.entries())
+        .map(([date, usageUsd]) => ({
+            date,
+            usageUsd: roundCurrency(usageUsd) ?? usageUsd,
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+};
+
+export const buildOpenRouterModelCostBreakdown = (rows: OpenRouterActivityRow[]): OpenRouterModelCostBreakdownRow[] => {
+    const byModel = new Map<string, OpenRouterModelCostBreakdownRow>();
+    let totalUsage = 0;
+
+    for (let index = 0; index < rows.length; index++) {
+        const row = rows[index];
+        totalUsage += row.usageUsd;
+        const existing = byModel.get(row.model) ?? {
+            model: row.model,
+            usageUsd: 0,
+            sharePercent: 0,
+            requests: 0,
+            promptTokens: 0,
+            completionTokens: 0,
+            reasoningTokens: 0,
+        };
+        existing.usageUsd += row.usageUsd;
+        existing.requests += row.requests ?? 0;
+        existing.promptTokens += row.promptTokens ?? 0;
+        existing.completionTokens += row.completionTokens ?? 0;
+        existing.reasoningTokens += row.reasoningTokens ?? 0;
+        byModel.set(row.model, existing);
+    }
+
+    const denominator = totalUsage > 0 ? totalUsage : 0;
+    return Array.from(byModel.values())
+        .map((entry) => ({
+            ...entry,
+            usageUsd: roundCurrency(entry.usageUsd) ?? entry.usageUsd,
+            sharePercent: denominator > 0
+                ? roundCurrency((entry.usageUsd / denominator) * 100) ?? (entry.usageUsd / denominator) * 100
+                : 0,
+        }))
+        .sort((a, b) => {
+            if (b.usageUsd !== a.usageUsd) {
+                return b.usageUsd - a.usageUsd;
+            }
+            return a.model.localeCompare(b.model);
+        });
 };
 
 const appendBillingSnapshot = (
@@ -579,6 +873,59 @@ const toBillingError = (error: unknown): OpenRouterBillingError => {
     }
 
     return new OpenRouterBillingError('Unknown OpenRouter billing error.');
+};
+
+export const fetchOpenRouterActivity = async (apiKey: string): Promise<OpenRouterActivityRow[]> => {
+    const normalizedApiKey = apiKey.trim();
+    if (!normalizedApiKey) {
+        throw new OpenRouterBillingError('OpenRouter API key is required to fetch usage activity.');
+    }
+
+    const payload = await fetchOpenRouterPayload(OPENROUTER_ACTIVITY_URL, normalizedApiKey);
+    const rows = parseOpenRouterActivityPayload(payload);
+    if (rows.length === 0) {
+        throw new OpenRouterBillingError(
+            'OpenRouter activity response had no usable rows. This endpoint may require a provisioning key.'
+        );
+    }
+    return rows;
+};
+
+export const fetchOpenRouterActivityWithCache = async (
+    apiKey: string,
+    options?: { forceRefresh?: boolean; maxAgeMs?: number }
+): Promise<OpenRouterActivityFetchResult> => {
+    const normalizedApiKey = apiKey.trim();
+    if (!normalizedApiKey) {
+        throw new OpenRouterBillingError('OpenRouter API key is required to fetch usage activity.');
+    }
+
+    const forceRefresh = options?.forceRefresh === true;
+    const maxAgeMs = Number.isFinite(options?.maxAgeMs) && (options?.maxAgeMs ?? 0) > 0
+        ? Math.floor(options?.maxAgeMs as number)
+        : DEFAULT_CACHE_MAX_AGE_MS;
+
+    const cache = loadOpenRouterActivityCache();
+    if (!forceRefresh && isCachedActivityFresh(cache.fetchedAt, maxAgeMs) && cache.rows.length > 0 && cache.fetchedAt) {
+        return {
+            rows: cache.rows,
+            fetchedAt: cache.fetchedAt,
+            fromCache: true,
+        };
+    }
+
+    const rows = await fetchOpenRouterActivity(normalizedApiKey);
+    const fetchedAt = new Date().toISOString();
+    persistOpenRouterActivityCache({
+        fetchedAt,
+        rows,
+    });
+
+    return {
+        rows,
+        fetchedAt,
+        fromCache: false,
+    };
 };
 
 export const fetchOpenRouterAuthoritativeBilling = async (apiKey: string): Promise<OpenRouterAuthoritativeBilling> => {
