@@ -40,6 +40,13 @@ export type OpenRouterAuthoritativeBillingFetchResult = {
     history: OpenRouterAuthoritativeBilling[];
 };
 
+export type OpenRouterBillingReconciliation = {
+    localEstimatedCostUsd: number;
+    authoritativeUsedUsd: number | null;
+    driftUsd: number | null;
+    driftPercent: number | null;
+};
+
 const OPENROUTER_CREDITS_URL = 'https://openrouter.ai/api/v1/credits';
 const OPENROUTER_KEY_URL = 'https://openrouter.ai/api/v1/key';
 const OPENROUTER_BILLING_CACHE_KEY = 'openrouter_authoritative_billing_cache_v1';
@@ -318,6 +325,25 @@ const getSnapshotAgeMs = (snapshot: OpenRouterAuthoritativeBilling): number | nu
     return Date.now() - snapshotMs;
 };
 
+const roundReconciliationValue = (value: number): number => {
+    return Math.round(value * CURRENCY_PRECISION) / CURRENCY_PRECISION;
+};
+
+const formatCsvField = (value: string | number | null): string => {
+    if (value === null) {
+        return '';
+    }
+    const raw = typeof value === 'number' ? String(value) : value;
+    if (raw.includes('"') || raw.includes(',') || raw.includes('\n')) {
+        return `"${raw.replace(/"/g, '""')}"`;
+    }
+    return raw;
+};
+
+const formatOptionalNumericCsvField = (value: number | null): string => {
+    return value === null ? '' : formatCsvField(value);
+};
+
 export const isCachedBillingFresh = (
     snapshot: OpenRouterAuthoritativeBilling | null,
     maxAgeMs: number = DEFAULT_CACHE_MAX_AGE_MS
@@ -330,6 +356,88 @@ export const isCachedBillingFresh = (
         return false;
     }
     return ageMs >= 0 && ageMs <= maxAgeMs;
+};
+
+export const buildOpenRouterBillingReconciliation = (
+    localEstimatedCostUsd: number,
+    authoritative: OpenRouterAuthoritativeBilling | null
+): OpenRouterBillingReconciliation => {
+    const safeLocalEstimate = Number.isFinite(localEstimatedCostUsd) ? localEstimatedCostUsd : 0;
+    const authoritativeUsed = authoritative?.usedUsd ?? null;
+    if (authoritativeUsed === null) {
+        return {
+            localEstimatedCostUsd: safeLocalEstimate,
+            authoritativeUsedUsd: null,
+            driftUsd: null,
+            driftPercent: null,
+        };
+    }
+
+    const driftUsd = safeLocalEstimate - authoritativeUsed;
+    const driftPercent = authoritativeUsed === 0
+        ? (safeLocalEstimate === 0 ? 0 : null)
+        : (driftUsd / authoritativeUsed) * 100;
+
+    return {
+        localEstimatedCostUsd: roundReconciliationValue(safeLocalEstimate),
+        authoritativeUsedUsd: roundReconciliationValue(authoritativeUsed),
+        driftUsd: roundReconciliationValue(driftUsd),
+        driftPercent: driftPercent === null ? null : roundReconciliationValue(driftPercent),
+    };
+};
+
+export const buildOpenRouterBillingCsv = (
+    history: OpenRouterAuthoritativeBilling[],
+    localEstimatedCostUsd: number,
+    latest: OpenRouterAuthoritativeBilling | null
+): string => {
+    const normalizedHistory = normalizeHistory(history);
+    const latestSnapshot = latest ?? (normalizedHistory.length > 0 ? normalizedHistory[normalizedHistory.length - 1] : null);
+    const reconciliation = buildOpenRouterBillingReconciliation(localEstimatedCostUsd, latestSnapshot);
+
+    const header = [
+        'row_type',
+        'timestamp_iso',
+        'source',
+        'used_usd',
+        'remaining_usd',
+        'limit_usd',
+        'local_estimated_cost_usd',
+        'drift_usd',
+        'drift_percent',
+    ];
+    const rows: string[] = [header.map((field) => formatCsvField(field)).join(',')];
+
+    for (let index = 0; index < normalizedHistory.length; index++) {
+        const snapshot = normalizedHistory[index];
+        const row = [
+            'snapshot',
+            snapshot.fetchedAt,
+            snapshot.source,
+            formatOptionalNumericCsvField(snapshot.usedUsd),
+            formatOptionalNumericCsvField(snapshot.remainingUsd),
+            formatOptionalNumericCsvField(snapshot.limitUsd),
+            '',
+            '',
+            '',
+        ];
+        rows.push(row.map((field) => formatCsvField(field)).join(','));
+    }
+
+    const reconciliationRow = [
+        'reconciliation_latest',
+        latestSnapshot?.fetchedAt ?? '',
+        latestSnapshot?.source ?? '',
+        formatOptionalNumericCsvField(latestSnapshot?.usedUsd ?? null),
+        formatOptionalNumericCsvField(latestSnapshot?.remainingUsd ?? null),
+        formatOptionalNumericCsvField(latestSnapshot?.limitUsd ?? null),
+        formatCsvField(reconciliation.localEstimatedCostUsd),
+        formatOptionalNumericCsvField(reconciliation.driftUsd),
+        formatOptionalNumericCsvField(reconciliation.driftPercent),
+    ];
+    rows.push(reconciliationRow.map((field) => formatCsvField(field)).join(','));
+
+    return rows.join('\n');
 };
 
 export const paginateOpenRouterBillingHistory = (

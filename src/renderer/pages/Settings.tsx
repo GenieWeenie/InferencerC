@@ -32,6 +32,8 @@ import { onboardingService } from '../services/onboarding';
 import { credentialService } from '../services/credentials';
 import { readAnalyticsUsageStats } from '../services/analyticsStore';
 import {
+    buildOpenRouterBillingCsv,
+    buildOpenRouterBillingReconciliation,
     clearOpenRouterBillingCache,
     fetchOpenRouterAuthoritativeBillingWithCache,
     loadOpenRouterBillingCache,
@@ -50,8 +52,19 @@ import {
 } from './settingsStorage';
 
 const AUTHORITATIVE_BILLING_TOGGLE_KEY = 'settings_usage_authoritative_billing_enabled';
+const AUTHORITATIVE_BILLING_REFRESH_SECONDS_KEY = 'settings_usage_authoritative_refresh_seconds';
 const AUTHORITATIVE_BILLING_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const AUTHORITATIVE_HISTORY_PAGE_SIZE = 12;
+const DEFAULT_AUTHORITATIVE_REFRESH_SECONDS = 60;
+const DRIFT_WARNING_THRESHOLD_PERCENT = 20;
+const DRIFT_WARNING_THRESHOLD_USD = 1;
+
+const AUTHORITATIVE_REFRESH_OPTIONS = [
+    { value: 0, label: 'Manual only' },
+    { value: 30, label: '30s' },
+    { value: 60, label: '1m' },
+    { value: 300, label: '5m' },
+] as const;
 
 const formatUsd = (value: number | null): string => {
     if (value === null) {
@@ -86,6 +99,45 @@ const formatTrendLabel = (isoDate: string): string => {
     return parsedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
+const readStoredRefreshSeconds = (): number => {
+    try {
+        const raw = localStorage.getItem(AUTHORITATIVE_BILLING_REFRESH_SECONDS_KEY);
+        if (!raw) {
+            return DEFAULT_AUTHORITATIVE_REFRESH_SECONDS;
+        }
+        const parsed = Number(raw.trim());
+        if (!Number.isFinite(parsed)) {
+            return DEFAULT_AUTHORITATIVE_REFRESH_SECONDS;
+        }
+        const normalized = Math.floor(parsed);
+        const allowed = AUTHORITATIVE_REFRESH_OPTIONS.some((option) => option.value === normalized);
+        return allowed ? normalized : DEFAULT_AUTHORITATIVE_REFRESH_SECONDS;
+    } catch {
+        return DEFAULT_AUTHORITATIVE_REFRESH_SECONDS;
+    }
+};
+
+const formatDurationSince = (ageMs: number | null): string => {
+    if (ageMs === null || ageMs < 0) {
+        return 'unknown age';
+    }
+    if (ageMs < 1_000) {
+        return 'just now';
+    }
+    if (ageMs < 60_000) {
+        return `${Math.floor(ageMs / 1_000)}s ago`;
+    }
+    if (ageMs < 3_600_000) {
+        return `${Math.floor(ageMs / 60_000)}m ago`;
+    }
+    return `${Math.floor(ageMs / 3_600_000)}h ago`;
+};
+
+const formatSignedUsd = (value: number): string => {
+    const sign = value >= 0 ? '+' : '-';
+    return `${sign}${formatUsd(Math.abs(value))}`;
+};
+
 const Settings: React.FC = () => {
     // API Keys
     const [openRouterKey, setOpenRouterKey] = useState('');
@@ -109,6 +161,7 @@ const Settings: React.FC = () => {
     const [authoritativeBillingEnabled, setAuthoritativeBillingEnabled] = useState(() =>
         readStoredBooleanWithFallback(AUTHORITATIVE_BILLING_TOGGLE_KEY, true)
     );
+    const [authoritativeRefreshSeconds, setAuthoritativeRefreshSeconds] = useState(readStoredRefreshSeconds);
     const [authoritativeBilling, setAuthoritativeBilling] = useState<OpenRouterAuthoritativeBilling | null>(null);
     const [authoritativeBillingHistory, setAuthoritativeBillingHistory] = useState<OpenRouterAuthoritativeBilling[]>([]);
     const [authoritativeBillingHistoryPageIndex, setAuthoritativeBillingHistoryPageIndex] = useState(0);
@@ -196,6 +249,35 @@ const Settings: React.FC = () => {
             };
         });
     }, [pagedAuthoritativeHistory.items]);
+
+    const authoritativeCacheAgeMs = React.useMemo(() => {
+        if (!authoritativeBilling) {
+            return null;
+        }
+        const parsed = new Date(authoritativeBilling.fetchedAt).getTime();
+        if (!Number.isFinite(parsed)) {
+            return null;
+        }
+        const ageMs = Date.now() - parsed;
+        return ageMs >= 0 ? ageMs : null;
+    }, [authoritativeBilling]);
+
+    const authoritativeBillingStale = authoritativeCacheAgeMs !== null
+        && authoritativeCacheAgeMs > AUTHORITATIVE_BILLING_CACHE_MAX_AGE_MS;
+
+    const authoritativeReconciliation = React.useMemo(() => (
+        buildOpenRouterBillingReconciliation(usageStats.estimatedCost, authoritativeBilling)
+    ), [usageStats.estimatedCost, authoritativeBilling]);
+
+    const authoritativeDriftWarning = React.useMemo(() => {
+        const driftPercent = authoritativeReconciliation.driftPercent;
+        const driftUsd = authoritativeReconciliation.driftUsd;
+        if (driftPercent === null || driftUsd === null) {
+            return false;
+        }
+        return Math.abs(driftPercent) >= DRIFT_WARNING_THRESHOLD_PERCENT
+            && Math.abs(driftUsd) >= DRIFT_WARNING_THRESHOLD_USD;
+    }, [authoritativeReconciliation.driftPercent, authoritativeReconciliation.driftUsd]);
 
     useEffect(() => {
         if (authoritativeBillingHistoryPageIndex !== pagedAuthoritativeHistory.page) {
@@ -326,15 +408,19 @@ const Settings: React.FC = () => {
         void refreshAuthoritativeBilling();
 
         const usageInterval = setInterval(refreshUsageStats, 3000);
-        const authoritativeInterval = setInterval(() => {
-            void refreshAuthoritativeBilling();
-        }, 60000);
+        const authoritativeInterval = authoritativeRefreshSeconds > 0
+            ? setInterval(() => {
+                void refreshAuthoritativeBilling();
+            }, authoritativeRefreshSeconds * 1000)
+            : null;
 
         return () => {
             clearInterval(usageInterval);
-            clearInterval(authoritativeInterval);
+            if (authoritativeInterval) {
+                clearInterval(authoritativeInterval);
+            }
         };
-    }, [activeTab, refreshUsageStats, refreshAuthoritativeBilling, hydrateAuthoritativeBillingFromCache]);
+    }, [activeTab, refreshUsageStats, refreshAuthoritativeBilling, hydrateAuthoritativeBillingFromCache, authoritativeRefreshSeconds]);
 
     const saveOpenRouterKey = async () => {
         if (!openRouterKey.trim()) {
@@ -375,6 +461,30 @@ const Settings: React.FC = () => {
         if (activeTab === 'usage') {
             void refreshAuthoritativeBilling();
         }
+    };
+
+    const handleAuthoritativeRefreshSecondsChange = (nextSeconds: number) => {
+        const allowed = AUTHORITATIVE_REFRESH_OPTIONS.some((option) => option.value === nextSeconds);
+        if (!allowed) {
+            return;
+        }
+        setAuthoritativeRefreshSeconds(nextSeconds);
+        localStorage.setItem(AUTHORITATIVE_BILLING_REFRESH_SECONDS_KEY, String(nextSeconds));
+    };
+
+    const exportAuthoritativeBillingCsv = () => {
+        const csv = buildOpenRouterBillingCsv(authoritativeBillingHistory, usageStats.estimatedCost, authoritativeBilling);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const dateSegment = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `openrouter-billing-${dateSegment}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        toast.success('Exported authoritative billing CSV');
     };
 
     const saveGithubKey = async () => {
@@ -654,6 +764,18 @@ const Settings: React.FC = () => {
                                     />
                                     Authoritative OpenRouter billing
                                 </label>
+                                <select
+                                    value={authoritativeRefreshSeconds}
+                                    onChange={(event) => handleAuthoritativeRefreshSecondsChange(Number(event.target.value))}
+                                    disabled={!authoritativeBillingEnabled}
+                                    className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {AUTHORITATIVE_REFRESH_OPTIONS.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                            Refresh: {option.label}
+                                        </option>
+                                    ))}
+                                </select>
                                 <button
                                     type="button"
                                     onClick={() => void refreshAuthoritativeBilling({ forceRefresh: true })}
@@ -662,6 +784,15 @@ const Settings: React.FC = () => {
                                 >
                                     <RefreshCw size={14} className={authoritativeBillingLoading ? 'animate-spin' : ''} />
                                     Refresh
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={exportAuthoritativeBillingCsv}
+                                    disabled={!authoritativeBillingEnabled || authoritativeBillingHistory.length === 0}
+                                    className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    <Download size={14} />
+                                    Export CSV
                                 </button>
                             </div>
                         </div>
@@ -685,14 +816,30 @@ const Settings: React.FC = () => {
                         </div>
 
                         {authoritativeBillingEnabled && (
-                            <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+                            <div className={`space-y-4 rounded-xl border p-6 ${
+                                authoritativeBillingStale
+                                    ? 'border-amber-700/70 bg-amber-950/10'
+                                    : 'border-slate-800 bg-slate-900/50'
+                            }`}>
                                 <div className="flex items-center justify-between gap-3">
                                     <h4 className="text-base font-semibold text-white">OpenRouter Authoritative Billing</h4>
-                                    <span className="text-xs text-slate-400">
-                                        {authoritativeBilling
-                                            ? `Last synced ${formatSyncTime(authoritativeBilling.fetchedAt)}`
-                                            : 'Not synced yet'}
-                                    </span>
+                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                        {authoritativeBillingStale && (
+                                            <span className="rounded-full border border-amber-600/70 bg-amber-500/20 px-2 py-0.5 text-[11px] font-medium text-amber-300">
+                                                Stale cache
+                                            </span>
+                                        )}
+                                        {authoritativeDriftWarning && (
+                                            <span className="rounded-full border border-rose-600/70 bg-rose-500/20 px-2 py-0.5 text-[11px] font-medium text-rose-300">
+                                                Drift warning
+                                            </span>
+                                        )}
+                                        <span className="text-xs text-slate-400">
+                                            {authoritativeBilling
+                                                ? `Last synced ${formatSyncTime(authoritativeBilling.fetchedAt)} (${formatDurationSince(authoritativeCacheAgeMs)})`
+                                                : 'Not synced yet'}
+                                        </span>
+                                    </div>
                                 </div>
 
                                 {authoritativeBillingError && (
@@ -718,6 +865,34 @@ const Settings: React.FC = () => {
                                         <p className="text-xs uppercase tracking-wider text-slate-500">Limit (USD)</p>
                                         <p className="mt-1 text-lg font-semibold text-white">
                                             {authoritativeBillingLoading && !authoritativeBilling ? 'Loading...' : formatUsd(authoritativeBilling?.limitUsd ?? null)}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className={`grid grid-cols-1 gap-4 rounded-lg border px-4 py-3 md:grid-cols-3 ${
+                                    authoritativeDriftWarning
+                                        ? 'border-rose-700/60 bg-rose-950/20'
+                                        : 'border-slate-800 bg-slate-900'
+                                }`}>
+                                    <div>
+                                        <p className="text-xs uppercase tracking-wider text-slate-500">Reconciliation: Local Estimate</p>
+                                        <p className="mt-1 text-base font-semibold text-white">{formatUsd(authoritativeReconciliation.localEstimatedCostUsd)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs uppercase tracking-wider text-slate-500">Reconciliation: Authoritative Used</p>
+                                        <p className="mt-1 text-base font-semibold text-white">{formatUsd(authoritativeReconciliation.authoritativeUsedUsd)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs uppercase tracking-wider text-slate-500">Drift</p>
+                                        <p className={`mt-1 text-base font-semibold ${
+                                            authoritativeDriftWarning ? 'text-rose-300' : 'text-slate-200'
+                                        }`}>
+                                            {authoritativeReconciliation.driftUsd === null
+                                                ? '—'
+                                                : formatSignedUsd(authoritativeReconciliation.driftUsd)}
+                                            {authoritativeReconciliation.driftPercent === null
+                                                ? ''
+                                                : ` (${authoritativeReconciliation.driftPercent >= 0 ? '+' : ''}${authoritativeReconciliation.driftPercent.toFixed(2)}%)`}
                                         </p>
                                     </div>
                                 </div>
@@ -785,7 +960,8 @@ const Settings: React.FC = () => {
 
                                 <p className="text-xs text-slate-400">
                                     Source: {authoritativeBilling ? getSourceLabel(authoritativeBilling.source) : '—'}.
-                                    Data is cached locally and reused for up to {Math.round(AUTHORITATIVE_BILLING_CACHE_MAX_AGE_MS / 60000)} minutes before refreshing.
+                                    Cache is reused for up to {Math.round(AUTHORITATIVE_BILLING_CACHE_MAX_AGE_MS / 60000)} minutes.
+                                    Auto refresh is {authoritativeRefreshSeconds === 0 ? 'manual only' : `every ${authoritativeRefreshSeconds}s`}.
                                 </p>
                             </div>
                         )}

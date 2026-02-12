@@ -3,6 +3,8 @@
  */
 
 import {
+    buildOpenRouterBillingCsv,
+    buildOpenRouterBillingReconciliation,
     clearOpenRouterBillingCache,
     fetchOpenRouterAuthoritativeBillingWithCache,
     isCachedBillingFresh,
@@ -192,5 +194,48 @@ describe('openRouterBilling', () => {
             source: 'credits',
             fetchedAt: new Date().toISOString(),
         }, 10_000)).toBe(true);
+    });
+
+    it('builds reconciliation metrics from local vs authoritative usage', () => {
+        const reconciliation = buildOpenRouterBillingReconciliation(4, {
+            usedUsd: 5,
+            remainingUsd: 10,
+            limitUsd: 15,
+            source: 'credits',
+            fetchedAt: '2026-02-12T00:00:00.000Z',
+        });
+
+        expect(reconciliation).toEqual({
+            localEstimatedCostUsd: 4,
+            authoritativeUsedUsd: 5,
+            driftUsd: -1,
+            driftPercent: -20,
+        });
+    });
+
+    it('builds CSV with snapshot and reconciliation rows', () => {
+        const csv = buildOpenRouterBillingCsv(
+            [
+                {
+                    usedUsd: 1.5,
+                    remainingUsd: 8.5,
+                    limitUsd: 10,
+                    source: 'key',
+                    fetchedAt: '2026-02-12T00:00:00.000Z',
+                },
+            ],
+            2,
+            {
+                usedUsd: 1.5,
+                remainingUsd: 8.5,
+                limitUsd: 10,
+                source: 'key',
+                fetchedAt: '2026-02-12T00:00:00.000Z',
+            }
+        );
+
+        expect(csv).toContain('row_type,timestamp_iso,source,used_usd,remaining_usd,limit_usd,local_estimated_cost_usd,drift_usd,drift_percent');
+        expect(csv).toContain('snapshot,2026-02-12T00:00:00.000Z,key,1.5,8.5,10,,,');
+        expect(csv).toContain('reconciliation_latest,2026-02-12T00:00:00.000Z,key,1.5,8.5,10,2,0.5,33.333333');
     });
 });
