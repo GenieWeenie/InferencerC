@@ -54,6 +54,10 @@ interface UseChatMessageListSearchParams {
     conversationFontSize: number;
     isCompactViewport: boolean;
     navigateToSearchResult: (resultIndex: number) => void;
+    collapsedMessageRows: Record<number, boolean>;
+    onToggleMessageCollapsed: (messageIndex: number) => void;
+    collapseLongCodeBlocksSignal: number;
+    expandLongCodeBlocksSignal: number;
 }
 
 export const useChatMessageListSearch = ({
@@ -99,6 +103,10 @@ export const useChatMessageListSearch = ({
     conversationFontSize,
     isCompactViewport,
     navigateToSearchResult,
+    collapsedMessageRows,
+    onToggleMessageCollapsed,
+    collapseLongCodeBlocksSignal,
+    expandLongCodeBlocksSignal,
 }: UseChatMessageListSearchParams) => {
     const searchResultSet = React.useMemo(() => new Set(searchResults), [searchResults]);
     const activeSearchMessageIndex = React.useMemo(
@@ -218,6 +226,10 @@ export const useChatMessageListSearch = ({
                 isCompactViewport={isCompactViewport}
                 isLazyLoaded={rowMetadata.isLazyLoaded}
                 loadMessageAtIndex={loadMessageAtIndex}
+                isMessageCollapsed={collapsedMessageRows[index] === true}
+                onToggleMessageCollapsed={onToggleMessageCollapsed}
+                collapseLongCodeBlocksSignal={collapseLongCodeBlocksSignal}
+                expandLongCodeBlocksSignal={expandLongCodeBlocksSignal}
             />
         );
     }, [
@@ -247,6 +259,10 @@ export const useChatMessageListSearch = ({
         conversationFontSize,
         isCompactViewport,
         loadMessageAtIndex,
+        collapsedMessageRows,
+        onToggleMessageCollapsed,
+        collapseLongCodeBlocksSignal,
+        expandLongCodeBlocksSignal,
     ]);
 
     const renderSearchResultItem = React.useCallback((resultIndex: number) => {

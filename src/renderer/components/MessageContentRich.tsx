@@ -12,6 +12,8 @@ interface MessageContentRichProps {
     isUser: boolean;
     mcpAvailable?: boolean;
     onInsertToFile?: (code: string, language: string, filePath: string) => void;
+    collapseLongCodeBlocksSignal?: number;
+    expandLongCodeBlocksSignal?: number;
 }
 
 const PREVIEWABLE_LANGUAGES = ['html', 'htm', 'css', 'javascript', 'js'];
@@ -397,7 +399,14 @@ const MarkdownCodeRenderer: React.FC<MarkdownCodeRendererProps> = React.memo(({
     );
 });
 
-const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser, mcpAvailable, onInsertToFile }) => {
+const MessageContentRich: React.FC<MessageContentRichProps> = ({
+    content,
+    isUser,
+    mcpAvailable,
+    onInsertToFile,
+    collapseLongCodeBlocksSignal,
+    expandLongCodeBlocksSignal,
+}) => {
     const [copiedCode, setCopiedCode] = React.useState<string | null>(null);
     const [previewCode, setPreviewCode] = React.useState<{ code: string; language: string } | null>(null);
     const [showFilePathInput, setShowFilePathInput] = React.useState<string | null>(null);
@@ -411,6 +420,8 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
     const [loadedSyntaxLanguages, setLoadedSyntaxLanguages] = React.useState<Set<string>>(new Set());
     const loadedSyntaxLanguagesRef = React.useRef<Set<string>>(new Set());
     const syntaxLanguageLoadInFlightRef = React.useRef<Set<string>>(new Set());
+    const lastCollapseSignalRef = React.useRef<number | undefined>(collapseLongCodeBlocksSignal);
+    const lastExpandSignalRef = React.useRef<number | undefined>(expandLongCodeBlocksSignal);
 
     const hasMathSyntax = React.useMemo(
         () => /(\$\$[\s\S]*?\$\$|\\\(|\\\[|\$[^$\n]+\$)/.test(content),
@@ -438,6 +449,19 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
         });
         return Array.from(languageSet);
     }, [content, codeBlockLanguages]);
+
+    const collapsibleCodeBlockHashes = React.useMemo(() => {
+        const hashes: string[] = [];
+        const fencePattern = /```(?:[\w-]+)?\n?([\s\S]*?)```/g;
+        for (const match of content.matchAll(fencePattern)) {
+            const code = String(match[1] || '').replace(/\n$/, '');
+            const lineCount = code.split('\n').length;
+            if (lineCount > 20 || code.length > 1200) {
+                hashes.push(code.substring(0, 50));
+            }
+        }
+        return hashes;
+    }, [content]);
 
     React.useEffect(() => {
         if (!hasMathSyntax || mathPlugins) return;
@@ -534,6 +558,54 @@ const MessageContentRich: React.FC<MessageContentRichProps> = ({ content, isUser
             void ensureSyntaxLanguageLoaded(language);
         });
     }, [hasCodeBlocks, syntaxHighlighterBundle, detectedCodeLanguages, ensureSyntaxLanguageLoaded]);
+
+    React.useEffect(() => {
+        if (collapseLongCodeBlocksSignal === undefined) {
+            return;
+        }
+        if (lastCollapseSignalRef.current === collapseLongCodeBlocksSignal) {
+            return;
+        }
+        lastCollapseSignalRef.current = collapseLongCodeBlocksSignal;
+        if (collapsibleCodeBlockHashes.length === 0) {
+            return;
+        }
+        setCollapsedCodeBlocks((prev) => {
+            let changed = false;
+            const next = { ...prev };
+            collapsibleCodeBlockHashes.forEach((codeHash) => {
+                if (next[codeHash] !== true) {
+                    next[codeHash] = true;
+                    changed = true;
+                }
+            });
+            return changed ? next : prev;
+        });
+    }, [collapseLongCodeBlocksSignal, collapsibleCodeBlockHashes]);
+
+    React.useEffect(() => {
+        if (expandLongCodeBlocksSignal === undefined) {
+            return;
+        }
+        if (lastExpandSignalRef.current === expandLongCodeBlocksSignal) {
+            return;
+        }
+        lastExpandSignalRef.current = expandLongCodeBlocksSignal;
+        if (collapsibleCodeBlockHashes.length === 0) {
+            return;
+        }
+        setCollapsedCodeBlocks((prev) => {
+            let changed = false;
+            const next = { ...prev };
+            collapsibleCodeBlockHashes.forEach((codeHash) => {
+                if (next[codeHash] === true) {
+                    next[codeHash] = false;
+                    changed = true;
+                }
+            });
+            return changed ? next : prev;
+        });
+    }, [expandLongCodeBlocksSignal, collapsibleCodeBlockHashes]);
 
     const remarkPlugins = React.useMemo<PluggableList>(() => {
         const plugins: PluggableList = [remarkGfm];

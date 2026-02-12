@@ -59,6 +59,7 @@ import {
     createChatRowMetadataCacheState,
     type SearchResultPreviewCacheEntry,
 } from '../lib/chatRenderModels';
+import { isLongMessageContent } from '../lib/chatMessageCollapse';
 import type { ChatVirtuosoHandle } from '../lib/chatVirtuosoTypes';
 import {
     type ChatMessageActionCapabilities,
@@ -317,6 +318,9 @@ const Chat: React.FC = () => {
     const messageListRef = React.useRef<HTMLDivElement | null>(null);
     const composerContainerRef = React.useRef<HTMLDivElement | null>(null);
     const longPressMenuRef = React.useRef<HTMLDivElement | null>(null);
+    const [collapsedMessageRows, setCollapsedMessageRows] = React.useState<Record<number, boolean>>({});
+    const [collapseLongCodeBlocksSignal, setCollapseLongCodeBlocksSignal] = React.useState(0);
+    const [expandLongCodeBlocksSignal, setExpandLongCodeBlocksSignal] = React.useState(0);
 
     const handleBottomControlsHidden = React.useCallback(() => {
         setShowExpertMenu(false);
@@ -816,6 +820,90 @@ const Chat: React.FC = () => {
         treeHook.switchToSibling(currentIndex + direction);
     }, [treeHook]);
 
+    React.useEffect(() => {
+        setCollapsedMessageRows({});
+        setCollapseLongCodeBlocksSignal(0);
+        setExpandLongCodeBlocksSignal(0);
+    }, [sessionId]);
+
+    React.useEffect(() => {
+        setCollapsedMessageRows((prev) => {
+            const next: Record<number, boolean> = {};
+            let changed = false;
+            Object.entries(prev).forEach(([key, value]) => {
+                const index = Number(key);
+                if (!Number.isInteger(index) || index < 0 || index >= history.length) {
+                    changed = true;
+                    return;
+                }
+                next[index] = value;
+            });
+            return changed ? next : prev;
+        });
+    }, [history.length]);
+
+    const longAssistantMessageIndices = React.useMemo(() => {
+        const indices: number[] = [];
+        history.forEach((message, index) => {
+            if (message.role !== 'assistant' || message.isLoading) {
+                return;
+            }
+            if (isLongMessageContent(message.content || '')) {
+                indices.push(index);
+            }
+        });
+        return indices;
+    }, [history]);
+
+    const collapsedLongMessageCount = React.useMemo(
+        () => longAssistantMessageIndices.reduce((count, index) => (
+            collapsedMessageRows[index] ? count + 1 : count
+        ), 0),
+        [collapsedMessageRows, longAssistantMessageIndices]
+    );
+    const hasCollapsibleContent = longAssistantMessageIndices.length > 0;
+    const allCollapsibleContentCollapsed = hasCollapsibleContent
+        && collapsedLongMessageCount === longAssistantMessageIndices.length;
+
+    const handleToggleMessageCollapsed = React.useCallback((messageIndex: number) => {
+        setCollapsedMessageRows((prev) => ({
+            ...prev,
+            [messageIndex]: !prev[messageIndex],
+        }));
+    }, []);
+
+    const handleCollapseAllLongContent = React.useCallback(() => {
+        if (longAssistantMessageIndices.length === 0) {
+            return;
+        }
+        setCollapsedMessageRows((prev) => {
+            const next = { ...prev };
+            longAssistantMessageIndices.forEach((index) => {
+                next[index] = true;
+            });
+            return next;
+        });
+        setCollapseLongCodeBlocksSignal((prev) => prev + 1);
+    }, [longAssistantMessageIndices]);
+
+    const handleExpandAllLongContent = React.useCallback(() => {
+        if (longAssistantMessageIndices.length === 0) {
+            return;
+        }
+        setCollapsedMessageRows((prev) => {
+            let changed = false;
+            const next = { ...prev };
+            longAssistantMessageIndices.forEach((index) => {
+                if (next[index]) {
+                    changed = true;
+                }
+                delete next[index];
+            });
+            return changed ? next : prev;
+        });
+        setExpandLongCodeBlocksSignal((prev) => prev + 1);
+    }, [longAssistantMessageIndices]);
+
     useChatKeyboardController({
         historyLength: history.length,
         branchingEnabled,
@@ -889,6 +977,10 @@ const Chat: React.FC = () => {
         conversationFontSize,
         isCompactViewport,
         navigateToSearchResult,
+        collapsedMessageRows,
+        onToggleMessageCollapsed: handleToggleMessageCollapsed,
+        collapseLongCodeBlocksSignal,
+        expandLongCodeBlocksSignal,
     });
 
     const longPressMessage = longPressMenu ? history[longPressMenu.messageIndex] : null;
@@ -1354,6 +1446,10 @@ const Chat: React.FC = () => {
                     isLongPressMessageBookmarked={isLongPressMessageBookmarked}
                     longPressMessageCapabilities={longPressMessageCapabilities}
                     onLongPressAction={handleLongPressAction}
+                    hasCollapsibleContent={hasCollapsibleContent}
+                    allCollapsibleContentCollapsed={allCollapsibleContentCollapsed}
+                    onCollapseAllLongContent={handleCollapseAllLongContent}
+                    onExpandAllLongContent={handleExpandAllLongContent}
                 />
             )}
             composer={(

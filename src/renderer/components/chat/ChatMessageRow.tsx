@@ -1,10 +1,11 @@
 import React from 'react';
-import { Brain, Clock, Code2, Star, ThumbsDown, ThumbsUp, Wrench, AlertTriangle } from 'lucide-react';
+import { Brain, Clock, Code2, Star, ThumbsDown, ThumbsUp, Wrench, AlertTriangle, Minimize2, Maximize2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import SkeletonLoader from '../SkeletonLoader';
 import { calculateEntropy } from '../../lib/chatDisplayUtils';
 import { getMessageActionCapabilities } from '../../lib/chatMessageActions';
+import { buildCollapsedMessagePreview, isLongMessageContent } from '../../lib/chatMessageCollapse';
 import type {
     ChatMessage,
     ImageAttachment,
@@ -231,6 +232,10 @@ export interface ChatMessageRowProps {
     isCompactViewport: boolean;
     isLazyLoaded: boolean;
     loadMessageAtIndex: (messageIndex: number) => void;
+    isMessageCollapsed: boolean;
+    onToggleMessageCollapsed: (messageIndex: number) => void;
+    collapseLongCodeBlocksSignal: number;
+    expandLongCodeBlocksSignal: number;
 }
 
 export const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
@@ -274,6 +279,10 @@ export const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
     isCompactViewport,
     isLazyLoaded,
     loadMessageAtIndex,
+    isMessageCollapsed,
+    onToggleMessageCollapsed,
+    collapseLongCodeBlocksSignal,
+    expandLongCodeBlocksSignal,
 }) => {
     const activeChoice = msg.choices?.[msg.selectedChoiceIndex || 0];
     const currentLogprobs: TokenLogprob[] = activeChoice?.logprobs?.content || [];
@@ -297,6 +306,12 @@ export const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
         ? msg.tool_calls as ToolCall[]
         : EMPTY_TOOL_CALLS;
     const hasToolCalls = toolCalls.length > 0;
+    const isLongAssistantMessage = msg.role === 'assistant' && isLongMessageContent(msg.content || '');
+    const showCollapsedAssistantBody = isLongAssistantMessage && isMessageCollapsed && !msg.isLoading;
+    const collapsedAssistantPreview = React.useMemo(
+        () => buildCollapsedMessagePreview(msg.content || ''),
+        [msg.content]
+    );
     const messageActionCapabilities = React.useMemo(
         () => getMessageActionCapabilities(msg),
         [msg.role, msg.isLoading]
@@ -358,6 +373,9 @@ export const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
     const handleRateDown = React.useCallback(() => {
         handleRateMessage(index, 'down');
     }, [handleRateMessage, index]);
+    const handleToggleMessageCollapsed = React.useCallback(() => {
+        onToggleMessageCollapsed(index);
+    }, [onToggleMessageCollapsed, index]);
 
     const handleEditContentChange = React.useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
         onEditingContentChange(e.target.value);
@@ -401,6 +419,18 @@ export const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                 />
                 {msg.role === 'assistant' ? (
                     <div>
+                        {isLongAssistantMessage && (
+                            <div className="mb-3 flex justify-end">
+                                <button
+                                    onClick={handleToggleMessageCollapsed}
+                                    className="flex items-center gap-1.5 rounded-md border border-cyan-500/35 bg-slate-900/60 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-200 transition-colors hover:border-cyan-400/60 hover:bg-slate-900"
+                                    title={showCollapsedAssistantBody ? 'Expand full message' : 'Minimize long message'}
+                                >
+                                    {showCollapsedAssistantBody ? <Maximize2 size={12} /> : <Minimize2 size={12} />}
+                                    {showCollapsedAssistantBody ? 'Expand' : 'Minimize'}
+                                </button>
+                            </div>
+                        )}
                         {msg.isLoading ? (
                             <div className="flex flex-col gap-2">
                                 {hasToolCalls && (
@@ -417,11 +447,27 @@ export const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                             isLazyLoaded={isLazyLoaded}
                                             onLoadContent={loadMessageAtIndex}
                                             messageIndex={index}
+                                            collapseLongCodeBlocksSignal={collapseLongCodeBlocksSignal}
+                                            expandLongCodeBlocksSignal={expandLongCodeBlocksSignal}
                                         />
                                     </React.Suspense>
                                 )}
                                 <div className="flex items-center gap-2 text-slate-400 italic text-sm animate-pulse">
                                     <Brain size={16} className="text-primary" /> Thinking...
+                                </div>
+                            </div>
+                        ) : showCollapsedAssistantBody ? (
+                            <div className="space-y-3">
+                                {hasToolCalls && (
+                                    <ToolCallsList toolCalls={toolCalls} />
+                                )}
+                                <div className="rounded-lg border border-slate-700/70 bg-slate-900/40 p-3">
+                                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-cyan-200/90">
+                                        Message minimized
+                                    </div>
+                                    <pre className="m-0 max-h-56 overflow-hidden whitespace-pre-wrap text-xs leading-relaxed text-slate-300 font-sans">
+                                        {collapsedAssistantPreview}
+                                    </pre>
                                 </div>
                             </div>
                         ) : (
@@ -440,6 +486,8 @@ export const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                                 isLazyLoaded={isLazyLoaded}
                                                 onLoadContent={loadMessageAtIndex}
                                                 messageIndex={index}
+                                                collapseLongCodeBlocksSignal={collapseLongCodeBlocksSignal}
+                                                expandLongCodeBlocksSignal={expandLongCodeBlocksSignal}
                                             />
                                         </React.Suspense>
                                     </>
@@ -518,7 +566,7 @@ export const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
                                 </div>
                             )}
                         </div>
-                        {!msg.isLoading && isLastMessage && msg.content && (
+                        {!msg.isLoading && !showCollapsedAssistantBody && isLastMessage && msg.content && (
                             <React.Suspense fallback={null}>
                                 <QuickReplyTemplates
                                     lastAssistantMessage={msg.content}
@@ -634,6 +682,9 @@ export const ChatMessageRow: React.FC<ChatMessageRowProps> = React.memo(({
         prev.conversationFontSize === next.conversationFontSize &&
         prev.isCompactViewport === next.isCompactViewport &&
         prev.isLazyLoaded === next.isLazyLoaded &&
+        prev.isMessageCollapsed === next.isMessageCollapsed &&
+        prev.collapseLongCodeBlocksSignal === next.collapseLongCodeBlocksSignal &&
+        prev.expandLongCodeBlocksSignal === next.expandLongCodeBlocksSignal &&
         prev.modelNameById === next.modelNameById &&
         prev.currentModel === next.currentModel &&
         prev.secondaryModel === next.secondaryModel

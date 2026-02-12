@@ -1,5 +1,6 @@
 import React from 'react';
 import { AnimatePresence } from 'framer-motion';
+import { Maximize2, Minimize2 } from 'lucide-react';
 import type { ChatMessage } from '../../../shared/types';
 import type { LaunchReadinessStep } from '../ChatEmptyState';
 import type { ChatVirtuosoComponent, ChatVirtuosoHandle } from '../../lib/chatVirtuosoTypes';
@@ -31,6 +32,10 @@ interface ChatMessagesViewportProps {
     isLongPressMessageBookmarked: boolean;
     longPressMessageCapabilities: ChatMessageActionCapabilities;
     onLongPressAction: (action: ChatMessageAction) => void;
+    hasCollapsibleContent: boolean;
+    allCollapsibleContentCollapsed: boolean;
+    onCollapseAllLongContent: () => void;
+    onExpandAllLongContent: () => void;
 }
 
 export const ChatMessagesViewport: React.FC<ChatMessagesViewportProps> = React.memo(({
@@ -54,6 +59,10 @@ export const ChatMessagesViewport: React.FC<ChatMessagesViewportProps> = React.m
     isLongPressMessageBookmarked,
     longPressMessageCapabilities,
     onLongPressAction,
+    hasCollapsibleContent,
+    allCollapsibleContentCollapsed,
+    onCollapseAllLongContent,
+    onExpandAllLongContent,
 }) => {
     const Virtuoso = VirtuosoComponent as React.ComponentType<Record<string, unknown> & {
         ref?: React.Ref<unknown>;
@@ -62,6 +71,18 @@ export const ChatMessagesViewport: React.FC<ChatMessagesViewportProps> = React.m
     return (
         <>
             <div ref={messageListRef} className="flex-1 overflow-hidden bg-background relative min-w-0 max-w-full">
+                {history.length > 0 && hasCollapsibleContent && (
+                    <div className="absolute top-3 left-3 z-20">
+                        <button
+                            onClick={allCollapsibleContentCollapsed ? onExpandAllLongContent : onCollapseAllLongContent}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/40 bg-slate-900/85 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-cyan-200 shadow-sm backdrop-blur-sm transition-colors hover:border-cyan-400/70 hover:bg-slate-900"
+                            title={allCollapsibleContentCollapsed ? 'Expand all long message content' : 'Minimize all long message content'}
+                        >
+                            {allCollapsibleContentCollapsed ? <Maximize2 size={13} /> : <Minimize2 size={13} />}
+                            {allCollapsibleContentCollapsed ? 'Expand Long' : 'Minimize Long'}
+                        </button>
+                    </div>
+                )}
                 {swipeSessionIndicator && (
                     <div className="absolute top-3 right-3 z-20 px-2 py-1 rounded bg-primary/20 border border-primary/40 text-primary text-xs font-semibold">
                         {swipeSessionIndicator === 'next' ? 'Swiped to next chat' : 'Swiped to previous chat'}
@@ -150,11 +171,15 @@ export const ChatMessagesViewport: React.FC<ChatMessagesViewportProps> = React.m
     prev.longPressMenu === next.longPressMenu &&
     prev.longPressMessage === next.longPressMessage &&
     prev.isLongPressMessageBookmarked === next.isLongPressMessageBookmarked &&
+    prev.hasCollapsibleContent === next.hasCollapsibleContent &&
+    prev.allCollapsibleContentCollapsed === next.allCollapsibleContentCollapsed &&
     prev.longPressMessageCapabilities.canCopy === next.longPressMessageCapabilities.canCopy &&
     prev.longPressMessageCapabilities.canBookmark === next.longPressMessageCapabilities.canBookmark &&
     prev.longPressMessageCapabilities.canEdit === next.longPressMessageCapabilities.canEdit &&
     prev.longPressMessageCapabilities.canRegenerate === next.longPressMessageCapabilities.canRegenerate &&
     prev.longPressMessageCapabilities.canBranch === next.longPressMessageCapabilities.canBranch &&
     prev.longPressMessageCapabilities.canDelete === next.longPressMessageCapabilities.canDelete &&
-    prev.onLongPressAction === next.onLongPressAction
+    prev.onLongPressAction === next.onLongPressAction &&
+    prev.onCollapseAllLongContent === next.onCollapseAllLongContent &&
+    prev.onExpandAllLongContent === next.onExpandAllLongContent
 ));

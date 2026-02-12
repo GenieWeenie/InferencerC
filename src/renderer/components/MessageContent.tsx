@@ -15,6 +15,8 @@ interface MessageContentProps {
     isLazyLoaded?: boolean;
     onLoadContent?: (messageIndex: number) => void;
     messageIndex?: number;
+    collapseLongCodeBlocksSignal?: number;
+    expandLongCodeBlocksSignal?: number;
 }
 
 interface PlainTextContentProps {
@@ -64,6 +66,8 @@ const MessageContent: React.FC<MessageContentProps> = ({
     isLazyLoaded = false,
     onLoadContent,
     messageIndex,
+    collapseLongCodeBlocksSignal,
+    expandLongCodeBlocksSignal,
 }) => {
     const [displayContent, setDisplayContent] = React.useState(content);
     const [isLoadingContent, setIsLoadingContent] = React.useState(false);
@@ -210,6 +214,8 @@ const MessageContent: React.FC<MessageContentProps> = ({
                         isUser={isUser}
                         mcpAvailable={mcpAvailable}
                         onInsertToFile={onInsertToFile}
+                        collapseLongCodeBlocksSignal={collapseLongCodeBlocksSignal}
+                        expandLongCodeBlocksSignal={expandLongCodeBlocksSignal}
                     />
                 </React.Suspense>
             ) : renderMode === 'markdown' ? (
