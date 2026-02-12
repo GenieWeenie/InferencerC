@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
     Key, Server, Palette, Database, DollarSign, Activity, Settings as SettingsIcon, Sparkles, Plug, Download,
-    Shield, BarChart3, Eye, GraduationCap, type LucideIcon
+    Shield, BarChart3, Eye, GraduationCap, RefreshCw, type LucideIcon
 } from 'lucide-react';
 import MCPSettings from '../components/MCPSettings';
 import ModelDownloader from '../components/ModelDownloader';
@@ -32,14 +32,46 @@ import { onboardingService } from '../services/onboarding';
 import { credentialService } from '../services/credentials';
 import { readAnalyticsUsageStats } from '../services/analyticsStore';
 import {
+    fetchOpenRouterAuthoritativeBilling,
+    type OpenRouterAuthoritativeBilling,
+} from '../services/openRouterBilling';
+import {
     DEFAULT_SYSTEM_PRESETS,
     DEFAULT_USAGE_STATS,
     buildOpenRouterUsageStats,
+    readStoredBooleanWithFallback,
     parseStoredModelEndpoints,
     parseStoredSystemPresets,
     readStoredIntegerWithFallback,
     readStoredStringWithFallback,
 } from './settingsStorage';
+
+const AUTHORITATIVE_BILLING_TOGGLE_KEY = 'settings_usage_authoritative_billing_enabled';
+
+const formatUsd = (value: number | null): string => {
+    if (value === null) {
+        return '—';
+    }
+    return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+};
+
+const formatSyncTime = (isoDate: string): string => {
+    const parsedDate = new Date(isoDate);
+    if (Number.isNaN(parsedDate.getTime())) {
+        return 'Unknown';
+    }
+    return parsedDate.toLocaleString();
+};
+
+const getSourceLabel = (source: OpenRouterAuthoritativeBilling['source']): string => {
+    if (source === 'credits+key') {
+        return '/credits + /key';
+    }
+    if (source === 'credits') {
+        return '/credits';
+    }
+    return '/key';
+};
 
 const Settings: React.FC = () => {
     // API Keys
@@ -59,12 +91,14 @@ const Settings: React.FC = () => {
     const [newPreset, setNewPreset] = useState<Partial<SettingsSystemPreset>>({ name: '', prompt: '' });
     const [showAddPreset, setShowAddPreset] = useState(false);
 
-    // Usage Tracking (mock data for now)
-    const [usageStats, setUsageStats] = useState({
-        totalTokens: 0,
-        estimatedCost: 0,
-        sessionCount: 0
-    });
+    // Usage Tracking
+    const [usageStats, setUsageStats] = useState(DEFAULT_USAGE_STATS);
+    const [authoritativeBillingEnabled, setAuthoritativeBillingEnabled] = useState(() =>
+        readStoredBooleanWithFallback(AUTHORITATIVE_BILLING_TOGGLE_KEY, true)
+    );
+    const [authoritativeBilling, setAuthoritativeBilling] = useState<OpenRouterAuthoritativeBilling | null>(null);
+    const [authoritativeBillingLoading, setAuthoritativeBillingLoading] = useState(false);
+    const [authoritativeBillingError, setAuthoritativeBillingError] = useState<string | null>(null);
 
     // Active Tab
     const [activeTab, setActiveTab] = useState<SettingsTabId>('api');
@@ -106,6 +140,34 @@ const Settings: React.FC = () => {
         const usageHistory = readAnalyticsUsageStats();
         setUsageStats(buildOpenRouterUsageStats(usageHistory));
     }, []);
+
+    const refreshAuthoritativeBilling = React.useCallback(async () => {
+        if (!authoritativeBillingEnabled) {
+            setAuthoritativeBillingError(null);
+            return;
+        }
+
+        const apiKey = await credentialService.getOpenRouterApiKey();
+        if (!apiKey || apiKey.trim().length === 0) {
+            setAuthoritativeBilling(null);
+            setAuthoritativeBillingError('Add an OpenRouter API key in API Keys to fetch authoritative billing.');
+            return;
+        }
+
+        setAuthoritativeBillingLoading(true);
+        setAuthoritativeBillingError(null);
+
+        try {
+            const billing = await fetchOpenRouterAuthoritativeBilling(apiKey);
+            setAuthoritativeBilling(billing);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to fetch OpenRouter authoritative billing.';
+            setAuthoritativeBilling(null);
+            setAuthoritativeBillingError(message);
+        } finally {
+            setAuthoritativeBillingLoading(false);
+        }
+    }, [authoritativeBillingEnabled]);
 
     useEffect(() => {
         let removeUpdateDownloadedListener: (() => void) | undefined;
@@ -188,19 +250,45 @@ const Settings: React.FC = () => {
             return;
         }
         refreshUsageStats();
-        const interval = setInterval(refreshUsageStats, 3000);
-        return () => clearInterval(interval);
-    }, [activeTab, refreshUsageStats]);
+        void refreshAuthoritativeBilling();
+
+        const usageInterval = setInterval(refreshUsageStats, 3000);
+        const authoritativeInterval = setInterval(() => {
+            void refreshAuthoritativeBilling();
+        }, 60000);
+
+        return () => {
+            clearInterval(usageInterval);
+            clearInterval(authoritativeInterval);
+        };
+    }, [activeTab, refreshUsageStats, refreshAuthoritativeBilling]);
 
     const saveOpenRouterKey = async () => {
         if (!openRouterKey.trim()) {
             await credentialService.clearOpenRouterApiKey();
             toast.success('OpenRouter API key cleared');
+            if (authoritativeBillingEnabled) {
+                setAuthoritativeBilling(null);
+                setAuthoritativeBillingError('Add an OpenRouter API key in API Keys to fetch authoritative billing.');
+            }
             return;
         }
 
         await credentialService.setOpenRouterApiKey(openRouterKey);
         toast.success('OpenRouter API key saved securely');
+        if (activeTab === 'usage' && authoritativeBillingEnabled) {
+            void refreshAuthoritativeBilling();
+        }
+    };
+
+    const handleToggleAuthoritativeBilling = (enabled: boolean) => {
+        setAuthoritativeBillingEnabled(enabled);
+        localStorage.setItem(AUTHORITATIVE_BILLING_TOGGLE_KEY, enabled ? 'true' : 'false');
+        if (!enabled) {
+            setAuthoritativeBillingLoading(false);
+            setAuthoritativeBillingError(null);
+            setAuthoritativeBilling(null);
+        }
     };
 
     const saveGithubKey = async () => {
@@ -465,30 +553,99 @@ const Settings: React.FC = () => {
                 {/* Usage & Cost Tab */}
                 {activeTab === 'usage' && (
                     <div className="max-w-3xl space-y-6 animate-in fade-in slide-in-from-right-2">
-                        <h3 className="text-xl font-bold text-white">Token Usage & Cost Tracking</h3>
-                        <p className="text-slate-500">Track your API usage for OpenRouter models. Local models are free!</p>
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                                <h3 className="text-xl font-bold text-white">Token Usage & Cost Tracking</h3>
+                                <p className="text-slate-500">Track local estimates and optional OpenRouter authoritative billing.</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <label className="flex items-center gap-2 text-sm text-slate-300">
+                                    <input
+                                        type="checkbox"
+                                        checked={authoritativeBillingEnabled}
+                                        onChange={(event) => handleToggleAuthoritativeBilling(event.target.checked)}
+                                        className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-primary focus:ring-primary/50"
+                                    />
+                                    Authoritative OpenRouter billing
+                                </label>
+                                <button
+                                    type="button"
+                                    onClick={() => void refreshAuthoritativeBilling()}
+                                    disabled={!authoritativeBillingEnabled || authoritativeBillingLoading}
+                                    className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    <RefreshCw size={14} className={authoritativeBillingLoading ? 'animate-spin' : ''} />
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
 
-                        <div className="grid grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 text-center">
                                 <Activity size={24} className="mx-auto text-primary mb-2" />
                                 <div className="text-3xl font-bold text-white">{usageStats.totalTokens.toLocaleString()}</div>
-                                <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Total Tokens</div>
+                                <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Local Total Tokens</div>
                             </div>
                             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 text-center">
                                 <DollarSign size={24} className="mx-auto text-emerald-400 mb-2" />
                                 <div className="text-3xl font-bold text-white">${usageStats.estimatedCost.toFixed(4)}</div>
-                                <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Estimated Cost</div>
+                                <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Local Estimated Cost</div>
                             </div>
                             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 text-center">
                                 <Database size={24} className="mx-auto text-blue-400 mb-2" />
                                 <div className="text-3xl font-bold text-white">{usageStats.sessionCount}</div>
-                                <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Sessions</div>
+                                <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Local Sessions</div>
                             </div>
                         </div>
 
+                        {authoritativeBillingEnabled && (
+                            <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+                                <div className="flex items-center justify-between gap-3">
+                                    <h4 className="text-base font-semibold text-white">OpenRouter Authoritative Billing</h4>
+                                    <span className="text-xs text-slate-400">
+                                        {authoritativeBilling
+                                            ? `Last synced ${formatSyncTime(authoritativeBilling.fetchedAt)}`
+                                            : 'Not synced yet'}
+                                    </span>
+                                </div>
+
+                                {authoritativeBillingError && (
+                                    <p className="rounded-lg border border-rose-700/50 bg-rose-950/30 px-3 py-2 text-sm text-rose-300">
+                                        {authoritativeBillingError}
+                                    </p>
+                                )}
+
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                                    <div className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-3">
+                                        <p className="text-xs uppercase tracking-wider text-slate-500">Used (USD)</p>
+                                        <p className="mt-1 text-lg font-semibold text-white">
+                                            {authoritativeBillingLoading && !authoritativeBilling ? 'Loading...' : formatUsd(authoritativeBilling?.usedUsd ?? null)}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-3">
+                                        <p className="text-xs uppercase tracking-wider text-slate-500">Remaining (USD)</p>
+                                        <p className="mt-1 text-lg font-semibold text-white">
+                                            {authoritativeBillingLoading && !authoritativeBilling ? 'Loading...' : formatUsd(authoritativeBilling?.remainingUsd ?? null)}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-3">
+                                        <p className="text-xs uppercase tracking-wider text-slate-500">Limit (USD)</p>
+                                        <p className="mt-1 text-lg font-semibold text-white">
+                                            {authoritativeBillingLoading && !authoritativeBilling ? 'Loading...' : formatUsd(authoritativeBilling?.limitUsd ?? null)}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <p className="text-xs text-slate-400">
+                                    Source: {authoritativeBilling ? getSourceLabel(authoritativeBilling.source) : '—'}.
+                                    Data is fetched live from your OpenRouter account for billing truth.
+                                </p>
+                            </div>
+                        )}
+
                         <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-6">
                             <p className="text-slate-400 text-sm">
-                                💡 <strong>Tip:</strong> Usage is estimated from tracked OpenRouter requests in this app. For billing truth, check your OpenRouter dashboard.
+                                💡 <strong>Tip:</strong> Local cards are app-side estimates from tracked requests. Authoritative billing uses OpenRouter account endpoints.
                             </p>
                         </div>
                     </div>

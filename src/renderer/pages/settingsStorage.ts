@@ -159,3 +159,23 @@ export const readStoredStringWithFallback = (key: string, fallback: string): str
         return fallback;
     }
 };
+
+export const readStoredBooleanWithFallback = (key: string, fallback: boolean): boolean => {
+    try {
+        const raw = localStorage.getItem(key);
+        if (typeof raw !== 'string') {
+            return fallback;
+        }
+
+        const normalized = raw.trim().toLowerCase();
+        if (normalized === 'true') {
+            return true;
+        }
+        if (normalized === 'false') {
+            return false;
+        }
+        return fallback;
+    } catch {
+        return fallback;
+    }
+};
