@@ -70,7 +70,7 @@ describe('buildRecoveryStateSnapshot', () => {
             enabledTools: new Set<string>(),
         })).toBeNull();
 
-        const snapshot = buildRecoveryStateSnapshot({
+        const missingModelSnapshot = buildRecoveryStateSnapshot({
             timestamp: Number.NaN,
             sessionId: 'session-2',
             history: null as unknown as ChatMessage[],
@@ -90,12 +90,40 @@ describe('buildRecoveryStateSnapshot', () => {
             prefill: 42 as unknown as string | null,
             enabledTools: [1, '  alpha  ', '', 'alpha'] as unknown as Set<string>,
         });
+        expect(missingModelSnapshot).toBeNull();
 
-        expect(snapshot?.history).toEqual([]);
-        expect(snapshot?.currentModel).toBe('');
+        const snapshot = buildRecoveryStateSnapshot({
+            timestamp: Number.NaN,
+            sessionId: 'session-2',
+            history: [
+                { role: 'user', content: '  hello  ' },
+                { role: 'assistant', content: 12 as unknown as string },
+                { role: 'invalid-role' as unknown as ChatMessage['role'], content: 'bad' },
+            ],
+            currentModel: ' model-a ',
+            systemPrompt: null as unknown as string,
+            temperature: 5,
+            topP: -2,
+            maxTokens: 0,
+            batchSize: -10,
+            expertMode: '   ',
+            thinkingEnabled: 'yes' as unknown as boolean,
+            battleMode: 1 as unknown as boolean,
+            secondaryModel: null as unknown as string,
+            autoRouting: 0 as unknown as boolean,
+            responseFormat: 'invalid' as unknown as 'text' | 'json_object',
+            input: undefined as unknown as string,
+            prefill: 42 as unknown as string | null,
+            enabledTools: [1, '  alpha  ', '', 'alpha'] as unknown as Set<string>,
+        });
+        expect(snapshot?.history).toEqual([
+            { role: 'user', content: '  hello  ' },
+            { role: 'assistant', content: '' },
+        ]);
+        expect(snapshot?.currentModel).toBe('model-a');
         expect(snapshot?.systemPrompt).toBe('');
-        expect(snapshot?.temperature).toBe(0.7);
-        expect(snapshot?.topP).toBe(1);
+        expect(snapshot?.temperature).toBe(2);
+        expect(snapshot?.topP).toBe(0);
         expect(snapshot?.maxTokens).toBe(2048);
         expect(snapshot?.batchSize).toBe(1);
         expect(snapshot?.expertMode).toBeNull();

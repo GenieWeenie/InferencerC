@@ -56,16 +56,18 @@ export const useChatSessionPersistence = ({
     enabledTools,
 }: UseChatSessionPersistenceParams) => {
     useEffect(() => {
-        if (!sessionId || !currentModel) return;
+        const normalizedSessionId = sessionId.trim();
+        const normalizedModelId = currentModel.trim();
+        if (!normalizedSessionId || !normalizedModelId) return;
 
         const timer = setTimeout(() => {
             const canPersistCurrentHistoryDirectly = loadedMessageIndices.size >= history.length;
             const needsSessionFallback = !canPersistCurrentHistoryDirectly;
             const existingSessionMessages = needsSessionFallback
                 ? (
-                    loadedSessionIdRef.current === sessionId
+                    loadedSessionIdRef.current === normalizedSessionId
                         ? loadedSessionMessagesRef.current
-                        : (HistoryService.getSession(sessionId)?.messages ?? [])
+                        : (HistoryService.getSession(normalizedSessionId)?.messages ?? [])
                 )
                 : [];
             const persistedAt = Date.now();
@@ -85,10 +87,10 @@ export const useChatSessionPersistence = ({
                 });
 
             HistoryService.saveSession({
-                id: sessionId,
+                id: normalizedSessionId,
                 title: persistedTitle,
                 lastModified: persistedAt,
-                modelId: currentModel,
+                modelId: normalizedModelId,
                 messages: messagesToSave,
                 expertMode,
                 thinkingEnabled,
@@ -98,13 +100,13 @@ export const useChatSessionPersistence = ({
                 maxTokens,
                 batchSize,
             });
-            loadedSessionIdRef.current = sessionId;
+            loadedSessionIdRef.current = normalizedSessionId;
             loadedSessionMessagesRef.current = messagesToSave;
 
             const sidebarMetadataSignature = JSON.stringify({
-                sessionId,
+                sessionId: normalizedSessionId,
                 persistedTitle,
-                currentModel,
+                currentModel: normalizedModelId,
                 expertMode: expertMode ?? null,
                 thinkingEnabled: Boolean(thinkingEnabled),
                 systemPrompt,
@@ -121,10 +123,10 @@ export const useChatSessionPersistence = ({
 
             setSavedSessions((prev) => {
                 const metadata: ChatSession = {
-                    id: sessionId,
+                    id: normalizedSessionId,
                     title: persistedTitle,
                     lastModified: persistedAt,
-                    modelId: currentModel,
+                    modelId: normalizedModelId,
                     messages: [],
                     expertMode,
                     thinkingEnabled,

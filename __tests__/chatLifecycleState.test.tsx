@@ -3,7 +3,11 @@
  */
 import React from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { useChatLifecycleState } from '../src/renderer/hooks/useChatLifecycleState';
+import {
+    readCloudSyncAuthSnapshot,
+    readHasConfiguredMcpServers,
+    useChatLifecycleState,
+} from '../src/renderer/hooks/useChatLifecycleState';
 
 jest.mock('react-virtuoso', () => ({
     Virtuoso: () => null,
@@ -86,6 +90,51 @@ describe('useChatLifecycleState', () => {
 
         await waitFor(() => {
             expect(result.current.isCloudSyncAuthenticated).toBe(true);
+        });
+    });
+
+    it('parses malformed cloud and MCP snapshots safely', () => {
+        localStorage.setItem('cloud_sync_config_v1', '{bad-json');
+        expect(readCloudSyncAuthSnapshot()).toBe(false);
+
+        localStorage.setItem('cloud_sync_config_v1', JSON.stringify({
+            token: 't',
+            accountId: '   ',
+            encryptionSalt: 's',
+        }));
+        expect(readCloudSyncAuthSnapshot()).toBe(false);
+
+        localStorage.setItem('mcp_servers', JSON.stringify([{ id: '   ' }, { id: 123 }]));
+        expect(readHasConfiguredMcpServers()).toBe(false);
+
+        localStorage.setItem('mcp_servers', JSON.stringify([{ id: 'server-1' }]));
+        expect(readHasConfiguredMcpServers()).toBe(true);
+    });
+
+    it('handles storage refresh events safely when persisted payloads become malformed', async () => {
+        localStorage.setItem('cloud_sync_config_v1', JSON.stringify({
+            token: 't',
+            accountId: 'a',
+            encryptionSalt: 's',
+        }));
+
+        const { result } = renderHook(() => useChatLifecycleState({
+            historyLength: 1,
+            showSearchResultsList: false,
+            searchResultsLength: 0,
+        }));
+
+        await waitFor(() => {
+            expect(result.current.isCloudSyncAuthenticated).toBe(true);
+        });
+
+        act(() => {
+            localStorage.setItem('cloud_sync_config_v1', '{broken');
+            window.dispatchEvent(new Event('storage'));
+        });
+
+        await waitFor(() => {
+            expect(result.current.isCloudSyncAuthenticated).toBe(false);
         });
     });
 });

@@ -82,6 +82,26 @@ const sanitizePromptSnippet = (value: unknown): PromptSnippet | null => {
     };
 };
 
+const normalizePromptMutationInput = (alias: string, title: string, content: string): {
+    alias: string;
+    aliasKey: string;
+    title: string;
+    content: string;
+} | null => {
+    const normalizedAlias = sanitizeNonEmptyString(alias)?.replace(/^\//, '');
+    const normalizedTitle = sanitizeNonEmptyString(title);
+    const normalizedContent = sanitizeNonEmptyString(content);
+    if (!normalizedAlias || !normalizedTitle || !normalizedContent) {
+        return null;
+    }
+    return {
+        alias: normalizedAlias,
+        aliasKey: normalizedAlias.toLowerCase(),
+        title: normalizedTitle,
+        content: normalizedContent,
+    };
+};
+
 export const parseStoredPromptSnippets = (raw: string): PromptSnippet[] | null => {
     const parsed = parseJson(raw);
     if (!Array.isArray(parsed)) {
@@ -141,11 +161,18 @@ export const usePrompts = () => {
 
     const savePrompt = (alias: string, title: string, content: string) => {
         setPrompts((prev) => {
+            const normalized = normalizePromptMutationInput(alias, title, content);
+            if (!normalized) {
+                return prev;
+            }
+            if (prev.some((snippet) => snippet.alias.toLowerCase() === normalized.aliasKey)) {
+                return prev;
+            }
             const newPrompt: PromptSnippet = {
                 id: createPromptId(),
-                alias,
-                title,
-                content
+                alias: normalized.alias,
+                title: normalized.title,
+                content: normalized.content,
             };
             const updated = [...prev, newPrompt];
             persistPrompts(updated);
@@ -155,9 +182,40 @@ export const usePrompts = () => {
 
     const updatePrompt = (id: string, alias: string, title: string, content: string) => {
         setPrompts((prev) => {
-            const updated = prev.map(p =>
-                p.id === id ? { ...p, alias, title, content } : p
+            const normalized = normalizePromptMutationInput(alias, title, content);
+            if (!normalized) {
+                return prev;
+            }
+            const targetIndex = prev.findIndex((prompt) => prompt.id === id);
+            if (targetIndex < 0) {
+                return prev;
+            }
+
+            const hasDuplicateAlias = prev.some((prompt, index) => (
+                index !== targetIndex && prompt.alias.toLowerCase() === normalized.aliasKey
+            ));
+            if (hasDuplicateAlias) {
+                return prev;
+            }
+
+            const nextPrompt: PromptSnippet = {
+                ...prev[targetIndex],
+                alias: normalized.alias,
+                title: normalized.title,
+                content: normalized.content,
+            };
+            const unchanged = (
+                prev[targetIndex].alias === nextPrompt.alias
+                && prev[targetIndex].title === nextPrompt.title
+                && prev[targetIndex].content === nextPrompt.content
             );
+            if (unchanged) {
+                return prev;
+            }
+
+            const updated = prev.map((prompt, index) => (
+                index === targetIndex ? nextPrompt : prompt
+            ));
             persistPrompts(updated);
             return updated;
         });
@@ -166,6 +224,9 @@ export const usePrompts = () => {
     const deletePrompt = (id: string) => {
         setPrompts((prev) => {
             const updated = prev.filter(p => p.id !== id);
+            if (updated.length === prev.length) {
+                return prev;
+            }
             persistPrompts(updated);
             return updated;
         });

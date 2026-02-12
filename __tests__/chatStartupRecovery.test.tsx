@@ -99,4 +99,60 @@ describe('useChatStartupRecovery', () => {
             expect(completeOnboardingMock).toHaveBeenCalled();
         });
     });
+
+    it('marks recovery exit state on mount/unmount and handles malformed clean-exit marker safely', async () => {
+        localStorage.setItem('app_recovery_clean_exit', 'unexpected');
+        getRecoveryStateMock.mockReturnValue({
+            sessionId: 'session-2',
+            timestamp: Date.now(),
+            draftMessage: 'should-not-restore',
+        });
+        loadOnboardingServiceMock.mockResolvedValue({
+            hasCompletedOnboarding: () => true,
+            getTutorials: () => [],
+            completeOnboarding: jest.fn(),
+        });
+
+        const { result, unmount } = renderHook(() => useChatStartupRecovery({
+            loadSession: jest.fn(),
+            setInput: (jest.fn() as unknown) as React.Dispatch<React.SetStateAction<string>>,
+        }));
+
+        expect(localStorage.getItem('app_recovery_clean_exit')).toBe('false');
+        expect(result.current.showRecoveryDialog).toBe(false);
+
+        unmount();
+        expect(localStorage.getItem('app_recovery_clean_exit')).toBe('true');
+    });
+
+    it('dismisses recovery dialog and clears persisted recovery state', async () => {
+        localStorage.setItem('app_recovery_clean_exit', 'false');
+        getRecoveryStateMock.mockReturnValue({
+            sessionId: 'session-3',
+            timestamp: Date.now(),
+            draftMessage: 'draft',
+        });
+        loadOnboardingServiceMock.mockResolvedValue({
+            hasCompletedOnboarding: () => true,
+            getTutorials: () => [],
+            completeOnboarding: jest.fn(),
+        });
+
+        const { result } = renderHook(() => useChatStartupRecovery({
+            loadSession: jest.fn(),
+            setInput: (jest.fn() as unknown) as React.Dispatch<React.SetStateAction<string>>,
+        }));
+
+        await waitFor(() => {
+            expect(result.current.showRecoveryDialog).toBe(true);
+        });
+
+        act(() => {
+            result.current.handleDismissRecovery();
+        });
+
+        expect(clearRecoveryStateMock).toHaveBeenCalled();
+        expect(result.current.showRecoveryDialog).toBe(false);
+        expect(localStorage.getItem('app_recovery_clean_exit')).toBe('true');
+    });
 });
