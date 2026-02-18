@@ -84,6 +84,14 @@ Branch from `master`, open a PR, wait for **CI / validate** to pass. See [CONTRI
 
 ---
 
+## About the author
+
+InferencerC is built by **GenieWeenie**. I like building desktop developer tools and AI UX—especially Electron apps that make local + remote models feel fast, practical, and fun.
+
+If something feels confusing, broken, or missing, open an issue with what you expected to happen (and what actually happened).
+
+---
+
 ## License
 
 ISC
