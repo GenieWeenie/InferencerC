@@ -43,7 +43,7 @@ Use the PR template and include:
 
 ## Maintainer Settings (GitHub UI)
 
-Set branch protection on `master`:
+Branch protection is available on **public** repos (and on private with GitHub Pro). After making the repo public, set branch protection on `master`:
 
 1. Require a pull request before merging
 2. Require status checks to pass
