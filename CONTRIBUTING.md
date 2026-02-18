@@ -1,5 +1,7 @@
 # Contributing
 
+Repository: **https://github.com/GenieWeenie/InferencerC** — use this URL when forking or cloning.
+
 This repository uses a simple safe GitHub flow to protect `master`.
 
 ## Safe Flow

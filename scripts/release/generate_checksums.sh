@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TARGET_DIR="${1:-$ROOT_DIR/release-artifacts}"
 OUTPUT_PATH="${2:-$ROOT_DIR/output/release/checksums.sha256}"
+# Resolve relative paths from repo root so script works from any cwd (e.g. in CI)
+[[ "$TARGET_DIR" != /* ]] && TARGET_DIR="$ROOT_DIR/$TARGET_DIR"
+[[ "$OUTPUT_PATH" != /* ]] && OUTPUT_PATH="$ROOT_DIR/$OUTPUT_PATH"
 
 mkdir -p "$(dirname "$OUTPUT_PATH")"
 

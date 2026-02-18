@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUTPUT_PATH="${1:-$ROOT_DIR/output/release/release-notes.md}"
+# Resolve relative path from repo root so script works from any cwd (e.g. in CI)
+[[ "$OUTPUT_PATH" != /* ]] && OUTPUT_PATH="$ROOT_DIR/$OUTPUT_PATH"
 
 mkdir -p "$(dirname "$OUTPUT_PATH")"
 

@@ -264,8 +264,8 @@ Release checklist and signed macOS setup:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/inferencer-c.git
-cd inferencer-c
+git clone https://github.com/GenieWeenie/InferencerC.git
+cd InferencerC
 
 # Install dependencies
 npm install
