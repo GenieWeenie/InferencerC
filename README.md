@@ -4,7 +4,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-4.0.18-blue.svg)
+![Version](https://img.shields.io/badge/version-4.0.19-blue.svg)
 ![Electron](https://img.shields.io/badge/Electron-40.0-47848F?logo=electron)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript)
