@@ -6,7 +6,7 @@ Documentation is organized by purpose:
 - `guides/INTEGRATION_GUIDES.md` - GitHub, Notion, Slack, and Discord setup
 - `guides/PLUGIN_DEVELOPMENT_TUTORIAL.md` - plugin authoring walkthrough
 - `guides/TROUBLESHOOTING.md` - common issues and recovery steps
-- `project-history/` - implementation plans, rollout notes, and verification reports
+- `project-history/` - historical archive of older implementation plans and verification reports (not active roadmap)
 
 Interactive docs are also available inside the app:
 

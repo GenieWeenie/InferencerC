@@ -1,6 +1,14 @@
-# Project History Docs
+# Project History Docs (Historical Archive)
 
-This folder contains implementation plans, rollout summaries, and verification notes that were previously stored at the repository root.
+This folder is an archive of historical plans, rollout summaries, and verification notes from earlier development phases.
+
+## Important
+
+1. Files in this directory are historical snapshots, not active roadmap sources.
+2. Unchecked checklist items in these documents are archival context only and should not be treated as current backlog.
+3. The active roadmap/progress source for v3.1 is:
+   - `docs/V3_1_BUILD_PLAN.md`
+   - `docs/PASS_LEDGER_215_540.md`
 
 ## Core roadmaps
 

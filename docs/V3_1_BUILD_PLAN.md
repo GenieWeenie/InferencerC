@@ -280,6 +280,18 @@ Make InferencerC a serious daily-driver competitor by focusing on:
    - Pass 213: extract memoized markdown code-block renderer in `MessageContentRich` and memoize the markdown components map to reduce heavy inline renderer recreation.
    - Pass 214: expand `chatStateGuards` tests for stop-generation and outgoing-message patch helpers, including deterministic no-op/update coverage.
 
+## Extended Pass Coverage (215-540)
+
+The roadmap work continued beyond pass 214 and is now fully tracked in:
+
+- `docs/PASS_LEDGER_215_540.md`
+
+Current coverage status:
+
+1. Passes `215-540` are present in git history.
+2. There are no missing pass numbers in that range.
+3. Batches are grouped by commit range with hash + summary for auditability.
+
 ## Release Checklist for v3.1.x
 
 1. Feature branch + PR
