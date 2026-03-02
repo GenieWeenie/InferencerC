@@ -14,7 +14,8 @@ export type SettingsTabId =
     | 'integrations'
     | 'accessibility'
     | 'onboarding'
-    | 'plugins';
+    | 'plugins'
+    | 'workspace';
 
 export interface SettingsUpdateInfo {
     version: string;
