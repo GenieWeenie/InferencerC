@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
     Key, Server, Palette, Database, DollarSign, Activity, Settings as SettingsIcon, Sparkles, Plug, Download,
-    Shield, BarChart3, Eye, GraduationCap, RefreshCw, type LucideIcon
+    Shield, BarChart3, Eye, GraduationCap, RefreshCw, FolderTree, type LucideIcon
 } from 'lucide-react';
 import MCPSettings from '../components/MCPSettings';
 import ModelDownloader from '../components/ModelDownloader';
@@ -13,6 +13,7 @@ import { SettingsIntegrationsTab } from '../components/settings/SettingsIntegrat
 import { SettingsPresetsTab, type SettingsSystemPreset } from '../components/settings/SettingsPresetsTab';
 import { SettingsPrivacyTab } from '../components/settings/SettingsPrivacyTab';
 import { SettingsWebhooksTab } from '../components/settings/SettingsWebhooksTab';
+import { SettingsWorkspaceTab } from '../components/settings/SettingsWorkspaceTab';
 import type {
     SettingsTabId,
     SettingsUpdateInfo,
@@ -708,6 +709,7 @@ const Settings: React.FC = () => {
                 <TabButton id="integrations" label="Integrations" icon={Plug} />
                 <TabButton id="accessibility" label="Accessibility" icon={Eye} />
                 <TabButton id="onboarding" label="Onboarding" icon={GraduationCap} />
+                <TabButton id="workspace" label="Workspace & context" icon={FolderTree} />
                 <TabButton id="usage" label="Usage" icon={DollarSign} />
             </div>
 
@@ -846,6 +848,11 @@ const Settings: React.FC = () => {
                 {/* Integrations Tab */}
                 {activeTab === 'integrations' && (
                     <SettingsIntegrationsTab />
+                )}
+
+                {/* Workspace & context Tab (GEN-153) */}
+                {activeTab === 'workspace' && (
+                    <SettingsWorkspaceTab />
                 )}
 
                 {/* Usage & Cost Tab */}
