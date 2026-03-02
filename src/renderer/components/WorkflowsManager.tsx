@@ -7,14 +7,15 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    X, Plus, Trash2, Edit2, Save, Play, Pause, Settings, Zap,
-    CheckCircle, AlertCircle, ArrowRight
+    X, Plus, Trash2, Edit2, Save, Zap, History, RotateCcw,
+    CheckCircle, AlertCircle
 } from 'lucide-react';
 import {
     workflowsService,
     WorkflowRule,
     WorkflowCondition,
     WorkflowAction,
+    WorkflowExecution,
 } from '../services/workflows';
 import { toast } from 'sonner';
 
@@ -53,17 +54,62 @@ export const WorkflowsManager: React.FC<WorkflowsManagerProps> = ({
     onClose,
 }) => {
     const [workflows, setWorkflows] = useState<WorkflowRule[]>([]);
+    const [executionHistory, setExecutionHistory] = useState<WorkflowExecution[]>([]);
     const [editingWorkflow, setEditingWorkflow] = useState<WorkflowRule | null>(null);
     const [showCreateForm, setShowCreateForm] = useState(false);
+    const [rerunningId, setRerunningId] = useState<string | null>(null);
+    const [pendingCount, setPendingCount] = useState(0);
+    const [approving, setApproving] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
             loadWorkflows();
+            setExecutionHistory(workflowsService.getExecutionHistory(50));
+            setPendingCount(workflowsService.getPendingApprovals().length);
         }
     }, [isOpen]);
 
     const loadWorkflows = () => {
         setWorkflows(workflowsService.getAllWorkflows());
+    };
+
+    const refreshHistory = () => {
+        setExecutionHistory(workflowsService.getExecutionHistory(50));
+    };
+
+    const handleRerun = async (workflowId: string) => {
+        setRerunningId(workflowId);
+        try {
+            const exec = await workflowsService.runWorkflowById(workflowId);
+            if (exec) {
+                toast.success('Workflow rerun completed');
+                refreshHistory();
+                setPendingCount(workflowsService.getPendingApprovals().length);
+            } else {
+                toast.error('Workflow not found');
+            }
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : 'Rerun failed');
+        } finally {
+            setRerunningId(null);
+        }
+    };
+
+    const handleApprovePending = async () => {
+        setApproving(true);
+        try {
+            const result = await workflowsService.approveAndRunPendingActions();
+            if (result.success) {
+                toast.success('Approved actions completed');
+                setPendingCount(0);
+            } else {
+                toast.error(result.error ?? 'Approval run failed');
+            }
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : 'Approval failed');
+        } finally {
+            setApproving(false);
+        }
     };
 
     const handleCreateWorkflow = () => {
@@ -140,6 +186,22 @@ export const WorkflowsManager: React.FC<WorkflowsManagerProps> = ({
                         </div>
                     </div>
 
+                    {/* Pending approvals banner (GEN-151) */}
+                    {pendingCount > 0 && (
+                        <div className="mx-6 mt-4 flex items-center justify-between gap-4 py-3 px-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                            <span className="text-amber-200 text-sm">
+                                {pendingCount} high-impact action{pendingCount !== 1 ? 's' : ''} require approval (webhook, notification).
+                            </span>
+                            <button
+                                onClick={handleApprovePending}
+                                disabled={approving}
+                                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
+                            >
+                                {approving ? 'Running…' : 'Approve and run'}
+                            </button>
+                        </div>
+                    )}
+
                     {/* Content */}
                     <div className="flex-1 overflow-y-auto p-6">
                         {workflows.length === 0 ? (
@@ -164,6 +226,54 @@ export const WorkflowsManager: React.FC<WorkflowsManagerProps> = ({
                                 ))}
                             </div>
                         )}
+
+                        {/* Run history (GEN-152) */}
+                        <div className="mt-8 pt-6 border-t border-slate-700">
+                            <div className="flex items-center gap-2 mb-3">
+                                <History className="w-5 h-5 text-slate-400" />
+                                <h3 className="text-lg font-semibold text-white">Run history</h3>
+                            </div>
+                            {executionHistory.length === 0 ? (
+                                <p className="text-sm text-slate-500">No runs yet. Workflows will appear here when they run.</p>
+                            ) : (
+                                <ul className="space-y-2 max-h-48 overflow-y-auto">
+                                    {executionHistory.map((exec, i) => {
+                                        const name = workflowsService.getWorkflow(exec.workflowId)?.name ?? exec.workflowId;
+                                        const date = new Date(exec.triggeredAt).toLocaleString();
+                                        return (
+                                            <li
+                                                key={`${exec.workflowId}-${exec.triggeredAt}-${i}`}
+                                                className="flex items-center justify-between gap-2 py-2 px-3 bg-slate-800/50 rounded border border-slate-700"
+                                            >
+                                                <div className="min-w-0 flex-1">
+                                                    <span className="font-medium text-white truncate block">{name}</span>
+                                                    <span className="text-xs text-slate-500">{date}</span>
+                                                    {exec.error && (
+                                                        <span className="text-xs text-red-400 block truncate">{exec.error}</span>
+                                                    )}
+                                                </div>
+                                                <div className="flex items-center gap-2 shrink-0">
+                                                    {exec.success ? (
+                                                        <CheckCircle className="w-4 h-4 text-green-500" aria-hidden />
+                                                    ) : (
+                                                        <AlertCircle className="w-4 h-4 text-amber-500" aria-hidden />
+                                                    )}
+                                                    <button
+                                                        onClick={() => handleRerun(exec.workflowId)}
+                                                        disabled={rerunningId === exec.workflowId}
+                                                        className="p-1.5 rounded hover:bg-slate-700 text-slate-400 hover:text-white transition-colors disabled:opacity-50"
+                                                        title="Rerun workflow"
+                                                        aria-label="Rerun workflow"
+                                                    >
+                                                        <RotateCcw size={14} className={rerunningId === exec.workflowId ? 'animate-spin' : ''} />
+                                                    </button>
+                                                </div>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            )}
+                        </div>
                     </div>
 
                     {/* Edit Dialog */}
