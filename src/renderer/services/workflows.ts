@@ -65,6 +65,12 @@ const ACTION_TYPES = new Set<WorkflowAction['type']>([
     'send-notification',
 ]);
 
+/** Actions that require explicit user approval before running (GEN-151) */
+export const HIGH_IMPACT_ACTION_TYPES = new Set<WorkflowAction['type']>([
+    'trigger-webhook',
+    'send-notification',
+]);
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 };
@@ -196,6 +202,41 @@ const parseStoredWorkflows = (raw: string): WorkflowRule[] => {
         });
 };
 
+const EXECUTION_HISTORY_KEY = 'workflow_execution_history';
+const MAX_EXECUTION_HISTORY = 100;
+
+const sanitizeExecution = (value: unknown): WorkflowExecution | null => {
+    if (!isRecord(value)) return null;
+    const workflowId = sanitizeNonEmptyString(value.workflowId);
+    const triggeredAt = typeof value.triggeredAt === 'number' && Number.isFinite(value.triggeredAt) ? value.triggeredAt : null;
+    if (!workflowId || triggeredAt === null) return null;
+    const conditionsMatched = Array.isArray(value.conditionsMatched)
+        ? value.conditionsMatched.map(sanitizeCondition).filter((c): c is WorkflowCondition => c !== null)
+        : [];
+    const actionsExecuted = Array.isArray(value.actionsExecuted)
+        ? value.actionsExecuted.map(sanitizeAction).filter((a): a is WorkflowAction => a !== null)
+        : [];
+    if (typeof value.success !== 'boolean') return null;
+    const error = typeof value.error === 'string' ? value.error : undefined;
+    return {
+        workflowId,
+        triggeredAt,
+        conditionsMatched,
+        actionsExecuted,
+        success: value.success,
+        error,
+    };
+};
+
+const parseStoredExecutionHistory = (raw: string): WorkflowExecution[] => {
+    const parsed = parseJson(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+        .map((entry) => sanitizeExecution(entry))
+        .filter((entry): entry is WorkflowExecution => entry !== null)
+        .slice(-MAX_EXECUTION_HISTORY);
+};
+
 export class WorkflowsService {
     private static instance: WorkflowsService;
     private workflows: Map<string, WorkflowRule> = new Map();
@@ -204,6 +245,29 @@ export class WorkflowsService {
 
     private constructor() {
         this.loadWorkflows();
+        this.loadExecutionHistory();
+    }
+
+    private loadExecutionHistory(): void {
+        try {
+            const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(EXECUTION_HISTORY_KEY) : null;
+            if (stored) {
+                this.executionHistory = parseStoredExecutionHistory(stored);
+            }
+        } catch (error) {
+            console.error('Failed to load workflow execution history:', error);
+        }
+    }
+
+    private saveExecutionHistory(): void {
+        try {
+            if (typeof localStorage !== 'undefined') {
+                const slice = this.executionHistory.slice(-MAX_EXECUTION_HISTORY);
+                localStorage.setItem(EXECUTION_HISTORY_KEY, JSON.stringify(slice));
+            }
+        } catch (error) {
+            console.error('Failed to save workflow execution history:', error);
+        }
     }
 
     static getInstance(): WorkflowsService {
@@ -399,12 +463,55 @@ export class WorkflowsService {
     }
 
     /**
-     * Execute workflow actions
+     * Execute workflow actions. High-impact actions are collected and not run until approved.
      */
-    private executeActions(actions: WorkflowAction[]): { success: boolean; error?: string } {
+    private executeActions(actions: WorkflowAction[]): { success: boolean; error?: string; pendingActions?: WorkflowAction[] } {
+        const pendingActions: WorkflowAction[] = [];
+        const toRun: WorkflowAction[] = [];
+        for (const a of actions) {
+            if (HIGH_IMPACT_ACTION_TYPES.has(a.type)) {
+                pendingActions.push(a);
+            } else {
+                toRun.push(a);
+            }
+        }
         try {
-            // Actions would be executed here
-            // For now, we just track them
+            // Run non-high-impact actions (stub: just track for now)
+            for (const _ of toRun) {
+                // Actions would be executed here
+            }
+            if (pendingActions.length > 0) {
+                this.pendingApprovals.push(...pendingActions);
+                return { success: true, pendingActions };
+            }
+            return { success: true };
+        } catch (error) {
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error',
+            };
+        }
+    }
+
+    private pendingApprovals: WorkflowAction[] = [];
+
+    /**
+     * Get actions waiting for user approval (GEN-151)
+     */
+    getPendingApprovals(): WorkflowAction[] {
+        return [...this.pendingApprovals];
+    }
+
+    /**
+     * Run previously high-impact actions after user approval
+     */
+    async approveAndRunPendingActions(): Promise<{ success: boolean; error?: string }> {
+        const toRun = [...this.pendingApprovals];
+        this.pendingApprovals = [];
+        try {
+            for (const _ of toRun) {
+                // Execute approved high-impact actions (stub: track only for now)
+            }
             return { success: true };
         } catch (error) {
             return {
@@ -446,11 +553,10 @@ export class WorkflowsService {
 
                 executions.push(execution);
                 this.executionHistory.push(execution);
-
-                // Limit history size
-                if (this.executionHistory.length > 100) {
-                    this.executionHistory = this.executionHistory.slice(-100);
+                if (this.executionHistory.length > MAX_EXECUTION_HISTORY) {
+                    this.executionHistory = this.executionHistory.slice(-MAX_EXECUTION_HISTORY);
                 }
+                this.saveExecutionHistory();
             }
         }
 
@@ -458,7 +564,30 @@ export class WorkflowsService {
     }
 
     /**
-     * Get execution history
+     * Run a workflow by ID (rerun): execute its actions and record to history.
+     */
+    async runWorkflowById(workflowId: string): Promise<WorkflowExecution | null> {
+        const workflow = this.workflows.get(workflowId);
+        if (!workflow) return null;
+        const result = this.executeActions(workflow.actions);
+        const execution: WorkflowExecution = {
+            workflowId: workflow.id,
+            triggeredAt: Date.now(),
+            conditionsMatched: [],
+            actionsExecuted: workflow.actions,
+            success: result.success,
+            error: result.error,
+        };
+        this.executionHistory.push(execution);
+        if (this.executionHistory.length > MAX_EXECUTION_HISTORY) {
+            this.executionHistory = this.executionHistory.slice(-MAX_EXECUTION_HISTORY);
+        }
+        this.saveExecutionHistory();
+        return execution;
+    }
+
+    /**
+     * Get execution history (most recent first)
      */
     getExecutionHistory(limit: number = 20): WorkflowExecution[] {
         return this.executionHistory.slice(-limit).reverse();
