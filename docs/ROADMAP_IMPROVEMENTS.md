@@ -79,6 +79,7 @@ Summary of recent work from commit history (date range roughly **Feb 10–18, 20
 
 - **KPIs**  
   - If you track “first success time,” “crash-free sessions,” “weekly retained users,” etc., consider a lightweight way to log or sample them (e.g. anonymous metrics or local-only stats) so you can measure progress.
+  - **Implemented:** optional local-only KPI module in `src/renderer/lib/kpiLogger.ts`; see [docs/KPI_LOGGING.md](KPI_LOGGING.md) for usage and product-decision notes.
 
 ---
 
