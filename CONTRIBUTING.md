@@ -13,6 +13,10 @@ This repository uses a simple safe GitHub flow to protect `master`.
 5. Merge PR, then delete branch.
 6. Only tag releases from `master` after merge.
 
+## Branch hygiene
+
+Keep the branch list tidy: delete merged or abandoned branches (e.g. `auto-claude/*` that are no longer needed). Prefer short-lived feature branches and delete after merge.
+
 ## Branch Naming
 
 - `feature/<short-description>`
@@ -31,6 +35,8 @@ Examples:
 npm test -- --runInBand
 npm run build
 ```
+
+If you see `Unknown env config "devdir"` when running npm scripts, it comes from your local npm or environment (not this repo). You can clear it with `npm config delete devdir` or by unsetting the variable in your shell.
 
 ## Pull Request Checklist
 
