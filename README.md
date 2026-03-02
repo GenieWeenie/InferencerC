@@ -74,7 +74,7 @@ Electron 40 · React 19 · TypeScript 5.9 · Vite 7 · Tailwind CSS · Framer Mo
 
 ## Roadmap
 
-Short-term: stability and performance. Mid-term: workflow and collaboration. Per-release details: GitHub Releases.
+Short-term: stability and performance. Mid-term: workflow and collaboration. See **[docs/ROADMAP.md](docs/ROADMAP.md)** for Next / Later / Done. Per-release details: [GitHub Releases](https://github.com/GenieWeenie/InferencerC/releases).
 
 ---
 

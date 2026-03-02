@@ -15,6 +15,14 @@
     "!src/main/**/*",
     "!src/renderer/**/*"
   ],
+  "coverageThreshold": {
+    "global": {
+      "statements": 35,
+      "branches": 25,
+      "functions": 40,
+      "lines": 35
+    }
+  },
   "moduleNameMapper": {
     "^@/(.*)$": "<rootDir>/src/$1"
   },
