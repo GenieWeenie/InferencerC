@@ -1,11 +1,14 @@
 # InferencerC
 
-**Desktop AI chat app** — use local models (LM Studio, Ollama) or OpenRouter, with MCP tools, code preview, conversation branching, and a ton of power-user features. One place to chat, compare models, and plug in your stack.
+**Desktop AI chat app** — use local models (LM Studio, Ollama) or cloud providers (OpenRouter), with MCP tool integration, live code preview, conversation branching, and 38+ power-user features. One app to chat, compare models, and plug in your stack.
 
 <div align="center">
 
 ![Version](https://img.shields.io/badge/version-4.0.19-blue.svg)
-![Electron](https://img.shields.io/badge/Electron-40.0-47848F?logo=electron)
+![CI](https://img.shields.io/github/actions/workflow/status/GenieWeenie/InferencerC/ci.yml?branch=master&label=CI)
+![Tests](https://img.shields.io/badge/tests-564_passing-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-50%25-yellow)
+![Electron](https://img.shields.io/badge/Electron-40.6-47848F?logo=electron)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
@@ -25,21 +28,28 @@ npm install
 npm run dev
 ```
 
-The app opens; add an API key (OpenRouter) or start LM Studio/Ollama for local models. Done.
+The app opens. Add an API key (OpenRouter) or start LM Studio / Ollama for local models — you're ready to go.
 
 **Build for production:** `npm run build` then `npm run build:mac` or `npm run build:win`. See [RELEASING.md](RELEASING.md) for signed builds.
 
 ---
 
-## What you get
+## Features
 
-- **Chat & models** — One UI for OpenRouter, LM Studio, Ollama, custom endpoints. Battle mode (compare two models), expert personas, thinking mode, prompt library.
-- **Files & context** — Drag in files and images, attach project folders, web fetch, GitHub/Notion. Vision-capable models supported.
-- **MCP** — Connect Model Context Protocol servers (filesystem, Git, SQLite, etc.), tool browser, quick-add presets.
-- **Code & artifacts** — Live preview for HTML/CSS/JS, run Python/JS blocks, token inspector, save artifacts. Export to PDF, DOCX, Markdown, JSON.
-- **Conversations** — Branch/merge chats (git-style), semantic search, summaries, templates, analytics, A/B testing, workflows, API playground. 5 themes (including OLED dark), command palette (`Ctrl+P`), 30+ shortcuts.
+### Chat & Models
+Multi-provider support — OpenRouter, LM Studio, Ollama, custom endpoints. Battle mode to compare two models side-by-side, expert personas, thinking mode, and a prompt library.
 
-**38+ features** in total — explore the app or the repo for the full list. In-app **Docs** (Chat header) has the developer guide and API reference.
+### Files & Context
+Drag in files and images, attach project folders, fetch web pages, pull from GitHub or Notion. Vision-capable models supported.
+
+### MCP Integration
+Connect Model Context Protocol servers (filesystem, Git, SQLite, etc.) with a tool browser and quick-add presets.
+
+### Code & Artifacts
+Live preview for HTML/CSS/JS, run Python and JS blocks inline, token inspector, save artifacts. Export conversations to PDF, DOCX, Markdown, or JSON.
+
+### Conversations
+Branch and merge chats (git-style), semantic search, summaries, templates, analytics, A/B testing, automated workflows, and an API playground. 5 themes including OLED dark, a command palette (`Ctrl+P`), and 30+ keyboard shortcuts.
 
 ---
 
@@ -47,9 +57,9 @@ The app opens; add an API key (OpenRouter) or start LM Studio/Ollama for local m
 
 | Use case | Step |
 |----------|------|
-| **Local models** | Install [LM Studio](https://lmstudio.ai/) or [Ollama](https://ollama.ai/), start the server; models show up in the app. |
-| **OpenRouter** | Settings → API Keys → add key; models appear in the dropdown. |
-| **MCP servers** | Settings → MCP → Quick Add or add custom commands. |
+| **Local models** | Install [LM Studio](https://lmstudio.ai/) or [Ollama](https://ollama.ai/), start the server — models appear automatically. |
+| **OpenRouter** | Settings → API Keys → add your key. Models appear in the dropdown. |
+| **MCP servers** | Settings → MCP → Quick Add or add custom server commands. |
 
 ---
 
@@ -58,11 +68,25 @@ The app opens; add an API key (OpenRouter) or start LM Studio/Ollama for local m
 ```
 src/
 ├── main/          # Electron main process (window, IPC)
-├── renderer/      # React UI: pages (Chat, Models, Settings), components, hooks, services, workers, lib
+├── renderer/      # React UI: pages, components, hooks, services, workers, lib
+├── server/        # Optional backend (adapters, services for local inference)
 └── shared/        # Shared types
 ```
 
-Full structure is in the repository. Docs: `docs/reference/API_REFERENCE.md`, `docs/guides/INTEGRATION_GUIDES.md`, `docs/guides/PLUGIN_DEVELOPMENT_TUTORIAL.md`, `RELEASING.md`. Sample plugin: `examples/plugins/sample-hello-plugin`.
+**Docs:** [`docs/reference/API_REFERENCE.md`](docs/reference/API_REFERENCE.md) · [`docs/guides/INTEGRATION_GUIDES.md`](docs/guides/INTEGRATION_GUIDES.md) · [`docs/guides/PLUGIN_DEVELOPMENT_TUTORIAL.md`](docs/guides/PLUGIN_DEVELOPMENT_TUTORIAL.md) · [`RELEASING.md`](RELEASING.md)
+
+---
+
+## Quality
+
+| Metric | Value |
+|--------|-------|
+| Test suites | 96 passing |
+| Tests | 564 passing |
+| Coverage | ~50% statements, branches, functions, lines |
+| CI | GitHub Actions — tests, lint, typecheck, coverage gate on every PR |
+| Lint | ESLint + TypeScript-ESLint, zero warnings |
+| Type safety | Strict TypeScript across renderer + node configs |
 
 ---
 
@@ -74,7 +98,7 @@ Electron 40 · React 19 · TypeScript 5.9 · Vite 7 · Tailwind CSS · Framer Mo
 
 ## Roadmap
 
-Short-term: stability and performance. Mid-term: workflow and collaboration. See **[docs/ROADMAP.md](docs/ROADMAP.md)** for Next / Later / Done. Per-release details: [GitHub Releases](https://github.com/GenieWeenie/InferencerC/releases).
+See **[docs/ROADMAP.md](docs/ROADMAP.md)** for the living Next / Later / Done list. Tracked in [Linear](https://linear.app/genies-lamp/project/inferencerc-2e98f74226cc). Per-release details on [GitHub Releases](https://github.com/GenieWeenie/InferencerC/releases).
 
 ---
 
@@ -84,11 +108,11 @@ Branch from `master`, open a PR, wait for **CI / validate** to pass. See [CONTRI
 
 ---
 
-## About the author
+## About
 
-InferencerC is built by **GenieWeenie**. I like building desktop developer tools and AI UX—especially Electron apps that make local + remote models feel fast, practical, and fun.
+InferencerC is built by **GenieWeenie** — desktop developer tools and AI UX, especially Electron apps that make local + remote models feel fast and practical.
 
-If something feels confusing, broken, or missing, open an issue with what you expected to happen (and what actually happened).
+Found a bug or have a feature idea? [Open an issue](https://github.com/GenieWeenie/InferencerC/issues).
 
 ---
 
