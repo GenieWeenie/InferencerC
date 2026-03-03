@@ -81,15 +81,12 @@ export class KeyboardShortcutService {
     if (!this.enabled) return;
 
     const key = event.key.toLowerCase();
-    const shortcutKey = this.generateKey(
-      key,
-      event.ctrlKey || event.metaKey, // Treat Cmd/Meta as Ctrl
-      event.shiftKey,
-      event.altKey,
-      event.metaKey
-    );
-
-    const shortcut = this.shortcuts.get(shortcutKey);
+    const useCtrl = event.ctrlKey || event.metaKey; // Treat Cmd/Meta as Ctrl
+    const shortcutKey = this.generateKey(key, useCtrl, event.shiftKey, event.altKey, false);
+    let shortcut = this.shortcuts.get(shortcutKey);
+    if (!shortcut && event.metaKey) {
+      shortcut = this.shortcuts.get(this.generateKey(key, false, event.shiftKey, event.altKey, true));
+    }
     if (shortcut) {
       event.preventDefault();
       shortcut.handler(event);
@@ -108,6 +105,27 @@ export class KeyboardShortcutService {
    */
   disable(): void {
     this.enabled = false;
+  }
+
+  /**
+   * Check if shortcuts are enabled
+   */
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  /**
+   * Format a shortcut for display (e.g., "Ctrl+Shift+K")
+   */
+  formatShortcut(shortcut: Shortcut): string {
+    const parts: string[] = [];
+    if (shortcut.ctrl) parts.push('Ctrl');
+    if (shortcut.shift) parts.push('Shift');
+    if (shortcut.alt) parts.push('Alt');
+    if (shortcut.meta) parts.push('Meta');
+    const key = shortcut.key.length === 1 ? shortcut.key.toUpperCase() : shortcut.key;
+    parts.push(key);
+    return parts.join('+');
   }
 
   /**
