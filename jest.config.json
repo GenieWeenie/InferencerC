@@ -13,14 +13,18 @@
     "src/**/*.{ts,tsx}",
     "!src/**/*.d.ts",
     "!src/main/**/*",
-    "!src/renderer/**/*"
+    "!src/renderer/components/**/*",
+    "!src/renderer/pages/**/*",
+    "!src/renderer/workers/**/*",
+    "!src/renderer/App.tsx",
+    "!src/renderer/main.tsx"
   ],
   "coverageThreshold": {
     "global": {
-      "statements": 35,
-      "branches": 25,
+      "statements": 40,
+      "branches": 30,
       "functions": 40,
-      "lines": 35
+      "lines": 40
     }
   },
   "moduleNameMapper": {
