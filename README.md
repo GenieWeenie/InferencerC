@@ -6,8 +6,8 @@
 
 ![Version](https://img.shields.io/badge/version-4.0.19-blue.svg)
 ![CI](https://img.shields.io/github/actions/workflow/status/GenieWeenie/InferencerC/ci.yml?branch=master&label=CI)
-![Tests](https://img.shields.io/badge/tests-564_passing-brightgreen)
-![Coverage](https://img.shields.io/badge/coverage-50%25-yellow)
+![Tests](https://img.shields.io/badge/tests-840_passing-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-57%25-yellow)
 ![Electron](https://img.shields.io/badge/Electron-40.6-47848F?logo=electron)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript)
