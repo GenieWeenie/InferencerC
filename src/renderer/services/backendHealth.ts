@@ -1,3 +1,5 @@
+import { getAllowBrowserProbe } from './backendHealthEnv';
+
 export type BackendHealthSource = 'init' | 'probe' | 'request';
 
 export interface BackendHealthState {
@@ -15,9 +17,7 @@ class BackendHealthService {
     private readonly probeTimeoutMs = 2500;
     private readonly onlineProbeIntervalMs = 5000;
     private readonly maxOfflineProbeIntervalMs = 60000;
-    private readonly allowBrowserProbe =
-        typeof import.meta !== 'undefined' &&
-        import.meta.env?.VITE_ALLOW_BROWSER_BACKEND_PROBE === 'true';
+    private readonly allowBrowserProbe = getAllowBrowserProbe();
 
     private listeners: Set<BackendHealthListener> = new Set();
     private probeTimer: ReturnType<typeof setTimeout> | null = null;
