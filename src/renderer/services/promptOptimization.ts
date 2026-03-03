@@ -277,14 +277,17 @@ export class PromptOptimizationService {
      * Calculate expected effectiveness
      */
     private calculateEffectiveness(prompt: string): number {
-        // Weighted average of other metrics
-        const metrics = this.calculateMetrics(prompt);
+        const clarity = this.calculateClarity(prompt);
+        const specificity = this.calculateSpecificity(prompt);
+        const structure = this.calculateStructure(prompt);
+        const completeness = this.calculateCompleteness(prompt);
+        const efficiency = this.calculateEfficiency(prompt);
         return Math.round(
-            metrics.clarity * 0.3 +
-            metrics.specificity * 0.25 +
-            metrics.structure * 0.15 +
-            metrics.completeness * 0.2 +
-            metrics.efficiency * 0.1
+            clarity * 0.3 +
+            specificity * 0.25 +
+            structure * 0.15 +
+            completeness * 0.2 +
+            efficiency * 0.1
         );
     }
 
