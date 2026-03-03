@@ -489,6 +489,8 @@ app.post('/v1/collaboration/sessions/:sessionId/participants/:participantId/kick
   }
 });
 
+export { app };
+
 export function startServer() {
   return app.listen(PORT, () => {
     console.log(`[Server] Local Inference Server running on http://localhost:${PORT}`);
